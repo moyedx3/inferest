@@ -4,7 +4,7 @@
 
 **Inferest pays for inference with yield.** Principal sits in a yield vault. Only the interest it earns becomes LLM API credit, issued as a spend limit on per-developer or per-agent keys. Principal is never spent.
 
-> The name is the mechanism: **infer**ence paid from inte**rest**.
+> **Your interest, now inference.**
 
 ---
 

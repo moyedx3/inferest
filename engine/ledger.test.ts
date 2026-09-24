@@ -28,16 +28,14 @@ test("fresh deposit has zero limit", () => {
   assert.equal(creditLimit(p, 1), 0);
 });
 
-test("demo: 100k USDC, six months at 4.5% simple", () => {
+test("demo: 100k USDC, six months at 4.5% APY", () => {
+  // hackathon/PLAN.md and deck/outline.md quote these. APY already compounds, so half a year is 1.045^0.5, not 4.5% / 2.
   const p = open(100_000, 1);
-  const price = 1 + 0.045 / 2; // simple interest, what the demo narrates
-  close(accruedUnharvested(p, price), 2_250);
-  close(creditLimit(p, price), 2_250 * 0.855); // 1,923.75 of credits
-});
-
-test("demo with compounding is within a few dollars of the narration", () => {
-  const p = open(100_000, 1);
-  close(accruedUnharvested(p, priceAfter(1, 0.045, 0.5)), 2_225.3, 0.1);
+  const price = priceAfter(1, 0.045, 0.5);
+  close(accruedUnharvested(p, price), 2_225.2, 0.1); // gross yield
+  close(creditLimit(p, price), 1_902.6, 0.1);        // credit across all keys after fees
+  close(creditLimit(p, price) / 3, 634.2, 0.1);      // per key, three developer keys
+  close(p.shares * price - accruedUnharvested(p, price), 100_000); // principal intact
 });
 
 test("spend cannot exceed the limit", () => {

@@ -32,11 +32,11 @@
 ## Demo script (3 minutes)
 
 1. The finance lead deposits 100,000 USDC with one button.
-2. Fast-forward six months. About **$2,250** of yield accrues, and the limits on three developer keys rise automatically.
+2. Fast-forward six months. **$2,225** of yield accrues, and **$1,903** of credit opens across three developer keys (about $634 each) automatically.
 3. A developer IDE and an OpenClaw agent each call a real model on their own key.
 4. End on principal: still 100,000 USDC.
 
-> **Say the right number in step 2.** $2,250 is gross yield at 4.5% simple. After our 10% fee and the 5% rail fee, keys get **$1,924 of credit** combined (`creditLimit`, checked in `ledger.test.ts`). With compounding the gross is $2,225. Either show the gross and the net side by side, or narrate the net.
+> **Where the numbers come from.** 4.5% is an APY, so six months is `1.045^0.5 − 1` = 2.225%, not 4.5% / 2. Gross yield $2,225; after our 10% fee and the 5% rail fee, $1,903 of credit. Checked in `engine/ledger.test.ts`. **On the fork, the vault's live APY sets the real figure**, so the dashboard must display what the ledger reads, not these constants. If the live APY is far from 4.5%, update this script and the deck before the demo.
 
 ---
 
