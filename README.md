@@ -49,6 +49,7 @@ npm test    # node --test, no dependencies (Node 22.6+ for native TypeScript)
 | [`docs/03-architecture.md`](docs/03-architecture.md) | Five engine modules, plug-in yield sources, credit rails |
 | [`docs/04-unit-economics.md`](docs/04-unit-economics.md) | Principal needed per budget, where our revenue comes from |
 | [`docs/05-risks.md`](docs/05-risks.md) | Terms of service, custody, contracts, rates, rail dependence, tax |
+| [`docs/06-workflow.md`](docs/06-workflow.md) | **Draft.** Who sends which transaction, the Settler contract, six open choices with recommendations |
 | [`sources/`](sources/) | The original Korean notes this repo is built from. Read-only reference |
 
 ---
@@ -119,7 +120,7 @@ Settled 2026-09-24. Where they depart from the source notes in [`sources/`](sour
 | 4 | Fee | **10% of leftover yield** (yield minus what credits cost). Leftover goes back to the customer | Rate is a placeholder |
 | 5 | Keys | **OpenRouter Management API keys**, not our own proxy | Same features for the hackathon (per-key limits, per-key usage), far less to build. A proxy comes with the move to contracted providers, when `base_url` changes anyway |
 | 6 | Customers | **Two ICPs**: crypto treasuries, agent wallet teams | Vault note 51's third segment (financial agent platforms) dropped |
-| 7 | Custody | **Customer holds the vault shares and approves them to our settler; each period we redeem only `usage + fee`** | Re-check once the contract mechanism is written. See [`docs/03-architecture.md`](docs/03-architecture.md#custody-take-only-what-was-used) |
+| 7 | Custody | **Customer holds the vault shares and approves them to our settler; each period we redeem only `usage + fee`** | **Under review:** the workflow draft recommends the Settler contract hold shares instead. See [`docs/06-workflow.md`](docs/06-workflow.md#1-the-customer-revokes-access-before-settlement) |
 | 8 | Settlement period | **Monthly.** In the demo, settlement is triggered by hand | Easy to change: the kernel has no notion of period length |
 
 ## Open
