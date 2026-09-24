@@ -1,0 +1,18 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.DS_Store
+node_modules/
+out/
+cache/
+cache_forge/
+broadcast/
+.env
+.env.*
+
+# chart tooling only; the kernel and backtest have no dependencies
+.venv-charts/
+
+# Anvil fork state
+anvil-state.json
