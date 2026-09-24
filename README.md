@@ -85,14 +85,15 @@ customer wallet ──deposit──▶ ERC-4626 vault (shares stay in the custom
 | ① | **Never open a limit ahead of earned yield** | The moment spend can exceed yield, principal is at risk and "principal never moves" is false |
 | ② | **Yield side and credit side meet only in the ledger** | So vaults (Morpho, Aave, Octant YDS, Kiln) and rails (OpenRouter, Venice, x402) swap independently |
 | ③ | **Take only `usage + fee` at settlement** | Leftover yield is returned by staying in the vault, not by a transfer back |
-| ④ | **Hackathon runs on a Base mainnet fork** | Real yield is cents. Time-warp with `evm_increaseTime` to show months in seconds |
+| ④ | **The chain is a config value** | Any EVM chain with an audited ERC-4626 USDC vault. Contracts and worker take the chain and vault address as config, nothing chain-specific in code |
+| ⑤ | **Demo on a mainnet fork of the target chain** | Real yield is cents. Time-warp with `evm_increaseTime` to show months in seconds |
 
 ---
 
 ## Scope
 
 **Build (hackathon)**
-- Deposit and withdraw against a Morpho USDC vault on a Base fork
+- Deposit and withdraw against an ERC-4626 USDC vault (Morpho where deployed) on a mainnet fork
 - Ledger plus a worker that syncs OpenRouter key limits to accrued yield and settles each period
 - One dashboard: deposit, yield counter, issued keys
 - Time-warp demo script
@@ -101,7 +102,7 @@ customer wallet ──deposit──▶ ERC-4626 vault (shares stay in the custom
 **Do not build (yet)**
 - Our own vault or yield strategy. Use an audited one
 - Our own inference proxy. OpenRouter keys do the metering until supply moves off OpenRouter
-- Multi-chain, self-hosted models
+- Cross-chain positions (one deployment serves one chain), self-hosted models
 - A principal-drawing option. Spend stops at yield, always
 
 ---
@@ -118,18 +119,15 @@ Settled 2026-09-24. Where they depart from the source notes in [`sources/`](sour
 | 4 | Fee | **10% of leftover yield** (yield minus what credits cost). Leftover goes back to the customer | Rate is a placeholder |
 | 5 | Keys | **OpenRouter Management API keys**, not our own proxy | Same features for the hackathon (per-key limits, per-key usage), far less to build. A proxy comes with the move to contracted providers, when `base_url` changes anyway |
 | 6 | Customers | **Two ICPs**: crypto treasuries, agent wallet teams | Vault note 51's third segment (financial agent platforms) dropped |
-| 7 | Custody | **Tentative:** customer holds the vault shares and approves them to our settler; each period we redeem only `usage + fee` | See [`docs/03-architecture.md`](docs/03-architecture.md#custody-take-only-what-was-used) |
+| 7 | Custody | **Customer holds the vault shares and approves them to our settler; each period we redeem only `usage + fee`** | Re-check once the contract mechanism is written. See [`docs/03-architecture.md`](docs/03-architecture.md#custody-take-only-what-was-used) |
+| 8 | Settlement period | **Monthly.** In the demo, settlement is triggered by hand | Easy to change: the kernel has no notion of period length |
 
 ## Open
 
 | | Status |
 |---|---|
-| Custody design (#7) | tentative, confirm |
+| Does the custody mechanism (#7) hold up once written as a contract | revisit during contract design |
 | **What happens to spend already made when the vault loses value** | after the workflow is final. The kernel floors yield at zero and stops new spend, nothing more |
-| Settlement period (weekly, monthly) | undecided |
-| Role split with 찬우: contracts and worker vs frontend and pitch | undecided |
-| Hackathon track: Base, Morpho or OpenRouter prize | undecided |
-| Hackathon name and date | not recorded yet |
 
 ---
 

@@ -16,3 +16,6 @@ broadcast/
 
 # Anvil fork state
 anvil-state.json
+
+# local-only notes, never committed
+private/

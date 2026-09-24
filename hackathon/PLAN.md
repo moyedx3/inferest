@@ -1,6 +1,6 @@
 # Hackathon Plan
 
-**Goal: "deposit → yield accrues → key limit rises → real LLM call" in one screen, under three minutes.** Real yield on a small deposit is cents, so run on a Base mainnet fork (Anvil) and fast-forward time to show months of yield instantly.
+**Goal: "deposit → yield accrues → key limit rises → real LLM call" in one screen, under three minutes.** Real yield on a small deposit is cents, so run on a mainnet fork of the target chain (Anvil) and fast-forward time to show months of yield instantly.
 
 ---
 
@@ -8,10 +8,10 @@
 
 | Layer | Choice |
 |---|---|
-| Chain and vault | Morpho Steakhouse USDC vault on a Base mainnet fork, read with `@morpho-org/blue-sdk-viem` |
+| Chain and vault | Any EVM chain with an audited ERC-4626 USDC vault, set in config. Morpho where deployed (read with `@morpho-org/blue-sdk-viem`), plain ERC-4626 calls otherwise |
 | Ledger and worker | Node cron worker reads vault share value, computes per-user accrued yield, syncs key limits, and settles each period. Math lives in [`../engine/ledger.ts`](../engine/ledger.ts) |
 | Keys | OpenRouter Management API keys under our account (decided: no proxy). The worker sets each key's limit and reads each key's usage |
-| Custody | Customer wallet holds the vault shares and approves them to the settler; settlement redeems only `usage + fee` (tentative) |
+| Custody | Customer wallet holds the vault shares and approves them to the settler; settlement redeems only `usage + fee`. Monthly; by hand in the demo |
 | Frontend | One dashboard for the finance lead: deposit button, accrued yield, list of issued keys |
 | ICP2 | OpenClaw takes an OpenRouter key with one onboard command ([OpenRouter guide](https://openrouter.ai/docs/guides/guides/openclaw-integration)). Plug our key in as is; wrap it as a provider plugin if time allows |
 
@@ -20,7 +20,9 @@
 ## Tasks
 
 - [ ] Fund OpenRouter float, issue a Management key
-- [ ] Fork Base with Anvil, fund test wallet with USDC
+- [ ] Fork the target chain with Anvil, fund test wallet with USDC
+- [ ] Chain config: RPC, USDC, vault address per chain
+- [ ] Settler contract: holds share approval, redeems `usage + fee`, deployable to any EVM chain
 - [ ] Deposit and withdraw scripts (ERC-4626 `deposit`, `convertToAssets`)
 - [ ] Ledger plus limit-sync worker (wrap `engine/ledger.ts`)
 - [ ] Settlement script: read key usage, redeem `usage + fee` from the customer's shares
@@ -48,15 +50,3 @@
 2. **Secure a rail:** OpenRouter enterprise inquiry, test Venice and Orbio rails in parallel
 3. **Go non-custodial:** Octant YDS or a Kiln partner vault, so principal stays in the customer's wallet
 4. **ICP2 SDK:** "inference from wallet yield" module for agent wallet teams (Coinbase Agentic Wallets, Crossmint, etc.)
-
----
-
-## Open questions
-
-| | Status |
-|---|---|
-| Settlement period (weekly, monthly) | undecided |
-| Vault loss after spend, before settlement | after the workflow is final |
-| Role split with 찬우: contracts and worker vs frontend and pitch | undecided |
-| Track: Base, Morpho or OpenRouter prize | undecided |
-| Hackathon name and date | not recorded here yet |

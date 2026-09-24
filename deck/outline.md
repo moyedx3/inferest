@@ -2,7 +2,7 @@
 
 _Content spec for design. Every number traces to [`../docs/`](../docs/) or [`../engine/ledger.ts`](../engine/ledger.ts). Nothing on a slide should be invented at design time._
 
-**Audience:** hackathon judges (track undecided, see [`../hackathon/PLAN.md`](../hackathon/PLAN.md)), accelerator applications after that.
+**Audience:** judges and accelerator reviewers.
 
 **One rule:** each headline is one complete sentence. If a slide needs a paragraph to be understood, the headline is wrong.
 
