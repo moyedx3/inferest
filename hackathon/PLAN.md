@@ -9,8 +9,9 @@
 | Layer | Choice |
 |---|---|
 | Chain and vault | Morpho Steakhouse USDC vault on a Base mainnet fork, read with `@morpho-org/blue-sdk-viem` |
-| Ledger and worker | Node cron worker reads vault share value and computes per-user accrued yield. Math lives in [`../engine/ledger.ts`](../engine/ledger.ts) |
-| Keys | OpenRouter Management API creates per-developer and per-agent keys; the worker syncs limits to yield balance |
+| Ledger and worker | Node cron worker reads vault share value, computes per-user accrued yield, syncs key limits, and settles each period. Math lives in [`../engine/ledger.ts`](../engine/ledger.ts) |
+| Keys | OpenRouter Management API keys under our account (decided: no proxy). The worker sets each key's limit and reads each key's usage |
+| Custody | Customer wallet holds the vault shares and approves them to the settler; settlement redeems only `usage + fee` (tentative) |
 | Frontend | One dashboard for the finance lead: deposit button, accrued yield, list of issued keys |
 | ICP2 | OpenClaw takes an OpenRouter key with one onboard command ([OpenRouter guide](https://openrouter.ai/docs/guides/guides/openclaw-integration)). Plug our key in as is; wrap it as a provider plugin if time allows |
 
@@ -22,6 +23,7 @@
 - [ ] Fork Base with Anvil, fund test wallet with USDC
 - [ ] Deposit and withdraw scripts (ERC-4626 `deposit`, `convertToAssets`)
 - [ ] Ledger plus limit-sync worker (wrap `engine/ledger.ts`)
+- [ ] Settlement script: read key usage, redeem `usage + fee` from the customer's shares
 - [ ] Dashboard: deposit, yield counter, key issuance
 - [ ] Time-warp demo script (`evm_increaseTime`)
 - [ ] Connect an issued key to OpenClaw and make a live call
@@ -31,12 +33,12 @@
 
 ## Demo script (3 minutes)
 
-1. The finance lead deposits 100,000 USDC with one button.
-2. Fast-forward six months. **$2,225** of yield accrues, and **$1,903** of credit opens across three developer keys (about $634 each) automatically.
-3. A developer IDE and an OpenClaw agent each call a real model on their own key.
-4. End on principal: still 100,000 USDC.
+1. The finance lead deposits 100,000 USDC with one button. The vault shares land in their own wallet.
+2. Fast-forward six months. **$2,225** of yield accrues, and **$2,114** of credit opens across three developer keys (about $705 each) automatically.
+3. A developer IDE and an OpenClaw agent each call a real model on their own key. Say the keys spend **$500** this period.
+4. Settle. **$526** goes to the rail for that usage, **$170** to us (10% of the $1,699 left over), and **$1,529** stays in the customer's vault. Principal is now **$101,529**. Nothing else left their wallet.
 
-> **Where the numbers come from.** 4.5% is an APY, so six months is `1.045^0.5 − 1` = 2.225%, not 4.5% / 2. Gross yield $2,225; after our 10% fee and the 5% rail fee, $1,903 of credit. Checked in `engine/ledger.test.ts`. **On the fork, the vault's live APY sets the real figure**, so the dashboard must display what the ledger reads, not these constants. If the live APY is far from 4.5%, update this script and the deck before the demo.
+> **Where the numbers come from.** 4.5% is an APY, so six months is `1.045^0.5 − 1` = 2.225%, not 4.5% / 2. Credit = yield × 0.95 after the 5% rail fee. Usage = $500 / 0.95. All pinned in `engine/ledger.test.ts`. **On the fork, the vault's live APY sets the real figure**, so the dashboard must display what the ledger reads, not these constants. If the live APY is far from 4.5%, update this script and the deck before the demo.
 
 ---
 
@@ -53,6 +55,8 @@
 
 | | Status |
 |---|---|
+| Settlement period (weekly, monthly) | undecided |
+| Vault loss after spend, before settlement | after the workflow is final |
 | Role split with 찬우: contracts and worker vs frontend and pitch | undecided |
 | Track: Base, Morpho or OpenRouter prize | undecided |
 | Hackathon name and date | not recorded here yet |

@@ -1,45 +1,46 @@
 // Inferest ledger kernel: pure functions, no I/O, no dependencies.
 // The yield side and the credit side meet only here, so either rail can be swapped.
 // Amounts are USD as plain numbers. Good enough for the demo; move to bigint base units before real money.
+//
+// Per settlement period:
+//   yield     = convertToAssets(shares) - principal
+//   usage     = credits spent / (1 - railFee)        USDC it took to buy those credits
+//   leftover  = yield - usage                        never negative: the limit stops spend at yield
+//   fee       = ourFee * leftover                    we earn only on yield the customer did not use
+//   pull      = usage + fee                          the only shares that leave the customer's position
+// The rest of the leftover stays in the vault and becomes principal, so it earns from then on.
 
 export type Params = {
-  ourFee: number;  // share of yield Inferest keeps, e.g. 0.10
+  ourFee: number;  // share of LEFTOVER yield Inferest keeps, e.g. 0.10
   railFee: number; // cost of turning USDC into credits on the rail, e.g. 0.05 for OpenRouter crypto top-up
 };
 
 export const DEFAULT_PARAMS: Params = { ourFee: 0.10, railFee: 0.05 };
 
 export type Position = {
-  principal: number; // USD deposited, never spent
-  shares: number;    // ERC-4626 vault shares held for this account
-  harvested: number; // yield already redeemed out of the vault, USD
-  spent: number;     // credits consumed across all keys, USD of credits
+  principal: number; // USD basis that is never spent; grows when leftover yield is returned
+  shares: number;    // ERC-4626 vault shares, held in the customer's own wallet
+  spent: number;     // credits consumed this period across all keys, USD of credits
 };
 
 export function open(principal: number, pricePerShare: number): Position {
   if (principal <= 0) throw new Error("principal must be positive");
-  return { principal, shares: principal / pricePerShare, harvested: 0, spent: 0 };
+  return { principal, shares: principal / pricePerShare, spent: 0 };
 }
 
 // convertToAssets(shares) - principal. Floors at zero: a vault loss never creates negative yield to spend.
-export function accruedUnharvested(p: Position, pricePerShare: number): number {
+// What happens to spend already made when the vault loses is open (README, open decisions).
+export function accruedYield(p: Position, pricePerShare: number): number {
   return Math.max(0, p.shares * pricePerShare - p.principal);
 }
 
-// All yield this account has ever earned, harvested or not.
-export function totalYield(p: Position, pricePerShare: number): number {
-  return p.harvested + accruedUnharvested(p, pricePerShare);
+export function usageCost(p: Position, params: Params = DEFAULT_PARAMS): number {
+  return p.spent / (1 - params.railFee);
 }
 
-// Credits one dollar of yield buys after our fee and the rail fee.
-export function creditsPerYieldDollar(params: Params = DEFAULT_PARAMS): number {
-  return (1 - params.ourFee) * (1 - params.railFee);
-}
-
-// The spend limit the key manager syncs to. Opens only up to yield already earned,
-// never ahead of it, so principal is never needed to cover spend (hackathon rule).
+// Credits this period's yield can buy in total. Opens only up to yield already earned, never ahead of it.
 export function creditLimit(p: Position, pricePerShare: number, params: Params = DEFAULT_PARAMS): number {
-  return totalYield(p, pricePerShare) * creditsPerYieldDollar(params);
+  return accruedYield(p, pricePerShare) * (1 - params.railFee);
 }
 
 export function remaining(p: Position, pricePerShare: number, params: Params = DEFAULT_PARAMS): number {
@@ -52,17 +53,36 @@ export function spend(p: Position, amount: number, pricePerShare: number, params
   return { ...p, spent: p.spent + amount };
 }
 
-// Batch settlement: redeem only the yield, leave principal's shares in the vault.
-export function harvest(p: Position, pricePerShare: number): { position: Position; redeemedShares: number; usd: number } {
-  const usd = accruedUnharvested(p, pricePerShare);
-  const redeemedShares = usd / pricePerShare;
-  return { position: { ...p, shares: p.shares - redeemedShares, harvested: p.harvested + usd }, redeemedShares, usd };
+export type Settlement = {
+  position: Position;   // next period starts here: yield 0, spent 0
+  yield: number;
+  usage: number;        // USDC that goes to the rail
+  leftover: number;
+  fee: number;          // USDC that goes to Inferest
+  returned: number;     // leftover minus fee, left in the vault as new principal
+  pull: number;         // usage + fee: total USDC redeemed from the customer's position
+  pulledShares: number;
+};
+
+export function settle(p: Position, pricePerShare: number, params: Params = DEFAULT_PARAMS): Settlement {
+  const y = accruedYield(p, pricePerShare);
+  const usage = usageCost(p, params);
+  const leftover = Math.max(0, y - usage);
+  const fee = params.ourFee * leftover;
+  const returned = leftover - fee;
+  const pull = usage + fee;
+  const pulledShares = pull / pricePerShare;
+  return {
+    position: { principal: p.principal + returned, shares: p.shares - pulledShares, spent: 0 },
+    yield: y, usage, leftover, fee, returned, pull, pulledShares,
+  };
 }
 
-// Principal a monthly credit budget needs if yield alone has to cover it.
-// requiredPrincipal = monthly * 12 / (apy * (1 - ourFee) * (1 - railFee))
+// Principal a monthly credit budget needs if yield alone has to cover all of it.
+// Our fee drops out: a customer who uses all its yield leaves no leftover to take a fee from.
+// requiredPrincipal = monthly * 12 / (apy * (1 - railFee))
 export function requiredPrincipal(monthlyCredits: number, apy: number, params: Params = DEFAULT_PARAMS): number {
-  return (monthlyCredits * 12) / (apy * creditsPerYieldDollar(params));
+  return (monthlyCredits * 12) / (apy * (1 - params.railFee));
 }
 
 // Price per share after `years` of compounding at `apy`, for time-warp demos and tests.

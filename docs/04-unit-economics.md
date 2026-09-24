@@ -2,7 +2,9 @@
 
 _Every number here comes from [`../engine/ledger.ts`](../engine/ledger.ts) and is checked in [`../engine/ledger.test.ts`](../engine/ledger.test.ts)._
 
-**To cover AI spend with yield alone, principal has to be about 26 times the monthly budget** (about 2.2 times the annual budget). Realistic for a treasury, not enough for a small agent wallet.
+**To cover AI spend with yield alone, principal has to be about 23 times the annual budget** (281 times the monthly budget). Realistic for a treasury, not enough for a small agent wallet.
+
+> The source note said "26x the monthly budget (2.2x the annual)." That was upside down: $62K for a $200/month developer is 311x monthly, 26x annual. The multiple is now 23x annual because of the fee change below.
 
 ---
 
@@ -11,23 +13,42 @@ _Every number here comes from [`../engine/ledger.ts`](../engine/ledger.ts) and i
 | | Value | Source |
 |---|---|---|
 | USDC vault APY | 4.5% | Top USDC vaults sit at 4 to 5% ([Eco](https://eco.com/support/en/articles/15182156-usdc-yield-in-2026-where-to-earn-interest-on-usdc)) |
-| Our fee | 10% of yield | assumed |
 | Rail fee | 5% | OpenRouter crypto top-up ([RouterPlex](https://routerplex.com/blog/openrouter-top-up-fees)) |
+| Our fee | **10% of leftover yield** | decided 2026-09-24; rate is a placeholder |
+
+## How money splits each period
 
 ```
-required principal = monthly budget × 12 / (APY × (1 − our fee) × (1 − rail fee))
-                   = monthly budget × 12 / 0.038475
+usage    = credits spent / (1 − railFee)
+leftover = yield − usage
+fee      = 10% × leftover      → Inferest
+returned = 90% × leftover      → stays in the vault as principal
 ```
 
-One dollar of yield buys **$0.855** of credit.
+**Example** (the demo): $100,000 for six months at 4.5% APY earns $2,225. The keys can spend up to $2,114 of credit.
+
+| Keys spend | Usage (to rail) | Leftover | Fee (to us) | Returned to customer |
+|---|---|---|---|---|
+| nothing | $0 | $2,225 | $223 | $2,003 |
+| $500 | $526 | $1,699 | $170 | $1,529 |
+| all $2,114 | $2,225 | $0 | $0 | $0 |
+
+## Required principal
+
+A customer that uses all its yield leaves no leftover, so our fee does not enter:
+
+```
+required principal = monthly budget × 12 / (APY × (1 − rail fee))
+                   = monthly budget × 12 / 0.04275
+```
 
 | Scenario | Monthly credit (USD) | Required principal (USD) |
 |---|---|---|
-| Light agent, cheap models | 10 | ~3,100 |
-| Always-on agent | 50 | ~15,600 |
-| One developer, normal use | 200 | ~62,400 |
-| One developer, heavy use | 500 | ~156,000 |
-| 20 developers × $500 | 10,000 | ~3,120,000 |
+| Light agent, cheap models | 10 | ~2,800 |
+| Always-on agent | 50 | ~14,000 |
+| One developer, normal use | 200 | ~56,100 |
+| One developer, heavy use | 500 | ~140,000 |
+| 20 developers × $500 | 10,000 | ~2,810,000 |
 
 ---
 
@@ -37,16 +58,15 @@ An organization with a treasury in the tens of millions covers its whole enginee
 
 ## ICP2: change the positioning
 
-A $1,000 wallet earns about $3 a month. That is "base running cost subsidy," not free inference. Bundle it with cheap-model routing (OpenRouter's auto router or free models), or offer an option that draws from principal when yield runs short.
+A $1,000 wallet earns about $3.50 of credit a month. That is "base running cost subsidy," not free inference. Bundle it with cheap-model routing (OpenRouter's auto router or free models). **No principal-drawing option**: spend stops at yield.
 
-> **Note:** drawing from principal breaks build rule ① in the README. If it ships, it ships as an explicit opt-in, never a default.
+## Our revenue
 
-## A second lever: buy inference at a discount
+**The fee only exists when the customer under-uses.** That cuts both ways:
 
-The same yield goes further if credit costs less. Touchmark offers up to 30% off through forward purchase ([TFN](https://techfundingnews.com/touchmark-wants-to-turn-ai-inference-into-a-futures-market/)), and Orbio CREDIT trades 23 to 31% below market ([orbio-mesh](https://github.com/sammy-XXIV/orbio-mesh)). A discounted rail cuts required principal by 20 to 30%.
+| Customer | What we earn |
+|---|---|
+| Deposits more than it needs (a treasury parking cash) | 10% of the surplus yield. $2.81M earning $126K a year, half used: $6.3K |
+| Sizes the deposit to its spend | close to zero |
 
-Vault note 51 goes further: route to open-weight models, which clear the same quality bar at $0.09 vs $0.43 for closed models (4.78x, Ornn table 4). See [`../sources/vault-51-agent-inference-payment-rail.md`](../sources/vault-51-agent-inference-payment-rail.md) §6–§7.
-
-## Our revenue is thin on the yield fee alone
-
-$3.12M principal earns about $140K a year. 10% of that is $14K. **Revenue has to be designed around the discounted-credit spread and enterprise seat pricing as well.**
+So the leftover fee pays best on treasuries that deposit for yield first and AI second. Revenue beyond it has to come from supply: once providers are contracted directly (Touchmark-style, decision 2), the gap between what we pay for open-weight inference and the credit price we charge is ours. Touchmark prices forwards up to 30% below market ([TFN](https://techfundingnews.com/touchmark-wants-to-turn-ai-inference-into-a-futures-market/)), and Orbio CREDIT trades 23 to 31% below ([orbio-mesh](https://github.com/sammy-XXIV/orbio-mesh)).

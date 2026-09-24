@@ -6,13 +6,13 @@ _Source: [`../sources/yield-to-inference-2026-09-24.md`](../sources/yield-to-inf
 
 ## Five modules
 
-Yield adapter, ledger, harvester, credit router, key manager. **The yield side and the credit side connect only through the ledger**, so each rail can be swapped independently.
+Yield adapter, ledger, settler, credit router, key manager. **The yield side and the credit side connect only through the ledger**, so each rail can be swapped independently.
 
 ```mermaid
 flowchart LR
   A[Treasury or agent wallet] --> B[Yield adapter<br/>ERC-4626 vault]
   B --> C[Ledger<br/>principal vs accrued yield]
-  C --> D[Harvester<br/>periodic yield redemption]
+  C --> D[Settler<br/>redeems usage + fee each period]
   C --> E[Credit router]
   D --> E
   E --> F[OpenRouter float]
@@ -27,11 +27,26 @@ Arrows carry information as well as money. **The core loop: raise each key's lim
 
 1. **Yield adapter.** The user deposits USDC or ETH into a standard ERC-4626 vault. The standard makes Morpho, Aave and Yearn interchangeable behind one interface.
 2. **Ledger.** Records each user's principal and vault shares. Accrued yield is `convertToAssets(shares) − principal`.
-3. **Harvester.** Yield does not need to be redeemed every time. The ledger opens credit against accrued yield first, and actual redemption settles in a batch, weekly for example. This saves gas and rail fees.
-4. **Credit router.** Decides which inference rail receives the settled USDC. For the hackathon, one OpenRouter float is enough.
+3. **Settler** (was harvester). Yield is not redeemed per request. The ledger opens credit against accrued yield first, and redemption settles in a batch each period. It redeems only `usage + fee`; the rest of the leftover yield stays in the vault and becomes principal. See `settle` in the kernel.
+4. **Credit router.** Decides which inference rail receives the usage USDC. For the hackathon, one OpenRouter float is enough.
 5. **Key manager.** Issues a key per developer or agent and syncs the ledger's yield balance to each key's spend limit.
 
-**Settled for the hackathon:** if credit already spent exceeds yield not yet harvested when principal is withdrawn, do we deduct the difference from principal, or only ever open the limit up to earned yield? **The latter.** `creditLimit` in the kernel implements it, and a vault loss floors accrued yield at zero rather than going negative.
+**Decided: keys are OpenRouter Management API keys, not our own proxy.** For the hackathon they do everything a proxy would: per-key limits, per-key usage, 400+ models. A proxy is less than a day of work, but it adds metering, streaming and failure handling that OpenRouter already does. Build it when supply moves to contracted providers and `base_url` changes anyway.
+
+**Settled:** the limit only ever opens up to earned yield, and spend never draws from principal. `creditLimit` in the kernel implements it. **Open:** if the vault loses value after credits were spent but before settlement, who covers the difference. The kernel floors yield at zero and stops new spend; the rest waits until the workflow is final.
+
+---
+
+## Custody: take only what was used
+
+**Tentative, 2026-09-24.**
+
+1. The customer deposits into the vault from their own wallet or Safe. **The shares stay there.**
+2. The customer approves those shares to our settler.
+3. Each period the settler calls `vault.redeem(shares, receiver, owner = customer)` for exactly `usage + fee`. Usage goes to the rail float, the fee to us.
+4. Nothing else moves. Returning leftover yield means not taking it.
+
+**The gap:** a plain share approval lets the settler redeem principal too, so the customer is trusting us. Closing it takes a settler contract that records principal at deposit and refuses to redeem more than `convertToAssets(shares) − principal`, or a Safe module with the same cap. Octant YDS does the cap at the vault level. For the hackathon a plain approval is enough; for a CFO it is not.
 
 ---
 
@@ -69,9 +84,11 @@ Key issuance is solved by OpenRouter. **The one blocked segment is putting USDC 
 | [Orbio](https://www.orbio.so/protocol) CREDIT | Yes, on-chain `buyAndActivate` | Orbio gateway key | The seller market is itself resale | Via OpenRouter |
 | x402 gateway | Yes, USDC per request | No key; the wallet authenticates | N/A | Varies by gateway |
 
-**Hackathon: OpenRouter float.** Pre-fund our account, raise key limits by accrued yield, and top up manually each week with the harvested USDC. Fees run about 5% for crypto and 5.5% for card ([RouterPlex](https://routerplex.com/blog/openrouter-top-up-fees)).
+**Decided supply path.** Hackathon: our OpenRouter account, resold through per-key limits, the way Orbio does it. Real product: contract providers to run open-weight models for us, the way Touchmark does it.
 
-**Automation path 1: crypto card.** Load harvested USDC onto a crypto card and attach it to OpenRouter Auto Top-Up. The human step disappears. Crypto developers already use this workaround ([SolCard](https://www.solcard.cc/blog/pay-openrouter-with-crypto)).
+**Hackathon: OpenRouter float.** Pre-fund our account, raise key limits by accrued yield, and top up manually each period with the usage USDC. Fees run about 5% for crypto and 5.5% for card ([RouterPlex](https://routerplex.com/blog/openrouter-top-up-fees)).
+
+**Automation path 1: crypto card.** Load the usage USDC onto a crypto card and attach it to OpenRouter Auto Top-Up. The human step disappears. Crypto developers already use this workaround ([SolCard](https://www.solcard.cc/blog/pay-openrouter-with-crypto)).
 
 **Automation path 2: on-chain rails.** Venice DIEM and Orbio CREDIT top up on-chain, so the loop closes in contracts. The cost is narrower model coverage and liquidity than OpenRouter. For ICP2 agents, an x402 gateway is also a natural fit.
 
