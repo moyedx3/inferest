@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "docs/01-problem-and-icp.md",
+                "file": "docs/02-landscape.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "01-problem-and-icp"
+              "title": "02-landscape"
             }
           }
         ]
@@ -100,7 +100,7 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "docs/01-problem-and-icp.md",
+                "file": "docs/02-landscape.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -119,7 +119,7 @@
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "docs/01-problem-and-icp.md",
+                "file": "docs/02-landscape.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               },
@@ -162,7 +162,7 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "docs/01-problem-and-icp.md",
+                "file": "docs/02-landscape.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
@@ -191,8 +191,8 @@
   },
   "active": "a9dbe05c3a39ddc7",
   "lastOpenFiles": [
+    "docs/01-problem-and-icp.md",
     "docs/06-workflow.md",
-    "deck/outline.md",
-    "docs/01-problem-and-icp.md"
+    "deck/outline.md"
   ]
 }

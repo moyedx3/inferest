@@ -38,16 +38,23 @@ The same engine is packaged twice. ICP1 is direct B2B sales. ICP2 is B2B2C throu
 
 **Treasuries have moved on-chain and now have to earn.** As of early 2026, more than 200 listed companies hold digital assets on their balance sheets, and the conversation has moved from accumulation to generating yield ([CoinDesk](https://www.coindesk.com/opinion/2026/04/04/digital-asset-treasuries-must-now-earn-their-keep)).
 
-**AI spend per employee has become a real budget line.** Across businesses on Ramp's token spend product, token usage grew 1,001% and spend 497% from January 2025 to April 2026; median spend was $46 per employee per month, and $442 at companies using 26 or more models ([Ramp](https://ramp.com/blog/ai-token-cost-for-businesses)). At the high end it is larger still: one seed-stage AI infrastructure startup went from about $200 to $3,000 per developer per month in six months ([The Pragmatic Engineer](https://blog.pragmaticengineer.com/the-pulse-token-spend-breaks-budgets-what-next/)). Uber used up its full-year AI coding budget by April, and Meta's Adam Mosseri expects engineers' token spend to approach their salaries within a year or two, with per-engineer caps to follow ([TechCrunch](https://techcrunch.com/2026/07/14/metas-adam-mosseri-says-ai-token-budgets-could-soon-be-capped-per-engineer/)).
+**AI spend per employee has become a real budget line.** 
+- Across businesses on Ramp's token spend product, token usage grew 1,001% and spend 497% from January 2025 to April 2026; median spend was $46 per employee per month, and $442 at companies using 26 or more models ([Ramp](https://ramp.com/blog/ai-token-cost-for-businesses)). 
+- At the high end it is larger still: one seed-stage AI infrastructure startup went from about $200 to $3,000 per developer per month in six months ([The Pragmatic Engineer](https://blog.pragmaticengineer.com/the-pulse-token-spend-breaks-budgets-what-next/)). 
+- Uber used up its full-year AI coding budget by April, and Meta's Adam Mosseri expects engineers' token spend to approach their salaries within a year or two, with per-engineer caps to follow ([TechCrunch](https://techcrunch.com/2026/07/14/metas-adam-mosseri-says-ai-token-budgets-could-soon-be-capped-per-engineer/)).
 
 **Inferest sits where the two meet**: an organization whose idle assets are on-chain and whose fastest-growing expense is AI. It gives the yield a job, and it gives per-person AI budgets a cap that is enforced by the key itself.
 
 ### ICP2: the infrastructure is already there
 
-**Agents that act for people are shipping now.** Meta launched Muse on September 8, 2026: it books travel, fills out forms, negotiates bills and keeps working after the app is closed, paying through Stripe's Link and one-time cards ([Meta](https://about.fb.com/news/2026/09/introducing-muse-personal-ai-agent/)). Instinct, a text-message agent still in private beta, passed 100,000 users and raised at a $2.5B valuation ([CellCog](https://cellcog.ai/blog/what-is-instinct-ai/)). Natural raised a $30M Series A to let agents pay, collect and hold money without a human confirming each payment ([TechCrunch](https://techcrunch.com/2026/07/20/natural-raises-30m-to-reinvent-payments-for-ai-agents-and-take-on-stripe/)).
+**Agents that act for people are shipping now.** 
+- Meta launched Muse on September 8, 2026: it books travel, fills out forms, negotiates bills and keeps working after the app is closed, paying through Stripe's Link and one-time cards ([Meta](https://about.fb.com/news/2026/09/introducing-muse-personal-ai-agent/)). 
+- Instinct, a text-message agent still in private beta, passed 100,000 users and raised at a $2.5B valuation ([CellCog](https://cellcog.ai/blog/what-is-instinct-ai/)). 
 
 None of these is a financial agent, and a mainstream agent that manages its own on-chain capital does not exist yet. **Our bet: when it arrives, it can pay for its own thinking.** An agent holding a balance in a vault funds its inference from the yield, with no human topping up its key.
 
-**Wallets are ready for it.** Coinbase launched agent-specific wallets in February 2026 with x402 payments and spend limits built in ([Coinbase](https://www.coinbase.com/developer-platform/discover/launches/agentic-wallets)). The agent wallet market is consolidating fast: Privy to Stripe, Dynamic to Fireblocks ([Crossmint comparison](https://www.crossmint.com/learn/agent-wallets-compared)). **Wallets exist. Paying for inference out of wallet money is still an empty slot.**
+**Wallets are ready for it.** 
+- Coinbase launched agent-specific wallets in February 2026 with x402 payments and spend limits built in ([Coinbase](https://www.coinbase.com/developer-platform/discover/launches/agentic-wallets)). 
+- The agent wallet market is consolidating fast: Privy to Stripe, Dynamic to Fireblocks ([Crossmint comparison](https://www.crossmint.com/learn/agent-wallets-compared)). 
 
-ICP2 has a sizing problem, covered in [`04-unit-economics.md`](04-unit-economics.md): a $1,000 wallet earns about $3.50 of credit a month, so the pitch is "base running cost subsidy," not "free inference."
+**Wallets exist. Paying for inference out of wallet money is still an empty slot.**
