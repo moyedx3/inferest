@@ -156,6 +156,14 @@ const BASE_NETWORK = "eip155:8453";
 const BASE_USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
 
 /** Real x402 (protocol version 2) payments in USDC on Base from our tool wallet, capped per call. */
+/** Coinbase's facilitator rejects a payment whose echoed resource description is longer than about 255 characters
+ *  (serper and joinmassive publish 550-character descriptions). The description is informational and outside
+ *  the signature, so the client shortens it before the payload is built. Mutates in place. */
+export function capResourceDescription(paymentRequired: { resource?: { description?: string } }, max = 255): void {
+  const r = paymentRequired.resource;
+  if (r && typeof r.description === "string" && r.description.length > max) r.description = r.description.slice(0, max);
+}
+
 export function x402PayingFetch(privateKey: `0x${string}`): PayingFetchFactory {
   const scheme = new ExactEvmScheme(privateKeyToAccount(privateKey));
   return (maxMicro, onAmount) => {
@@ -165,7 +173,8 @@ export function x402PayingFetch(privateKey: `0x${string}`): PayingFetchFactory {
       .registerPolicy((_version, reqs) =>
         reqs.filter((r) => r.scheme === "exact" && r.network === BASE_NETWORK && r.asset.toLowerCase() === BASE_USDC.toLowerCase()),
       )
-      .onBeforePaymentCreation(async ({ selectedRequirements }) => {
+      .onBeforePaymentCreation(async ({ paymentRequired, selectedRequirements }) => {
+        capResourceDescription(paymentRequired);
         const amount = BigInt(selectedRequirements.amount);
         // this hook runs before signing and an abort throws unsigned; report only amounts that will be signed
         if (amount > maxMicro) return { abort: true, reason: `price ${amount} exceeds the cap of ${maxMicro} micro USDC` };
