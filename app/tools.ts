@@ -109,6 +109,10 @@ export function toolGateway(d: {
         }
         if (!res.ok) {
           const text = await res.text();
+          // a 402 to the paid replay means the processor rejected the payment and nothing settled
+          if (charged > 0n && res.status === 402) {
+            throw new Error(`tool ${tool}: payment rejected, nothing charged (${rejectionReason(res, text)})`);
+          }
           if (charged > 0n) throw failedAfterPayment(`${res.status} ${text}`);
           throw new Error(`tool ${tool} failed: ${res.status} ${text}`);
         }
@@ -122,6 +126,31 @@ export function toolGateway(d: {
 }
 
 export type ToolGateway = ReturnType<typeof toolGateway>;
+
+/** The reason an x402 server gives for refusing a payment: the decoded `payment-required` header, else the body. */
+function rejectionReason(res: Response, body: string): string {
+  const header = res.headers.get("payment-required");
+  if (header) {
+    try {
+      const j: any = JSON.parse(Buffer.from(header, "base64").toString("utf8"));
+      const parts: string[] = [];
+      for (const k of ["error", "reason", "invalidReason", "errorReason"]) {
+        if (typeof j?.[k] === "string" && j[k]) parts.push(j[k]);
+      }
+      // processors often embed their own JSON error inside the message
+      const nested = parts.join(" ").match(/\{.*\}/s)?.[0];
+      if (nested) {
+        try {
+          const n = JSON.parse(nested);
+          const m = n?.errorMessage ?? n?.message ?? n?.reason;
+          if (typeof m === "string" && !parts.some((p) => p.includes(m))) parts.push(m);
+        } catch {}
+      }
+      if (parts.length) return parts.join(": ");
+    } catch {}
+  }
+  return body || "no reason given";
+}
 
 const BASE_NETWORK = "eip155:8453";
 const BASE_USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
