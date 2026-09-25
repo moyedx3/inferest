@@ -45,9 +45,11 @@ cp .env.example .env                      # then fill it in
 # TARGET_VAULT (and optionally FEE_BPS) in the shell first; this writes contracts/deployments/<chainId>.json,
 # which DEPLOYMENTS in .env points at
 (cd contracts && forge script script/Deploy.s.sol --rpc-url $RPC_URL --private-key $DEPLOYER_PRIVATE_KEY --broadcast --slow)
-node --env-file=.env app/cli.ts serve     # dashboard, API, MCP at /mcp
+node --env-file=.env app/cli.ts serve     # dashboard, API, chat at /v1, MCP at /mcp
 node --env-file=.env demo/treasury.ts     # or demo/agent.ts
 ```
+
+**Use a key.** Point any OpenAI-compatible client at `http://localhost:8787/v1` with an Inferest key as the API key (model ids are OpenRouter's); `http://localhost:8787/setup` has copyable snippets. The same key authenticates to the MCP tools server at `/mcp`. Set `KEY_ENCRYPTION_KEY` (`openssl rand -hex 32`) before the first start.
 
 `forge test` prints diagnostics from an upstream Foundry lint bug before its results; read the `Suite result` lines.
 
@@ -77,7 +79,8 @@ customer wallet ──deposit──▶ ERC-4626 vault (shares stay in the custom
                   credit limit = yield × (1 − railFee)
                                    │
                                    ▼
-          OpenRouter keys under our account, limits synced per key ──▶ IDE, agent, OpenClaw
+          Inferest keys (sk-inf-…) on our proxy, metered per call ──▶ IDE, agent, OpenClaw
+          one OpenRouter key per vault behind it, its limit synced as the backstop
                                    │
           each period: settle
             usage    = credits spent / (1 − railFee)       → redeemed, tops up the OpenRouter float
@@ -108,14 +111,13 @@ customer wallet ──deposit──▶ ERC-4626 vault (shares stay in the custom
 
 **Build (hackathon)**
 - Deposit and withdraw against an ERC-4626 USDC vault (Fluid USDC on Arbitrum One) on a mainnet fork
-- Ledger plus a worker that syncs OpenRouter key limits to accrued yield and settles each period
+- Ledger, a proxy that meters every model call against the key's yield budget, and a worker that keeps the provider backstop in step and settles each period
 - One dashboard: deposit, yield counter, issued keys
 - Time-warp demo script
 - A live model call from an IDE and an OpenClaw agent on issued keys
 
 **Do not build (yet)**
 - Our own vault or yield strategy. Use an audited one
-- Our own inference proxy. OpenRouter keys do the metering until supply moves off OpenRouter
 - Cross-chain positions (one deployment serves one chain), self-hosted models
 - A principal-drawing option. Spend stops at yield, always
 
@@ -131,7 +133,7 @@ Settled 2026-09-24. Where they depart from the source notes in [`sources/`](sour
 | 2 | Supply | **Hackathon:** our OpenRouter account, resold through per-key limits, the way Orbio does it. **Real product: both** OpenRouter under an enterprise contract (breadth, closed models, invoiced after usage) **and** contracted open-weight providers the way Touchmark does it (margin) | Enterprise terms permit serving end customers |
 | 3 | ICP1 pain | **Opex is fiat, treasury is on-chain.** Off-ramp then top up becomes one stop, and idle yield pays for it | |
 | 4 | Fee | **10% of leftover yield** (yield minus what credits cost). Leftover goes back to the customer | Rate is a placeholder |
-| 5 | Keys | **OpenRouter Management API keys**, not our own proxy | Same features for the hackathon (per-key limits, per-key usage), far less to build. A proxy comes with the move to contracted providers, when `base_url` changes anyway |
+| 5 | Keys | **Inferest keys in front of one OpenRouter key per vault.** A small proxy checks the key's budget before the call and meters the cost after; the provider key's limit is a backstop | Decided 2026-09-25. Per-developer budgets, instant revoke and rotate, and the same key for models and MCP tools; the base URL is the only thing a client changes. See [`docs/superpowers/specs/2026-09-25-inference-proxy-design.md`](docs/superpowers/specs/2026-09-25-inference-proxy-design.md) |
 | 6 | Customers | **Two ICPs**: crypto treasuries, agent wallet teams | Vault note 51's third segment (financial agent platforms) dropped |
 | 7 | Custody | **One Octant YDS vault per customer; shares stay in the customer's wallet; profit is minted to our Splitter, which spends only `usage + fee`.** | Decided 2026-09-25. Deployability checked on every target chain. See [`docs/06-workflow.md`](docs/06-workflow.md) |
 | 8 | Settlement period | **Monthly.** In the demo, settlement is triggered by hand | Easy to change: the kernel has no notion of period length |
@@ -169,7 +171,7 @@ Settled 2026-09-24. Where they depart from the source notes in [`sources/`](sour
 ```
 engine/       ledger kernel + tests (source of truth for the math)
 contracts/    Splitter, VaultFactory (Octant YDS per customer), tests, deploy script
-app/          keeper, OpenRouter keys, Orthogonal tools over MCP, HTTP API, dashboard
+app/          keeper, inference proxy, Orthogonal tools over MCP, HTTP API, dashboard
 demo/         treasury and agent scripts for a forked chain
 config/       per-chain addresses
 docs/         problem, landscape, architecture, economics, risks, workflow, plans

@@ -10,7 +10,7 @@ This is the chain-agnostic mechanism: who sends which transaction, when, and wha
 
 1. Each customer gets **their own Octant yield-donating vault**, deployed by our factory over an allowlisted ERC-4626 yield source. They deposit USDC and **keep the vault shares in their own wallet**.
 2. The vault's donation address is our **Splitter**. When our keeper calls `report()`, the vault's profit is minted to the Splitter as vault shares. That is the customer's yield, now out of their position and in one place.
-3. The customer's admin creates keys and gives each a **weight**. Our keeper keeps each OpenRouter key's limit at its weight's share of the yield **already in the Splitter**, so every dollar of credit is backed before it is spent.
+3. The customer's admin creates keys and gives each a **weight**. Our proxy lets each Inferest key spend its weight's share of the yield **already in the Splitter**, and our keeper holds the vault's single OpenRouter key at that same total as a backstop, so every dollar of credit is backed before it is spent.
 4. Agents and developers can also buy **paid tools** through our MCP server. Each call is paid in USDC over x402 from our wallet, capped at the key's remaining budget, and recorded against the key like model spend.
 5. Once a month the Splitter settles: `usage` to our float, **10% of the leftover** to us, and the leftover shares **back to the customer's wallet** as new principal.
 6. The customer withdraws principal any time through the standard ERC-4626 `withdraw`. We are not involved.
@@ -24,12 +24,12 @@ This is the chain-agnostic mechanism: who sends which transaction, when, and wha
 | Actor | What it is | Can do |
 |---|---|---|
 | **Customer** | Treasury wallet or Safe (ICP1), or an agent's wallet (ICP2) | Deposit, withdraw, create keys, set key weights. Holds the vault's **management** role |
-| **Key holders** | Developers or agents | Call models with their key over OpenRouter, call paid tools with the same key over our MCP server. Nothing on-chain |
+| **Key holders** | Developers or agents | Call models with their Inferest key through our proxy, call paid tools with the same key over our MCP server. Nothing on-chain |
 | **Customer vault** | Octant `ERC4626Strategy` over an allowlisted yield source, one per customer | Earns yield, mints profit to the Splitter on `report()`, burns Splitter shares first on a loss |
 | **Factory** | Our contract, one per chain, owned by us | Deploys customer vaults, keeps the allowlist of yield sources, records which customer owns which vault |
 | **Splitter** | Our contract, one per chain, immutable. The donation address of every customer vault | Holds each customer's reported yield as that vault's shares, settles monthly |
-| **Keeper** | Our worker's signing key (`app/keeper.ts`) | Calls `report()` on customer vaults and `settle()` on the Splitter, syncs OpenRouter limits. Nothing else on-chain |
-| **OpenRouter** | Our account, prefunded float | Serves model requests, enforces per-key limits |
+| **Keeper** | Our worker's signing key (`app/keeper.ts`) | Calls `report()` on customer vaults and `settle()` on the Splitter, holds each vault's OpenRouter key limit at its open credit. Nothing else on-chain |
+| **OpenRouter** | Our account, prefunded float, one key per vault | Serves the model requests our proxy forwards; its per-vault limit is the backstop |
 | **Orthogonal** | Paid tool catalog (search, scraping, enrichment) | Answers each tool call with a price, has its payment facilitator verify and settle the x402 payment, runs the tool |
 | **Inferest MCP server** | Part of our HTTP server (`/mcp`) | Authenticates the key, searches the catalog, pays for and runs tools within the key's budget |
 
@@ -51,21 +51,22 @@ sequenceDiagram
 
   W->>V: deploy through the factory, donation address is the Splitter
   C->>V: deposit USDC, shares stay in the customer wallet
-  C->>W: create keys and set weights
-  W->>O: create keys with limit 0
+  C->>W: register the vault, create Inferest keys and set weights
+  W->>O: create one key per vault with limit 0
   loop daily
     W->>V: report, profit minted to the Splitter as shares
   end
   loop every minute
     W->>S: read the vault's yield in the Splitter
-    W->>O: read usage per key, set each limit
+    W->>O: read the vault key's usage, set its limit to usage plus open credit
   end
-  K->>O: model calls within the limit
+  K->>W: model call on the Inferest key, budget checked
+  W->>O: forwarded with the vault key, cost metered from the response
   K->>W: run_tool over MCP
   W->>T: paid call over x402, capped at the key's budget
   T-->>W: result and price, recorded against the key
   Note over W,S: once a month
-  W->>O: freeze every key at its usage, then re-read usage
+  W->>O: close the vault, pin its key at usage, drain in-flight metering
   W->>S: settle with the period's usage
   S->>V: withdraw usage to the float and the fee to Inferest
   S->>C: transfer the leftover shares to the customer
@@ -83,27 +84,32 @@ Our factory deploys an Octant `ERC4626Strategy` for the customer over an allowli
 
 ### 2. Keys
 
-In the dashboard the admin creates keys and sets a weight per key (default 1). The keeper creates matching OpenRouter keys with limit 0. The key secret is shown once and only its hash is stored. The same secret authenticates the key holder to the MCP server.
+In the dashboard the admin creates keys and sets a weight per key (default 1). A key is an Inferest secret (`sk-inf-...`) shown once and stored as a hash; the admin can rotate it (new secret, same budget and history) or revoke it (next request gets 401). Developers use it as the API key of any OpenAI-compatible client with the base URL set to the Inferest server, and as the bearer for the MCP tools server.
 
-### 3. Report and sync
+Behind every vault sits one OpenRouter key, minted when the vault is registered and stored encrypted. The proxy forwards each call with that key; the keeper holds its limit at the vault's open credit as a backstop, so a proxy bug cannot spend past yield.
+
+### 3. Report, meter and sync
 
 **Daily**, the keeper calls `report()` on each customer vault. Profit since the last report is minted to the Splitter as vault shares.
+
+**Per call**, the proxy reads the key's remaining budget from the store, refuses with 402 when nothing is left, forwards the request with the vault's OpenRouter key, and records the cost from the response (the usage event of a stream, the usage object otherwise) as one `model_calls` row. A call whose cost never arrives is filed pending and resolved by the keeper through OpenRouter's generation lookup.
 
 **Every minute**, per customer:
 
 ```
-credit_i  = yieldInSplitter × (1 − railFee) × weight_i / Σ weights
-spent_i   = (usage_i − usageAtPeriodStart_i) + toolSpend_i × (1 − railFee)
-limit_i   = usage_i + max(credit_i − spent_i, 0)        (OpenRouter limits are cumulative)
+credit_i     = yieldInSplitter × (1 − railFee) × weight_i / Σ weights        (a revoked key weighs 0)
+spent_i      = modelCost_i + toolSpend_i × (1 − railFee)                       (this period's rows)
+remaining_i  = max(credit_i − spent_i, 0), scaled down if Σ remaining would exceed credit − Σ spent
+companyLimit = usage_OR + Σ remaining_i                                          (OpenRouter limits are cumulative)
 ```
 
-A key's credit is fixed by its weight, so what one key leaves unused does not flow to the others. The sum of open credit is capped at the pool: if reweighting would open more than the pool has left, every remaining budget is scaled down proportionally, so credit never opens ahead of yield. Limits rise in a step after each report. Between syncs a key can overshoot by at most one minute of spend; we absorb that.
+A key's credit is fixed by its weight, so what one key leaves unused does not flow to the others. The proxy enforces `remaining_i` before every call; one in-flight request may overshoot by its own cost. The company limit is the backstop, one keeper tick behind. Once a day the keeper logs the drift between OpenRouter's cumulative usage and the recorded model cost.
 
-**Loss pending:** if the yield source is worth less than the vault last reported, every key is frozen at its current usage and settlement is skipped for that vault until the next `report()` books the loss.
+**Loss pending:** if the yield source is worth less than the vault last reported, the proxy refuses the vault's keys with 402 and the keeper pins the company key's limit at its usage, until the next `report()` books the loss.
 
 ### 4. Paid tools
 
-The key holder adds our MCP endpoint (`/mcp`, bearer token is the key secret) and gets three tools: `search_tools`, `tool_details` (free, returns the exact parameters and price) and `run_tool`. LLM calls do not go through us; they still go straight to OpenRouter on the same key.
+The key holder adds our MCP endpoint (`/mcp`, bearer token is the key secret) and gets three tools: `search_tools`, `tool_details` (free, returns the exact parameters and price) and `run_tool`. LLM calls go through the same server on the same key, at `/v1/chat/completions`.
 
 For `run_tool`, the server:
 
@@ -117,11 +123,11 @@ Tools carry no rail fee, because they are paid in USDC directly. At settlement, 
 
 Settlement is the only time yield leaves the Splitter. The keeper:
 
-1. Pins every key's limit to its current usage, so nothing new can land.
-2. Re-reads usage from OpenRouter, so requests that were in flight during the freeze are counted.
-3. Signs the `Splitter.settle(vault, usage)` transaction locally and writes a pending settlement record (vault, usage, each key's usage snapshot, transaction hash) before broadcasting. The record is insert-only, so two processes cannot both broadcast for one vault.
-4. Broadcasts, then polls for the receipt. On success it records the settlement, starts the new period with the snapshot as each key's baseline, marks the month, and re-syncs limits, all in one database transaction. On a revert it drops the record and reopens the keys.
-5. If the receipt does not arrive, the record stays, the vault's keys stay frozen, and every tick reconciles it until it mines. A transaction the node no longer knows after 30 minutes is dropped so the vault can retry. An operator can clear a stuck record through the admin API.
+1. Marks the vault as settling, so the proxy answers its keys with 503 (retry later), and pins the vault's OpenRouter key limit at its current usage, so nothing new can land either way.
+2. Waits up to ten seconds for requests already past the budget check to finish metering, then reads this period's rows: `usage = Σ modelCost / (1 − railFee) + Σ toolSpend`.
+3. Signs the `Splitter.settle(vault, usage)` transaction locally and writes a pending settlement record (vault, usage, each key's spend snapshot, transaction hash) before broadcasting. The record is insert-only, so two processes cannot both broadcast for one vault.
+4. Broadcasts, then polls for the receipt. On success it records the settlement, starts the new period (spend is per period, so this is a bump), clears the settling flag, marks the month, and re-syncs the backstop, all in one database transaction. On a revert it drops the record and reopens the vault.
+5. If the receipt does not arrive, the record stays, the vault stays closed, and every tick reconciles it until it mines. A transaction the node no longer knows after 30 minutes is dropped so the vault can retry. An operator can clear a stuck record through the admin API.
 6. Each vault carries the month it last settled. A vault whose settlement failed is retried on later ticks in the same month, with a ten-minute backoff after a failed attempt.
 
 On-chain:
@@ -161,7 +167,7 @@ On a loss, `report()` **burns the Splitter's shares of that vault first**. So un
 | Only our keeper can settle, and only vaults from our factory | `NotKeeper`, `UnknownVault` |
 | We cannot trap funds | Withdrawal is standard ERC-4626 and needs nothing from us |
 | We are never owed money | Limits open only up to yield already in the Splitter |
-| **Not enforced:** that reported usage is honest | Usage is off-chain OpenRouter and Orthogonal data. Bounded by yield in the Splitter. The customer can check it against per-key usage on the dashboard |
+| **Not enforced:** that reported usage is honest | Usage is our own metering of OpenRouter responses and Orthogonal payments. Bounded by yield in the Splitter. The customer can check it against per-key usage on the dashboard |
 
 ### What the keeper enforces
 
@@ -218,7 +224,7 @@ The full decision table is in the [README](../README.md#decisions). What this wo
 5. **Paid tools:** Orthogonal, through our MCP server, paid per call over x402 from our wallet. One server-side catalog with a price on every response, which fits a service paying on behalf of many customers.
 6. **Rail fee:** absorbed in this build (`HACKATHON_PARAMS`, `railFee = 0`). One USDC of yield opens one dollar of credit; buying that credit costs us about 5% more, paid from the fee address. Our result per settlement is `10% × leftover − 5% × usage`, negative once a customer uses more than two thirds of its yield (pinned in `ledger.test.ts`). For the real product: pass the fee through (`DEFAULT_PARAMS`), absorb it as acquisition cost, or remove it with an enterprise invoice. Tools carry no rail fee either way.
 7. **Float top-up:** manual for now. OpenRouter is prefunded by us, settlement sends usage in USDC to our float wallet, and someone buys credit through OpenRouter's checkout; OpenRouter has no crypto purchase API. In production a programmable card funded from the float wallet pays that checkout, or an enterprise invoice removes the float.
-8. **Keys:** OpenRouter Management API keys under our account, not our own proxy. LLM calls never pass through us.
+8. **Keys:** Inferest keys on our own proxy, in front of one OpenRouter Management API key per vault. LLM calls pass through us for the budget check and the metering; the provider key's limit is the backstop.
 
 ---
 
@@ -238,7 +244,7 @@ _Numbers use `HACKATHON_PARAMS` at 4.5% APY and are pinned in `engine/ledger.tes
 ### Agent (ICP2), `demo/agent.ts`
 
 1. An agent's own wallet deposits into its own vault. Same contracts, different depositor.
-2. The agent runs with its Inferest key as its OpenRouter key, plus the Inferest MCP server for tools. The script drives the loop directly; OpenClaw or Hermes work the same way with the key and the MCP URL.
+2. The agent runs with its Inferest key and the Inferest base URL in place of OpenRouter's, plus the Inferest MCP server for tools. The script drives the loop directly; OpenClaw or Hermes work the same way with the key and the MCP URL.
 3. Warp, `report()`: the agent's limit rises from its own yield.
 4. The agent does a task that needs a model **and** paid tools through Orthogonal. If a tool call is refused, it switches to another tool. The dashboard shows model spend and tool spend drawing from the same yield.
 5. Settle: leftover goes back into the agent's vault. **No human topped anything up.**
@@ -247,7 +253,7 @@ _Numbers use `HACKATHON_PARAMS` at 4.5% APY and are pinned in `engine/ledger.tes
 
 ## Known gaps
 
-- **One OpenRouter account.** Every customer's keys live under our account. Per-company isolation would mean one OpenRouter account per company, each with its own float.
+- **One OpenRouter account.** Every vault's key lives under our account. Per-company isolation would mean one OpenRouter account per company, each with its own float.
 - **Company admins use our admin token.** Self-service needs wallet login: the factory records the vault's owner, so a signed message from that wallet can authorize key creation for that vault.
 - **Orthogonal descriptions.** Coinbase's facilitator rejects a payment whose echoed resource description is longer than about 255 characters; our client caps it before signing. Any other client hits the same on long-description listings.
 - **A daily report on an emptied vault fails Octant's health check.** Harmless, logged, and skipped until the vault is funded again.
