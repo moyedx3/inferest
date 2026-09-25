@@ -80,12 +80,12 @@ In the dashboard the admin creates keys and sets a weight per key (decision 3). 
 **Every minute**, per customer:
 
 ```
-yieldInSplitter = convertToAssets(splitter's shares of vault C)
-pool            = yieldInSplitter × (1 − railFee) − spentThisPeriod
-limit_i         = usage_i + weight_i × max(pool, 0)       (OpenRouter limits are cumulative)
+credit_i  = yieldInSplitter × (1 − railFee) × weight_i / Σ weights
+spent_i   = (usage_i − usageAtPeriodStart_i) + toolSpend_i × (1 − railFee)
+limit_i   = usage_i + max(credit_i − spent_i, 0)        (OpenRouter limits are cumulative)
 ```
 
-Limits rise in a step after each report, not continuously. Between syncs a key can overshoot by at most one minute of spend; we absorb that.
+A key's credit is fixed by its weight, so what one key leaves unused does not flow to the others (decision 3). Limits rise in a step after each report. Between syncs a key can overshoot by at most one minute of spend; we absorb that. If the yield source is worth less than the vault last reported, every key is frozen at its current usage until the next report.
 
 ### 4. Settle (monthly)
 
