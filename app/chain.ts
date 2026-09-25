@@ -1,13 +1,20 @@
-import { createPublicClient, createWalletClient, defineChain, http, parseAbi } from "viem";
+import { createPublicClient, createWalletClient, defineChain, http, parseAbi, TransactionReceiptNotFoundError } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import type { Config } from "./config.ts";
+
+export type TxStatus = "success" | "reverted" | "pending";
 
 export interface Chain {
   yieldOf(vault: string): Promise<bigint>;
   /** True when the yield source is worth less than the vault last reported: limits must freeze. */
   lossPending(vault: string): Promise<boolean>;
   report(vault: string): Promise<string>;
+  /** Sends settle and waits for the receipt: sendSettle followed by a wait. Throws if it reverts. */
   settle(vault: string, usageMicro: bigint): Promise<string>;
+  /** Simulates and sends settle, returning the hash without waiting for the receipt. */
+  sendSettle(vault: string, usageMicro: bigint): Promise<string>;
+  /** The receipt status of a sent transaction; "pending" while no receipt exists. */
+  settleStatus(tx: string): Promise<TxStatus>;
   customerOf(vault: string): Promise<string>;
 }
 
@@ -37,9 +44,13 @@ export function makeChain(cfg: Config): Chain {
   const account = privateKeyToAccount(cfg.keeperKey);
   const wallet = createWalletClient({ chain, account, transport: http(cfg.rpcUrl) });
 
-  async function write(address: Hex, abi: any, functionName: string, args: unknown[]): Promise<string> {
+  async function send(address: Hex, abi: any, functionName: string, args: unknown[]): Promise<Hex> {
     const { request } = await pub.simulateContract({ account, address, abi, functionName, args } as any);
-    const hash = await wallet.writeContract(request as any);
+    return wallet.writeContract(request as any);
+  }
+
+  async function write(address: Hex, abi: any, functionName: string, args: unknown[]): Promise<string> {
+    const hash = await send(address, abi, functionName, args);
     const receipt = await pub.waitForTransactionReceipt({ hash });
     if (receipt.status !== "success") throw new Error(`${functionName} reverted: ${hash}`);
     return hash;
@@ -63,6 +74,16 @@ export function makeChain(cfg: Config): Chain {
     },
     report: (vault) => write(vault as Hex, strategyAbi, "report", []),
     settle: (vault, usageMicro) => write(cfg.splitter, splitterAbi, "settle", [vault, usageMicro]),
+    sendSettle: (vault, usageMicro) => send(cfg.splitter, splitterAbi, "settle", [vault, usageMicro]),
+    async settleStatus(tx) {
+      try {
+        const receipt = await pub.getTransactionReceipt({ hash: tx as Hex });
+        return receipt.status === "success" ? "success" : "reverted";
+      } catch (e) {
+        if (e instanceof TransactionReceiptNotFoundError) return "pending";
+        throw e;
+      }
+    },
     customerOf: (vault) =>
       pub.readContract({ address: cfg.factory, abi: factoryAbi, functionName: "customerOf", args: [vault as Hex] }),
   };

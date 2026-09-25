@@ -10,7 +10,7 @@ import type { Store } from "./store.ts";
 import type { ToolGateway } from "./tools.ts";
 import { buildMcpServer } from "./mcp.ts";
 import { computeLimits } from "./limits.ts";
-import { syncAll, reportAll, settleVault, type KeeperDeps } from "./keeper.ts";
+import { syncAll, reportAll, settleVault, markRegistered, type KeeperDeps } from "./keeper.ts";
 
 export type AppDeps = {
   store: Store; or: OpenRouter; chain: Chain; gateway: ToolGateway; params: Params;
@@ -54,6 +54,9 @@ function state(d: AppDeps) {
       };
     }),
     settlements: d.store.listSettlements(),
+    pendingSettlements: d.store.listPendingSettlements().map((p) => ({
+      vault: p.vault, usageMicro: p.usageMicro.toString(), tx: p.tx, createdAt: p.createdAt,
+    })),
   };
 }
 
@@ -96,6 +99,7 @@ async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse): Pro
       const customer = await d.chain.customerOf(vault).catch(() => "");
       if (!customer || ZERO.test(customer)) return send(res, 400, { error: "not a vault from our factory" });
       d.store.addVault(vault, customer, String(body.label ?? "customer"));
+      markRegistered(d.store, vault); // a vault added mid-month is first settled next month
       return send(res, 201, { vault, customer: customer.toLowerCase() });
     }
     if (url.pathname === "/api/keys") {
@@ -122,7 +126,7 @@ async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse): Pro
       const vault = String(body.vault ?? "").toLowerCase();
       if (!d.store.vault(vault)) return send(res, 404, { error: "unknown vault" });
       const r = await settleVault(d.keeper, vault);
-      return send(res, 200, { usageMicro: r ? r.usage.toString() : null, tx: r ? r.tx : null });
+      return send(res, 200, { usageMicro: r ? r.usage.toString() : null, tx: r ? r.tx : null, pending: r?.pending === true });
     }
     return send(res, 404, { error: "not found" });
   }

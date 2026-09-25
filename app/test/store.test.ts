@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { rmSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import { openStore } from "../store.ts";
 
 const V = "0xAbC0000000000000000000000000000000000001";
@@ -72,9 +73,61 @@ test("recordToolCall rejects an unknown key", () => {
   assert.throws(() => s.recordToolCall("nope", "a", "/b", 1), /unknown key nope/);
 });
 
-test("a fresh store records schema version 1", () => {
+test("a fresh store records schema version 2", () => {
   const s = fresh();
-  assert.equal(s.getMeta("schemaVersion"), "1");
+  assert.equal(s.getMeta("schemaVersion"), "2");
+});
+
+test("pending settlements round-trip", () => {
+  const s = fresh();
+  assert.equal(s.pendingSettlement(V), undefined);
+  const baselines = [{ hash: "h1", baseline: 3.5 }, { hash: "h2", baseline: 0 }];
+  s.setPendingSettlement(V, { usageMicro: 12_345_678_901_234n, baselines, tx: "0xtx" });
+  const p = s.pendingSettlement(V.toLowerCase())!;
+  assert.equal(p.vault, V.toLowerCase());
+  assert.equal(p.usageMicro, 12_345_678_901_234n);
+  assert.equal(typeof p.usageMicro, "bigint");
+  assert.deepEqual(p.baselines, baselines);
+  assert.equal(p.tx, "0xtx");
+  assert.ok(p.createdAt > 0);
+  assert.deepEqual(s.listPendingSettlements(), [p]);
+  s.clearPendingSettlement(V);
+  assert.equal(s.pendingSettlement(V), undefined);
+  assert.deepEqual(s.listPendingSettlements(), []);
+});
+
+test("completing a pending settlement applies it once, only for its tx", () => {
+  const s = fresh();
+  s.setUsage("h1", 5);
+  s.setPendingSettlement(V, { usageMicro: 3_000_000n, baselines: [{ hash: "h1", baseline: 3 }, { hash: "h2", baseline: 0 }], tx: "0xtx" });
+  assert.equal(s.completePendingSettlement(V, "0xother"), false);
+  assert.equal(s.vault(V)!.period, 0);
+  assert.equal(s.completePendingSettlement(V, "0xtx"), true);
+  assert.equal(s.completePendingSettlement(V, "0xtx"), false);
+  assert.equal(s.listSettlements().length, 1);
+  assert.equal(s.keyByHash("h1")!.baseline, 3);
+  assert.equal(s.vault(V)!.period, 1);
+  assert.equal(s.pendingSettlement(V), undefined);
+});
+
+test("a version 1 database migrates to version 2", () => {
+  const path = join(tmpdir(), `inferest-test-migrate-${process.pid}-${Date.now()}.db`);
+  try {
+    const s = openStore(path);
+    s.setMeta("schemaVersion", "1");
+    s.close();
+    const raw = new DatabaseSync(path);
+    raw.exec("DROP TABLE IF EXISTS pending_settlements");
+    raw.close();
+    const s2 = openStore(path);
+    assert.equal(s2.getMeta("schemaVersion"), "2");
+    assert.deepEqual(s2.listPendingSettlements(), []);
+    s2.setPendingSettlement(V, { usageMicro: 1n, baselines: [], tx: "0xtx" });
+    assert.equal(s2.listPendingSettlements().length, 1);
+    s2.close();
+  } finally {
+    rmSync(path, { force: true });
+  }
 });
 
 test("an unsupported schema version is refused", () => {
