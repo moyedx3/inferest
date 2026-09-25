@@ -53,3 +53,18 @@ test("vault state, settlements and meta round-trip", () => {
   assert.equal(s.getMeta("lastReport"), "123");
   assert.equal(s.getMeta("missing"), undefined);
 });
+
+test("startNewPeriod accepts explicit baselines", () => {
+  const s = fresh();
+  s.setUsage("h1", 3.5);
+  s.setUsage("h2", 1.25);
+  s.startNewPeriod(V, [{ hash: "h1", baseline: 2 }]);
+  assert.equal(s.keyByHash("h1")!.baseline, 2);
+  assert.equal(s.keyByHash("h2")!.baseline, s.keyByHash("h2")!.usageTotal);
+  assert.equal(s.vault(V)!.period, 1);
+});
+
+test("recordToolCall rejects an unknown key", () => {
+  const s = fresh();
+  assert.throws(() => s.recordToolCall("nope", "a", "/b", 1), /unknown key nope/);
+});

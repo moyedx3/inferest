@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { openStore } from "../store.ts";
-import { syncVault, settleVault, reportAll, tick, toolBudgetFor, type KeeperDeps } from "../keeper.ts";
+import { syncVault, syncAll, settleVault, reportAll, tick, toolBudgetFor, type KeeperDeps } from "../keeper.ts";
 import type { Chain } from "../chain.ts";
 import type { OpenRouter } from "../openrouter.ts";
 import { HACKATHON_PARAMS } from "../../engine/ledger.ts";
@@ -135,4 +135,32 @@ test("toolBudgetFor uses the last synced state", async () => {
   store.recordToolCall("h1", "a", "/b", 50);
   assert.equal(toolBudgetFor(store, HACKATHON_PARAMS, "h1"), 850);
   assert.equal(toolBudgetFor(store, HACKATHON_PARAMS, "nope"), 0);
+});
+
+test("a sync during settlement does not move the baseline past the settled usage", async () => {
+  // h1 reads 100 on the freeze pass, 101 on the re-read, 150 on any later read
+  const { d, store, events } = setup({ usage: { h1: [100, 101, 150], h2: [0] } });
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  let entered!: () => void;
+  const waiting = new Promise<void>((r) => { entered = r; });
+  const orig = d.chain.settle;
+  d.chain.settle = async (v, u) => { entered(); await gate; return orig(v, u); };
+  const p = settleVault(d, V);
+  await waiting;
+  await syncAll(d); // a minute tick or POST /api/admin/sync while chain.settle is in flight
+  assert.deepEqual(events.filter((e) => e.startsWith("limit:h1:")), ["limit:h1:100"]); // only the freeze
+  assert.ok(!events.includes("get:h1:150"));
+  release();
+  const r = await p;
+  assert.equal(store.keyByHash("h1")!.baseline, 101);
+  assert.equal(r!.usage, 101_000_000n);
+  assert.equal(store.vault(V)!.period, 1);
+});
+
+test("settling an unknown vault does nothing", async () => {
+  const { d, store, events } = setup();
+  assert.equal(await settleVault(d, "0x00000000000000000000000000000000000000bb"), null);
+  assert.ok(!events.some((e) => e.startsWith("settle:")));
+  assert.equal(store.listSettlements().length, 0);
 });

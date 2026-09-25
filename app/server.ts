@@ -118,7 +118,9 @@ async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse): Pro
     if (url.pathname === "/api/admin/sync") { await syncAll(d.keeper); return send(res, 200, { ok: true }); }
     if (url.pathname === "/api/admin/report") { await reportAll(d.keeper); return send(res, 200, { ok: true }); }
     if (url.pathname === "/api/admin/settle") {
-      const r = await settleVault(d.keeper, String(body.vault ?? "").toLowerCase());
+      const vault = String(body.vault ?? "").toLowerCase();
+      if (!d.store.vault(vault)) return send(res, 404, { error: "unknown vault" });
+      const r = await settleVault(d.keeper, vault);
       return send(res, 200, { usageMicro: r ? r.usage.toString() : null, tx: r ? r.tx : null });
     }
     return send(res, 404, { error: "not found" });

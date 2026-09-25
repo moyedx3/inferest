@@ -41,9 +41,15 @@ npm install
 npm test                                  # ledger kernel + app, no network
 cd contracts && forge test                # Splitter, factory, lifecycle
 cp .env.example .env                      # then fill it in
+# deploy: export KEEPER, FLOAT_ADDRESS, FEE_ADDRESS, EMERGENCY_ADMIN, TARGET_VAULT
+# (and optionally FEE_BPS) in the shell first; this writes contracts/deployments/<chainId>.json,
+# which DEPLOYMENTS in .env points at
+(cd contracts && forge script script/Deploy.s.sol --rpc-url $RPC_URL --private-key $DEPLOYER_PRIVATE_KEY --broadcast --slow)
 node --env-file=.env app/cli.ts serve     # dashboard, API, MCP at /mcp
 node --env-file=.env demo/treasury.ts     # or demo/agent.ts
 ```
+
+`forge test` prints diagnostics from an upstream Foundry lint bug before its results; read the `Suite result` lines.
 
 The demos run against a Tenderly Virtual TestNet or a local anvil fork of the target chain; the demo helpers support both.
 

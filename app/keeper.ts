@@ -33,6 +33,10 @@ export async function syncVault(d: KeeperDeps, vault: string): Promise<KeyLimit[
 
 export async function syncAll(d: KeeperDeps): Promise<void> {
   for (const v of d.store.listVaults()) {
+    if (settlingVaults.has(v.vault.toLowerCase())) {
+      d.log(`sync ${v.vault} skipped: settling`);
+      continue;
+    }
     try {
       await syncVault(d, v.vault);
     } catch (e) {
@@ -55,6 +59,10 @@ export async function reportAll(d: KeeperDeps, now: number = Date.now()): Promis
 /** Freeze, re-read, settle, open a new period, re-sync. */
 export async function settleVault(d: KeeperDeps, vault: string): Promise<{ usage: bigint; tx: string } | null> {
   const key = vault.toLowerCase();
+  if (!d.store.vault(vault)) {
+    d.log(`settle ${vault} skipped: unknown vault`);
+    return null;
+  }
   if (settlingVaults.has(key)) {
     d.log(`settle ${vault} skipped: already settling`);
     return null;
@@ -72,7 +80,7 @@ export async function settleVault(d: KeeperDeps, vault: string): Promise<{ usage
     const usage = usageMicro(keys, d.params);
     const tx = await d.chain.settle(vault, usage);
     d.store.recordSettlement(vault, usage, tx);
-    d.store.startNewPeriod(vault);
+    d.store.startNewPeriod(vault, keys.map((k) => ({ hash: k.hash, baseline: k.usageTotal })));
     await syncVault(d, vault);
     return { usage, tx };
   } finally {

@@ -85,7 +85,7 @@ spent_i   = (usage_i − usageAtPeriodStart_i) + toolSpend_i × (1 − railFee)
 limit_i   = usage_i + max(credit_i − spent_i, 0)        (OpenRouter limits are cumulative)
 ```
 
-A key's credit is fixed by its weight, so what one key leaves unused does not flow to the others (decision 3). Limits rise in a step after each report. Between syncs a key can overshoot by at most one minute of spend; we absorb that. If the yield source is worth less than the vault last reported, every key is frozen at its current usage until the next report.
+A key's credit is fixed by its weight, so what one key leaves unused does not flow to the others (decision 3). The sum of open credit is capped at the pool: if reweighting would open more than the pool has left, every remaining budget is scaled down proportionally. Limits rise in a step after each report. Between syncs a key can overshoot by at most one minute of spend; we absorb that. If the yield source is worth less than the vault last reported, every key is frozen at its current usage until the next report.
 
 ### 4. Settle (monthly)
 
@@ -97,10 +97,10 @@ paid     = min(usage, y)
 leftover = y − paid
 fee      = feeBps × leftover
 redeem paid → FLOAT address, fee → FEE address          (both immutable)
-redeem leftover − fee, deposit it back into the vault with the customer as receiver
+transfer the shares worth leftover − fee to the customer
 ```
 
-The redeposit mints new principal shares to the customer's wallet. This is the kernel's `settle`: principal grows by `leftover − fee`. Because limits never open beyond `y`, `usage ≤ y` always holds and nothing is ever owed.
+The Splitter transfers the leftover shares to the customer's wallet, where they are now principal. This is the kernel's `settle`: principal grows by `leftover − fee`. Because limits never open beyond `y`, `usage ≤ y` always holds and nothing is ever owed.
 
 ### 5. Withdraw
 

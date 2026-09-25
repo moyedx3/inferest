@@ -10,6 +10,16 @@ export type ToolCall = { api: string; path: string; method?: string; body?: unkn
 
 export class BudgetExhausted extends Error {}
 
+/** A paid call that failed after its payment was signed. `charged` is in USD and has been recorded. */
+export class ToolCallFailed extends Error {
+  charged: number;
+  constructor(message: string, charged: number) {
+    super(message);
+    this.name = "ToolCallFailed";
+    this.charged = charged;
+  }
+}
+
 const SEARCH_URL = "https://api.orthogonal.com/v1/search";
 const DETAILS_URL = "https://api.orthogonal.com/v1/details";
 const X402_BASE = "https://x402.orthogonal.com";
@@ -23,6 +33,15 @@ export function toolGateway(d: {
   budgetUsd: (keyHash: string) => number;
   record: (keyHash: string, api: string, path: string, priceUsd: number) => void;
 }) {
+  // micro USDC held by in-flight runs, per key, so parallel runs share one budget
+  const reserved = new Map<string, bigint>();
+  const reservedFor = (h: string) => reserved.get(h) ?? 0n;
+  const hold = (h: string, delta: bigint) => {
+    const next = reservedFor(h) + delta;
+    if (next > 0n) reserved.set(h, next);
+    else reserved.delete(h);
+  };
+
   return {
     async search(prompt: string, limit = 10): Promise<ToolHit[]> {
       const res = await d.fetchFn(SEARCH_URL, {
@@ -60,18 +79,46 @@ export function toolGateway(d: {
       }
       const budget = d.budgetUsd(keyHash);
       if (!(budget > 0)) throw new BudgetExhausted("no yield left for tools on this key");
-      let charged = 0n;
-      const pay = d.makePayingFetch(BigInt(Math.floor(budget * 1e6)), (m) => { charged = m; });
-      const method = (call.method ?? (call.body === undefined ? "GET" : "POST")).toUpperCase();
-      const qs = call.query ? `?${new URLSearchParams(call.query)}` : "";
-      const res = await pay(`${X402_BASE}/${call.api}${call.path}${qs}`, {
-        method,
-        headers: { "Content-Type": "application/json" },
-        body: call.body === undefined || method === "GET" ? undefined : JSON.stringify(call.body),
-      });
-      if (!res.ok) throw new Error(`tool ${call.api}${call.path} failed: ${res.status} ${await res.text()}`);
-      if (charged > 0n) d.record(keyHash, call.api, call.path, Number(charged) / 1e6);
-      return res.json();
+      const available = BigInt(Math.floor(budget * 1e6)) - reservedFor(keyHash);
+      if (available <= 0n) throw new BudgetExhausted("this key's tool budget is held by calls in flight");
+      let held = available;
+      hold(keyHash, held);
+      try {
+        let charged = 0n;
+        const pay = d.makePayingFetch(available, (m) => {
+          charged = m;
+          hold(keyHash, m - held);
+          held = m;
+        });
+        const method = (call.method ?? (call.body === undefined ? "GET" : "POST")).toUpperCase();
+        const qs = call.query ? `?${new URLSearchParams(call.query)}` : "";
+        const tool = `${call.api}${call.path}`;
+        const failedAfterPayment = (reason: string) => {
+          const usd = Number(charged) / 1e6;
+          d.record(keyHash, call.api, call.path, usd);
+          return new ToolCallFailed(`tool ${tool} failed after a payment of $${usd} was signed (${reason}); check usage before retrying`, usd);
+        };
+        let res: Response;
+        try {
+          res = await pay(`${X402_BASE}/${call.api}${call.path}${qs}`, {
+            method,
+            headers: { "Content-Type": "application/json" },
+            body: call.body === undefined || method === "GET" ? undefined : JSON.stringify(call.body),
+          });
+        } catch (e) {
+          if (charged > 0n) throw failedAfterPayment((e as Error).message);
+          throw e;
+        }
+        if (!res.ok) {
+          const text = await res.text();
+          if (charged > 0n) throw failedAfterPayment(`${res.status} ${text}`);
+          throw new Error(`tool ${tool} failed: ${res.status} ${text}`);
+        }
+        if (charged > 0n) d.record(keyHash, call.api, call.path, Number(charged) / 1e6);
+        return await res.json();
+      } finally {
+        hold(keyHash, -held);
+      }
     },
   };
 }
