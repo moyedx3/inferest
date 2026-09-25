@@ -22,3 +22,5 @@ _Content spec for design. Every number traces to [`../docs/`](../docs/) or [`../
 | 10 | Next | Five treasury interviews, one rail contract, one non-custodial pilot | | `hackathon/PLAN.md` |
 
 Float top-up, speaker note for slides 6 and 9: OpenRouter is prefunded by us, and settlement sends each month's usage in USDC to our float wallet. Refilling OpenRouter from that wallet is manual today, because OpenRouter has no crypto purchase API, only a hosted checkout. Production phase: a programmable card funded from the float wallet pays that checkout automatically, or an enterprise invoice removes the float entirely.
+
+Keys, speaker note for slides 6 and 7: developers get Inferest keys, not provider keys. Our proxy checks the key's yield budget before each call and meters the cost after; one OpenRouter key per vault sits behind it with its limit held at the vault's open credit as a backstop. A client changes only its base URL, and the same key opens the paid tools over MCP.

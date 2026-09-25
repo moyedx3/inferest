@@ -95,11 +95,12 @@ export async function customerWithVault(privateKey: Hex, depositMicro: bigint, l
   return { account, vault, value, withdrawAll };
 }
 
+/** A chat completion on an Inferest key, through the Inferest proxy (OpenAI wire format). */
 export async function chat(key: string, messages: unknown[], tools?: unknown[]): Promise<any> {
-  const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+  const r = await fetch(`${API}/v1/chat/completions`, {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: process.env.DEMO_MODEL ?? "moonshotai/kimi-k2.6", messages, tools, usage: { include: true } }),
+    body: JSON.stringify({ model: process.env.DEMO_MODEL ?? "moonshotai/kimi-k2.6", messages, tools }),
   });
   const j: any = await r.json();
   if (!r.ok) throw new Error(`chat: ${r.status} ${JSON.stringify(j)}`);
