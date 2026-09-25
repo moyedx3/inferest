@@ -131,7 +131,9 @@ export function x402PayingFetch(privateKey: `0x${string}`): PayingFetchFactory {
   return (maxMicro, onAmount) =>
     wrapFetchWithPayment(fetch, wallet as any, maxMicro, (reqs: any, network: any, scheme: any) => {
       const chosen = selectPaymentRequirements(reqs, network, scheme);
-      onAmount(BigInt(chosen.maxAmountRequired));
+      const amount = BigInt(chosen.maxAmountRequired);
+      // x402-fetch checks the cap after this selector and throws unsigned; report only amounts it will sign
+      if (amount <= maxMicro) onAmount(amount);
       return chosen;
     }) as unknown as typeof fetch;
 }

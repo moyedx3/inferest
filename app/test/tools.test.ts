@@ -152,3 +152,25 @@ test("parallel runs on one key share the budget", async () => {
   await g.run("h1", call);
   assert.equal(paid[2].max, 10_000n);
 });
+
+test("a price above the cap is not recorded as a paid call", async () => {
+  const recorded: unknown[][] = [];
+  const price = 5_000n;
+  const g = toolGateway({
+    orthogonalKey: "orth",
+    fetchFn: (async () => new Response("{}")) as unknown as typeof fetch,
+    // mirrors x402PayingFetch: the amount is reported only when within the cap, then x402-fetch throws unsigned
+    makePayingFetch: (max, onAmount) => (async () => {
+      if (price <= max) onAmount(price);
+      throw new Error("Payment amount exceeds maximum allowed");
+    }) as unknown as typeof fetch,
+    budgetUsd: () => 0.001,
+    record: (...a) => recorded.push(a),
+  });
+  await assert.rejects(g.run("h1", { api: "olostep", path: "/v1/scrapes" }), (err: unknown) => {
+    assert.ok(err instanceof Error && !(err instanceof ToolCallFailed));
+    assert.match(err.message, /exceeds maximum/);
+    return true;
+  });
+  assert.deepEqual(recorded, []);
+});
