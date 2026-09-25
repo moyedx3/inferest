@@ -1,21 +1,28 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { openStore } from "../store.ts";
-import { syncVault, syncAll, settleVault, reportAll, tick, toolBudgetFor, reconcilePending, type KeeperDeps } from "../keeper.ts";
+import {
+  syncVault, syncAll, settleVault, reportAll, tick, toolBudgetFor, reconcilePending, resolvePendingModelCalls, checkDrift,
+  type KeeperDeps,
+} from "../keeper.ts";
 import type { Chain, TxStatus } from "../chain.ts";
 import type { OpenRouter } from "../openrouter.ts";
 import { HACKATHON_PARAMS } from "../../engine/ledger.ts";
 
 const V = "0x00000000000000000000000000000000000000aa";
+const OR = "orhash";
 
-function setup(opts: { yieldMicro?: bigint; lossPending?: boolean; usage?: Record<string, number[]>; status?: TxStatus } = {}) {
+/** Yield defaults to $2,000. orUsage is the sequence of cumulative usage readings OpenRouter returns for the company key. */
+function setup(opts: { yieldMicro?: bigint; lossPending?: boolean; orUsage?: number[]; status?: TxStatus; noOrKey?: boolean } = {}) {
   const events: string[] = [];
+  const logs: string[] = [];
   const store = openStore(":memory:");
   store.addVault(V, "0x00000000000000000000000000000000000000cc", "T");
-  store.addKey({ hash: "h1", vault: V, name: "a", weight: 1, secretSha256: "s1" });
-  store.addKey({ hash: "h2", vault: V, name: "b", weight: 1, secretSha256: "s2" });
-  const usage = opts.usage ?? { h1: [0], h2: [0] };
-  const ctl = { status: opts.status ?? ("success" as TxStatus), known: true, prepared: 0 };
+  if (!opts.noOrKey) store.setVaultOpenRouterKey(V, OR, "enc:sk-or-v1-company");
+  store.addKey({ id: "k1", vault: V, name: "a", weight: 1, secretSha256: "s1" });
+  store.addKey({ id: "k2", vault: V, name: "b", weight: 1, secretSha256: "s2" });
+  const usage = opts.orUsage ?? [0];
+  const ctl = { status: opts.status ?? ("success" as TxStatus), known: true, prepared: 0, generations: {} as Record<string, number> };
   const chain: Chain = {
     yieldOf: async () => opts.yieldMicro ?? 2_000_000_000n,
     lossPending: async () => opts.lossPending ?? false,
@@ -36,53 +43,95 @@ function setup(opts: { yieldMicro?: bigint; lossPending?: boolean; usage?: Recor
   const or: OpenRouter = {
     createKey: async () => ({ key: "k", hash: "h" }),
     getKey: async (h) => {
-      const seq = usage[h];
-      const u = seq.length > 1 ? seq.shift()! : seq[0];
+      const u = usage.length > 1 ? usage.shift()! : usage[0];
       events.push(`get:${h}:${u}`);
       return { hash: h, usage: u, limit: null, disabled: false };
     },
     setLimit: async (h, l) => { events.push(`limit:${h}:${l}`); },
     deleteKey: async () => {},
-    getGeneration: async () => undefined,
+    getGeneration: async (id, apiKey) => {
+      events.push(`gen:${id}:${apiKey}`);
+      const cost = ctl.generations[id];
+      return cost === undefined ? undefined : { id, model: "m", totalCost: cost };
+    },
   };
-  const d: KeeperDeps = { chain, store, or, params: HACKATHON_PARAMS, log: () => {}, sleep: async () => {} };
-  return { d, store, events, ctl };
+  const d: KeeperDeps = {
+    chain, store, or, params: HACKATHON_PARAMS, log: (m) => logs.push(m), sleep: async () => {},
+    decrypt: (e) => e.replace(/^enc:/, ""),
+  };
+  let gen = 0;
+  /** A metered model call on a key, as the proxy records it. */
+  const spend = (keyId: string, usd: number) => store.recordModelCall({ keyId, model: "m", costUsd: usd, generationId: `g${++gen}` });
+  return { d, store, events, logs, ctl, spend };
 }
 
-test("sync writes each key's weighted limit and stores yield", async () => {
-  const { d, store, events } = setup({ usage: { h1: [100], h2: [0] } });
+const OCT = Date.UTC(2026, 9, 10, 12, 0);
+const NOV = Date.UTC(2026, 10, 1, 0, 0);
+const MIN = 60_000;
+const settles = (events: string[]) => events.filter((e) => e.startsWith("settle:")).length;
+const lastLimit = (events: string[]) => events.filter((e) => e.startsWith(`limit:${OR}:`)).at(-1);
+
+test("sync pins the company key at its usage plus open credit and stores yield", async () => {
+  const { d, store, events, spend } = setup({ orUsage: [100] });
+  spend("k1", 100); // k1 has 900 of its 1,000 left, k2 all of its 1,000
   await syncVault(d, V);
-  assert.ok(events.includes("limit:h1:1000")); // 100 used of a 1,000 budget -> cumulative limit 1,000
-  assert.ok(events.includes("limit:h2:1000"));
-  assert.equal(store.vault(V)!.yieldUsd, 2_000);
+  assert.ok(events.includes(`limit:${OR}:2000`)); // 100 used + 1,900 open
+  const v = store.vault(V)!;
+  assert.equal(v.yieldUsd, 2_000);
+  assert.equal(v.orLimit, 2000);
+  assert.equal(v.orUsage, 100);
 });
 
-test("freezes limits when a loss is pending", async () => {
-  const { d, store, events } = setup({ lossPending: true, usage: { h1: [40], h2: [7] } });
+test("a vault without an OpenRouter key on file syncs its yield and pins nothing", async () => {
+  const { d, store, events, logs } = setup({ noOrKey: true });
   await syncVault(d, V);
-  assert.ok(events.includes("limit:h1:40"));
-  assert.ok(events.includes("limit:h2:7"));
+  assert.equal(store.vault(V)!.yieldUsd, 2_000);
+  assert.ok(!events.some((e) => e.startsWith("limit:")));
+  assert.ok(logs.some((m) => m.includes("no OpenRouter key on file")));
+});
+
+test("freezes the company key at its usage when a loss is pending", async () => {
+  const { d, store, events } = setup({ lossPending: true, orUsage: [47.5] });
+  await syncVault(d, V);
+  assert.ok(events.includes(`limit:${OR}:47.5`));
   assert.equal(store.vault(V)!.frozen, true);
 });
 
 test("skips settlement when a loss is pending", async () => {
-  const { d, events } = setup({ lossPending: true });
+  const { d, store, events } = setup({ lossPending: true });
   assert.equal(await settleVault(d, V), null);
   assert.ok(!events.some((e) => e.startsWith("settle:")));
+  assert.equal(store.vault(V)!.settling, false);
 });
 
-test("settle freezes keys, re-reads usage, then settles", async () => {
-  // h1 reads 100 on the freeze pass, then 101 after a request that was already in flight
-  const { d, store, events } = setup({ usage: { h1: [100, 101], h2: [0] } });
+test("settle closes the vault, pins the backstop, drains in-flight metering, then settles", async () => {
+  const { d, store, events, spend } = setup({ orUsage: [100] });
+  spend("k1", 100);
+  d.drain = async (vault, ms) => {
+    events.push(`drain:${vault}:${ms}`);
+    assert.equal(store.vault(V)!.settling, true);
+    spend("k1", 1); // a request that was in flight finishes metering during the drain
+  };
   const r = await settleVault(d, V);
-  const iFreeze = events.indexOf("limit:h1:100");
-  const iReread = events.indexOf("get:h1:101");
+  const iFreeze = events.indexOf(`limit:${OR}:100`);
+  const iDrain = events.indexOf(`drain:${V}:10000`);
   const iSettle = events.findIndex((e) => e.startsWith("settle:"));
-  assert.ok(iFreeze >= 0 && iFreeze < iReread && iReread < iSettle);
+  assert.ok(iFreeze >= 0 && iFreeze < iDrain && iDrain < iSettle, events.join(","));
   assert.equal(r!.usage, 101_000_000n);
-  assert.equal(store.keyByHash("h1")!.baseline, 101);
   assert.equal(store.vault(V)!.period, 1);
+  assert.equal(store.vault(V)!.settling, false);
+  assert.equal(store.keyById("k1")!.modelSpent, 0);
   assert.equal(store.listSettlements().length, 1);
+  assert.equal(lastLimit(events), `limit:${OR}:2100`); // reopened after settlement: 100 used + 2,000 open
+});
+
+test("settlement usage is model cost over the rail fee plus tool spend", async () => {
+  const { d, store, spend } = setup();
+  d.params = { ...HACKATHON_PARAMS, railFee: 0.05 };
+  spend("k1", 19);
+  store.recordToolCall("k2", "a", "/b", 10);
+  const r = await settleVault(d, V);
+  assert.equal(r!.usage, 30_000_000n);
 });
 
 test("reportAll reports every vault and survives a failing one", async () => {
@@ -105,17 +154,58 @@ test("reportAll skips an empty vault", async () => {
   assert.ok(events.includes(`report:${V}`));
 });
 
-test("tick reports once a day and settles on a new month, not on first run", async () => {
-  const { d, store, events } = setup();
+test("tick reports once a day with a drift check, and settles on a new month, not on first run", async () => {
+  const { d, store, events, logs, spend } = setup({ orUsage: [1.5] });
+  spend("k1", 1.5);
   const day1 = Date.UTC(2026, 9, 1, 0, 0);
   await tick(d, day1);
   assert.equal(events.filter((e) => e.startsWith("report:")).length, 1);
   assert.equal(events.filter((e) => e.startsWith("settle:")).length, 0);
+  assert.ok(logs.includes(`drift ${V}: openrouter usage 1.5 recorded 1.5 drift 0`), logs.join("\n"));
   await tick(d, day1 + 60_000);
   assert.equal(events.filter((e) => e.startsWith("report:")).length, 1);
+  assert.equal(logs.filter((m) => m.startsWith("drift ")).length, 1);
   await tick(d, Date.UTC(2026, 10, 1, 0, 0));
   assert.equal(events.filter((e) => e.startsWith("settle:")).length, 1);
   assert.equal(store.getMeta("lastSettleMonth"), "2026-11");
+});
+
+test("the drift check compares the company key's usage with recorded model cost", async () => {
+  const { d, logs, spend } = setup({ orUsage: [3] });
+  spend("k1", 1);
+  spend("k2", 1.5);
+  await checkDrift(d);
+  assert.ok(logs.includes(`drift ${V}: openrouter usage 3 recorded 2.5 drift 0.5`), logs.join("\n"));
+});
+
+test("pending model calls are resolved through the generation lookup with the company key", async () => {
+  const { d, store, events, ctl } = setup();
+  store.recordPendingModelCall({ keyId: "k1", model: "m", generationId: "gen-1" });
+  store.recordPendingModelCall({ keyId: "k1", model: "m", generationId: "gen-2" });
+  ctl.generations["gen-1"] = 0.25;
+  await resolvePendingModelCalls(d, OCT);
+  assert.ok(events.includes("gen:gen-1:sk-or-v1-company")); // decrypted, never the stored form
+  assert.equal(store.modelCall("gen-1")!.status, "recorded");
+  assert.equal(store.modelCall("gen-1")!.costUsd, 0.25);
+  assert.equal(store.modelCall("gen-2")!.status, "pending");
+  assert.equal(store.keyById("k1")!.modelSpent, 0.25);
+  ctl.generations["gen-2"] = 0.5;
+  await tick(d, OCT + MIN); // the tick resolves the rest
+  assert.equal(store.listPendingModelCalls().length, 0);
+  assert.equal(store.keyById("k1")!.modelSpent, 0.75);
+});
+
+test("a pending model call unresolved for a day is logged, not dropped", async () => {
+  const { d, store, logs } = setup();
+  store.recordPendingModelCall({ keyId: "k1", model: "m", generationId: "gen-old" }, OCT - 2 * 86_400_000);
+  d.or.getGeneration = async () => { throw new Error("rate limited"); };
+  await resolvePendingModelCalls(d, OCT);
+  assert.equal(store.listPendingModelCalls().length, 1);
+  assert.ok(logs.some((m) => m.includes("gen-old") && m.includes("lookup failed")));
+  assert.ok(logs.some((m) => m.includes("gen-old") && m.includes("unresolved for 48 h")));
+  d.or.getGeneration = async () => undefined;
+  await resolvePendingModelCalls(d, OCT + MIN);
+  assert.equal(store.listPendingModelCalls().length, 1);
 });
 
 test("overlapping ticks do not run twice", async () => {
@@ -130,11 +220,11 @@ test("overlapping ticks do not run twice", async () => {
   release();
   await Promise.all([p1, p2]);
   assert.equal(events.filter((e) => e.startsWith("report:")).length, 1);
-  const syncedBefore = events.filter((e) => e === "get:h1:0").length;
+  const syncedBefore = events.filter((e) => e === `get:${OR}:0`).length;
   await tick(d, day1 + 86_400_000 + 60_000); // a third tick, after both earlier ones settled
-  const syncedAfter = events.filter((e) => e === "get:h1:0").length;
+  const syncedAfter = events.filter((e) => e === `get:${OR}:0`).length;
   assert.equal(events.filter((e) => e.startsWith("report:")).length, 2);
-  assert.equal(syncedAfter, syncedBefore + 1);
+  assert.equal(syncedAfter, syncedBefore + 2); // one sync read plus one drift read
 });
 
 test("a vault already settling is not settled twice", async () => {
@@ -152,17 +242,24 @@ test("a vault already settling is not settled twice", async () => {
   assert.equal(r2, null);
 });
 
-test("toolBudgetFor uses the last synced state", async () => {
-  const { d, store } = setup({ usage: { h1: [100], h2: [0] } });
+test("toolBudgetFor uses the last synced state and refuses revoked keys and closed vaults", async () => {
+  const { d, store, spend } = setup();
+  spend("k1", 100);
   await syncVault(d, V);
-  store.recordToolCall("h1", "a", "/b", 50);
-  assert.equal(toolBudgetFor(store, HACKATHON_PARAMS, "h1"), 850);
+  store.recordToolCall("k1", "a", "/b", 50);
+  assert.equal(toolBudgetFor(store, HACKATHON_PARAMS, "k1"), 850);
   assert.equal(toolBudgetFor(store, HACKATHON_PARAMS, "nope"), 0);
+  store.setSettling(V, true);
+  assert.equal(toolBudgetFor(store, HACKATHON_PARAMS, "k1"), 0);
+  store.setSettling(V, false);
+  store.revokeKey("k1");
+  assert.equal(toolBudgetFor(store, HACKATHON_PARAMS, "k1"), 0);
+  assert.equal(toolBudgetFor(store, HACKATHON_PARAMS, "k2"), 1850); // the pool cap: 2,000 credit minus k1's 150 spent
 });
 
-test("a sync during settlement does not move the baseline past the settled usage", async () => {
-  // h1 reads 100 on the freeze pass, 101 on the re-read, 150 on any later read
-  const { d, store, events } = setup({ usage: { h1: [100, 101, 150], h2: [0] } });
+test("a sync during settlement does not reopen the backstop", async () => {
+  const { d, store, events, spend } = setup({ orUsage: [100] });
+  spend("k1", 100);
   let release!: () => void;
   const gate = new Promise<void>((r) => { release = r; });
   let entered!: () => void;
@@ -171,14 +268,20 @@ test("a sync during settlement does not move the baseline past the settled usage
   d.chain.prepareSettle = async (v, u) => { entered(); await gate; return orig(v, u); };
   const p = settleVault(d, V);
   await waiting;
-  await syncAll(d); // a minute tick or POST /api/admin/sync while chain.settle is in flight
-  assert.deepEqual(events.filter((e) => e.startsWith("limit:h1:")), ["limit:h1:100"]); // only the freeze
-  assert.ok(!events.includes("get:h1:150"));
+  await syncAll(d); // a minute tick or POST /api/admin/sync while the settlement is in flight
+  assert.deepEqual(events.filter((e) => e.startsWith(`limit:${OR}:`)), [`limit:${OR}:100`]); // only the freeze
   release();
   const r = await p;
-  assert.equal(store.keyByHash("h1")!.baseline, 101);
-  assert.equal(r!.usage, 101_000_000n);
+  assert.equal(r!.usage, 100_000_000n);
   assert.equal(store.vault(V)!.period, 1);
+});
+
+test("a stale settling flag is cleared by the next sync", async () => {
+  const { d, store, logs } = setup();
+  store.setSettling(V, true); // e.g. the process died between the freeze and the pending row
+  await syncVault(d, V);
+  assert.equal(store.vault(V)!.settling, false);
+  assert.ok(logs.some((m) => m.includes("stale settling flag cleared")));
 });
 
 test("settling an unknown vault does nothing", async () => {
@@ -188,14 +291,9 @@ test("settling an unknown vault does nothing", async () => {
   assert.equal(store.listSettlements().length, 0);
 });
 
-const OCT = Date.UTC(2026, 9, 10, 12, 0);
-const NOV = Date.UTC(2026, 10, 1, 0, 0);
-const MIN = 60_000;
-const settles = (events: string[]) => events.filter((e) => e.startsWith("settle:")).length;
-const lastLimit = (events: string[], hash: string) => events.filter((e) => e.startsWith(`limit:${hash}:`)).at(-1);
-
 test("a settlement is persisted before the broadcast", async () => {
-  const { d, store } = setup({ usage: { h1: [100], h2: [0] }, status: "pending" });
+  const { d, store, spend } = setup({ orUsage: [100], status: "pending" });
+  spend("k1", 100);
   const orig = d.chain.prepareSettle;
   let persistedAtSend: string | undefined;
   d.chain.prepareSettle = async (v, u) => {
@@ -208,15 +306,16 @@ test("a settlement is persisted before the broadcast", async () => {
   assert.deepEqual(r, { usage: 100_000_000n, tx: "0xs", pending: true });
   const p = store.pendingSettlement(V)!;
   assert.equal(p.usageMicro, 100_000_000n);
-  assert.deepEqual(p.baselines, [{ hash: "h1", baseline: 100 }, { hash: "h2", baseline: 0 }]);
+  assert.deepEqual(p.baselines, [{ keyId: "k1", spentUsd: 100 }, { keyId: "k2", spentUsd: 0 }]);
   assert.equal(p.createdAt, OCT);
-  assert.equal(store.keyByHash("h1")!.baseline, 0);
   assert.equal(store.vault(V)!.period, 0);
+  assert.equal(store.vault(V)!.settling, true); // the proxy keeps refusing until the receipt is seen
   assert.equal(store.listSettlements().length, 0);
 });
 
 test("an error while waiting for the receipt leaves the settlement pending", async () => {
-  const { d, store } = setup({ usage: { h1: [100], h2: [0] } });
+  const { d, store, spend } = setup({ orUsage: [100] });
+  spend("k1", 100);
   d.chain.settleStatus = async () => { throw new Error("rpc down"); };
   const r = await settleVault(d, V, OCT);
   assert.equal(r!.pending, true);
@@ -225,15 +324,16 @@ test("an error while waiting for the receipt leaves the settlement pending", asy
 });
 
 test("reconciliation applies the bookkeeping once", async () => {
-  // h1 reads 100 at the freeze and re-read, then 150 once usage moves on
-  const { d, store, events, ctl } = setup({ usage: { h1: [100, 100, 150], h2: [0] }, status: "pending" });
+  const { d, store, events, ctl, spend } = setup({ orUsage: [100], status: "pending" });
+  spend("k1", 100);
   await settleVault(d, V, OCT);
   ctl.status = "success";
   await tick(d, OCT + MIN);
   assert.equal(store.listSettlements().length, 1);
   assert.equal(store.listSettlements()[0].usageMicro, "100000000");
-  assert.equal(store.keyByHash("h1")!.baseline, 100); // the snapshot, not the later 150
   assert.equal(store.vault(V)!.period, 1);
+  assert.equal(store.vault(V)!.settling, false);
+  assert.equal(store.keyById("k1")!.modelSpent, 0);
   assert.equal(store.pendingSettlement(V), undefined);
   assert.equal(store.getMeta("settledMonth:" + V), "2026-10");
   await tick(d, OCT + 2 * MIN);
@@ -243,36 +343,40 @@ test("reconciliation applies the bookkeeping once", async () => {
   assert.equal(settles(events), 1);
 });
 
-test("a reverted settlement clears the pending row, moves nothing and reopens the keys", async () => {
-  const { d, store, events } = setup({ usage: { h1: [100], h2: [0] }, status: "reverted" });
+test("a reverted settlement clears the pending row, moves nothing and reopens the vault", async () => {
+  const { d, store, events, spend } = setup({ orUsage: [100], status: "reverted" });
+  spend("k1", 100);
   assert.equal(await settleVault(d, V, OCT), null);
   assert.equal(store.pendingSettlement(V), undefined);
   assert.equal(store.listSettlements().length, 0);
-  assert.equal(store.keyByHash("h1")!.baseline, 0);
   assert.equal(store.vault(V)!.period, 0);
-  assert.equal(lastLimit(events, "h1"), "limit:h1:1000"); // the freeze at 100 was lifted
+  assert.equal(store.vault(V)!.settling, false);
+  assert.equal(store.keyById("k1")!.modelSpent, 100); // still this period's spend
+  assert.equal(lastLimit(events), `limit:${OR}:2000`); // the freeze at 100 was lifted: 100 used + 1,900 open
 });
 
 test("reconciling a reverted settlement clears the row and moves nothing", async () => {
-  const { d, store, events, ctl } = setup({ usage: { h1: [100], h2: [0] }, status: "pending" });
+  const { d, store, events, ctl, spend } = setup({ orUsage: [100], status: "pending" });
+  spend("k1", 100);
   await settleVault(d, V, OCT);
   ctl.status = "reverted";
   await reconcilePending(d, OCT + MIN);
   assert.equal(store.pendingSettlement(V), undefined);
   assert.equal(store.listSettlements().length, 0);
-  assert.equal(store.keyByHash("h1")!.baseline, 0);
   assert.equal(store.vault(V)!.period, 0);
-  assert.equal(lastLimit(events, "h1"), "limit:h1:1000");
+  assert.equal(store.vault(V)!.settling, false);
+  assert.equal(lastLimit(events), `limit:${OR}:2000`);
 });
 
 test("a vault with a pending settlement is not synced or settled again", async () => {
-  const { d, store, events } = setup({ usage: { h1: [100], h2: [0] }, status: "pending" });
+  const { d, store, events, spend } = setup({ orUsage: [100], status: "pending" });
+  spend("k1", 100);
   await tick(d, OCT); // first tick: marks the month, settles nothing
   await settleVault(d, V, OCT);
   const before = events.length;
   await syncAll(d);
   await syncVault(d, V);
-  assert.equal(events.length, before); // no usage reads, no limit writes: keys stay pinned at the freeze
+  assert.equal(events.length, before); // no usage reads, no limit writes: the vault stays closed
   const r = await settleVault(d, V, OCT);
   assert.deepEqual(r, { usage: 100_000_000n, tx: "0xs", pending: true });
   await tick(d, NOV); // a new month, but the vault still has a pending settlement
@@ -298,15 +402,17 @@ test("a failed settlement is retried on a later tick within the month", async ()
   assert.equal(settles(events), 1);
 });
 
-test("a failed prepare reopens the keys and backs off before retrying", async () => {
-  const { d, store, events, ctl } = setup({ usage: { h1: [100], h2: [0] } });
+test("a failed prepare reopens the vault and backs off before retrying", async () => {
+  const { d, store, events, ctl, spend } = setup({ orUsage: [100] });
+  spend("k1", 100);
   await tick(d, OCT);
   const orig = d.chain.prepareSettle;
   d.chain.prepareSettle = async () => { ctl.prepared++; throw new Error("simulation failed"); };
   await tick(d, NOV);
   assert.equal(ctl.prepared, 1);
-  assert.ok(events.includes("limit:h1:100")); // the freeze happened
-  assert.equal(lastLimit(events, "h1"), "limit:h1:1000"); // and was lifted within the same tick
+  assert.ok(events.includes(`limit:${OR}:100`)); // the freeze happened
+  assert.equal(lastLimit(events), `limit:${OR}:2000`); // and was lifted within the same tick
+  assert.equal(store.vault(V)!.settling, false);
   assert.equal(store.getMeta("settleRetryAfter:" + V), String(NOV + 10 * MIN));
   await tick(d, NOV + 5 * MIN);
   assert.equal(ctl.prepared, 1); // within the backoff: not retried
@@ -329,7 +435,8 @@ test("a vault registered mid-month is not settled that month", async () => {
 });
 
 test("a reconcile in flight holds the vault, so a revert cannot drop a newer settlement", async () => {
-  const { d, store, events, ctl } = setup({ usage: { h1: [100], h2: [0] }, status: "pending" });
+  const { d, store, events, ctl, spend } = setup({ orUsage: [100], status: "pending" });
+  spend("k1", 100);
   await settleVault(d, V, OCT); // pending row for 0xs
   let release!: () => void;
   const gate = new Promise<void>((r) => { release = r; });
@@ -358,7 +465,8 @@ test("a reconcile in flight holds the vault, so a revert cannot drop a newer set
 });
 
 test("a mined settlement whose row vanished is reported pending, not settled", async () => {
-  const { d, store } = setup({ usage: { h1: [100], h2: [0] } });
+  const { d, store, spend } = setup({ orUsage: [100] });
+  spend("k1", 100);
   let polls = 0;
   d.chain.settleStatus = async (tx) => {
     if (polls++ === 0) {
@@ -374,7 +482,8 @@ test("a mined settlement whose row vanished is reported pending, not settled", a
 });
 
 test("an ambiguous broadcast stays pending and is not sent twice", async () => {
-  const { d, store, events, ctl } = setup({ usage: { h1: [100], h2: [0] }, status: "pending" });
+  const { d, store, events, ctl, spend } = setup({ orUsage: [100], status: "pending" });
+  spend("k1", 100);
   await tick(d, OCT);
   const orig = d.chain.prepareSettle;
   d.chain.prepareSettle = async (v, u) => {
@@ -398,7 +507,8 @@ test("an ambiguous broadcast stays pending and is not sent twice", async () => {
 });
 
 test("a settlement unknown to the node past the age limit is cleared and retried", async () => {
-  const { d, store, events, ctl } = setup({ usage: { h1: [100], h2: [0] }, status: "pending" });
+  const { d, store, events, ctl, spend } = setup({ orUsage: [100], status: "pending" });
+  spend("k1", 100);
   let lookups = 0;
   d.chain.transactionKnown = async () => { lookups++; return ctl.known; };
   await tick(d, OCT);
@@ -415,19 +525,20 @@ test("a settlement unknown to the node past the age limit is cleared and retried
 });
 
 test("a settlement known to the node but unmined stays pending past the age limit", async () => {
-  const { d, store } = setup({ usage: { h1: [100], h2: [0] }, status: "pending" });
-  const logs: string[] = [];
-  d.log = (m) => logs.push(m);
+  const { d, store, logs, spend } = setup({ orUsage: [100], status: "pending" });
+  spend("k1", 100);
   await settleVault(d, V, OCT);
   await tick(d, OCT + 31 * MIN);
   assert.equal(store.pendingSettlement(V)!.tx, "0xs");
+  assert.equal(store.vault(V)!.settling, true);
   assert.ok(logs.some((m) => m.includes("still unmined after 31 min")));
 });
 
 test("a second settle that loses the persist race does not broadcast", async () => {
   // a second copy of the keeper module has its own in-process guard, like the CLI in another process
   const other: typeof import("../keeper.ts") = await import(new URL("../keeper.ts?process=cli", import.meta.url).href);
-  const { d, store, events, ctl } = setup({ usage: { h1: [100], h2: [0] }, status: "pending" });
+  const { d, store, events, ctl, spend } = setup({ orUsage: [100], status: "pending" });
+  spend("k1", 100);
   const orig = d.chain.prepareSettle;
   const gates: (() => void)[] = [];
   const entered: Promise<void>[] = [];
@@ -456,5 +567,6 @@ test("a second settle that loses the persist race does not broadcast", async () 
   await other.reconcilePending(d, OCT + 2 * MIN);
   assert.deepEqual(store.listSettlements().map((x) => x.tx), ["0xs"]);
   assert.equal(store.vault(V)!.period, 1);
+  assert.equal(store.vault(V)!.settling, false);
   assert.equal(store.pendingSettlement(V), undefined);
 });

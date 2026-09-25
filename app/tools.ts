@@ -28,8 +28,8 @@ export function toolGateway(d: {
   orthogonalKey: string;
   fetchFn: typeof fetch;
   makePayingFetch: PayingFetchFactory;
-  budgetUsd: (keyHash: string) => number;
-  record: (keyHash: string, api: string, path: string, priceUsd: number) => void;
+  budgetUsd: (keyId: string) => number;
+  record: (keyId: string, api: string, path: string, priceUsd: number) => void;
 }) {
   // micro USDC held by in-flight runs, per key, so parallel runs share one budget
   const reserved = new Map<string, bigint>();
@@ -71,21 +71,21 @@ export function toolGateway(d: {
     },
 
     /** One attempt only. A failed or ambiguous paid call is never retried here: the caller checks usage first. */
-    async run(keyHash: string, call: ToolCall): Promise<unknown> {
+    async run(keyId: string, call: ToolCall): Promise<unknown> {
       if (!API_SLUG.test(call.api) || !PATH.test(call.path) || call.path.includes("..")) {
         throw new Error(`invalid tool ${call.api}${call.path}`);
       }
-      const budget = d.budgetUsd(keyHash);
+      const budget = d.budgetUsd(keyId);
       if (!(budget > 0)) throw new BudgetExhausted("no yield left for tools on this key");
-      const available = BigInt(Math.floor(budget * 1e6)) - reservedFor(keyHash);
+      const available = BigInt(Math.floor(budget * 1e6)) - reservedFor(keyId);
       if (available <= 0n) throw new BudgetExhausted("this key's tool budget is held by calls in flight");
       let held = available;
-      hold(keyHash, held);
+      hold(keyId, held);
       try {
         let charged = 0n;
         const pay = d.makePayingFetch(available, (m) => {
           charged = m;
-          hold(keyHash, m - held);
+          hold(keyId, m - held);
           held = m;
         });
         const method = (call.method ?? (call.body === undefined ? "GET" : "POST")).toUpperCase();
@@ -93,7 +93,7 @@ export function toolGateway(d: {
         const tool = `${call.api}${call.path}`;
         const failedAfterPayment = (reason: string) => {
           const usd = Number(charged) / 1e6;
-          d.record(keyHash, call.api, call.path, usd);
+          d.record(keyId, call.api, call.path, usd);
           return new ToolCallFailed(`tool ${tool} failed after a payment of $${usd} was signed (${reason}); check usage before retrying`, usd);
         };
         let res: Response;
@@ -116,10 +116,10 @@ export function toolGateway(d: {
           if (charged > 0n) throw failedAfterPayment(`${res.status} ${text}`);
           throw new Error(`tool ${tool} failed: ${res.status} ${text}`);
         }
-        if (charged > 0n) d.record(keyHash, call.api, call.path, Number(charged) / 1e6);
+        if (charged > 0n) d.record(keyId, call.api, call.path, Number(charged) / 1e6);
         return await res.json();
       } finally {
-        hold(keyHash, -held);
+        hold(keyId, -held);
       }
     },
   };

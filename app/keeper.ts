@@ -1,11 +1,17 @@
 import type { Params } from "../engine/ledger.ts";
 import type { Chain, TxStatus } from "./chain.ts";
 import type { OpenRouter } from "./openrouter.ts";
-import { settledMonthKey, type Store, type KeyRow, type PendingSettlement } from "./store.ts";
-import { computeLimits, toolBudgetUsd, usageMicro, type KeyLimit } from "./limits.ts";
+import { settledMonthKey, type Store, type PendingSettlement, type SpendSnapshot } from "./store.ts";
+import { computeLimits, companyLimit, toolBudgetUsd, usageMicro, type KeyLimit } from "./limits.ts";
 
 export type KeeperDeps = {
   chain: Chain; store: Store; or: OpenRouter; params: Params; log: (msg: string) => void;
+  /** Decrypts a vault's OpenRouter key secret (secretBox(KEY_ENCRYPTION_KEY).decrypt in production). */
+  decrypt: (encrypted: string) => string;
+  /** Waits for the vault's in-flight proxy requests to finish metering, up to ms. The server sets it from the proxy. */
+  drain?: (vault: string, ms: number) => Promise<void>;
+  /** How long settlement waits for in-flight metering (default 10 s). */
+  drainMs?: number;
   /** Delay between receipt polls after sending a settlement (default 2 s). */
   waitMs?: number;
   /** Receipt polls before leaving a settlement pending for reconciliation (default 60, about 2 minutes). */
@@ -24,7 +30,9 @@ const DEFAULT_WAIT_MS = 2_000;
 const DEFAULT_WAIT_ATTEMPTS = 60;
 const DEFAULT_MAX_PENDING_MS = 30 * 60_000;
 const DEFAULT_RETRY_DELAY_MS = 10 * 60_000;
+const DEFAULT_DRAIN_MS = 10_000;
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+const noDrain = async (): Promise<void> => {};
 
 /** UTC calendar month, e.g. "2026-11". */
 export const monthOf = (ms: number): string => new Date(ms).toISOString().slice(0, 7);
@@ -43,28 +51,39 @@ const settlingVaults = new Set<string>();
 /** Whether this process is settling or reconciling the vault right now. */
 export const isSettling = (vault: string): boolean => settlingVaults.has(vault.toLowerCase());
 
-async function refreshUsage(d: KeeperDeps, keys: KeyRow[]): Promise<void> {
-  for (const k of keys) {
-    const live = await d.or.getKey(k.hash);
-    d.store.setUsage(k.hash, live.usage);
-    k.usageTotal = live.usage;
+/**
+ * Pins the company OpenRouter key's cumulative limit at its usage plus the credit open here: the backstop.
+ * With no open credit (a freeze, or the settlement snapshot) the limit is the usage itself.
+ */
+async function syncCompanyKey(d: KeeperDeps, vault: string, limits: KeyLimit[]): Promise<void> {
+  const orKey = d.store.openRouterKeyFor(vault);
+  if (!orKey) {
+    d.log(`sync ${vault}: no OpenRouter key on file, nothing to pin`);
+    return;
   }
+  const live = await d.or.getKey(orKey.hash);
+  const limit = companyLimit(live.usage, limits);
+  await d.or.setLimit(orKey.hash, limit);
+  d.store.setVaultState(vault, { orLimit: limit, orUsage: live.usage });
 }
 
 export async function syncVault(d: KeeperDeps, vault: string): Promise<KeyLimit[]> {
   if (d.store.pendingSettlement(vault)) {
-    // keys stay pinned at the usage frozen for the settlement until its receipt is seen
+    // the vault stays closed until the settlement's receipt is seen
     d.log(`sync ${vault} skipped: settlement pending`);
     return [];
+  }
+  if (d.store.vault(vault)?.settling && !settlingVaults.has(vault.toLowerCase())) {
+    // a settling flag with no pending row and no settlement in this process is left over from a crash
+    d.store.setSettling(vault, false);
+    d.log(`sync ${vault}: stale settling flag cleared`);
   }
   const frozen = await d.chain.lossPending(vault);
   const yieldUsd = Number(await d.chain.yieldOf(vault)) / 1e6;
   d.store.setVaultState(vault, { frozen, yieldUsd });
   if (frozen) d.log(`loss pending on ${vault}: keys frozen at current usage`);
-  const keys = d.store.keysForVault(vault);
-  await refreshUsage(d, keys);
-  const limits = computeLimits(yieldUsd, keys, d.params, frozen);
-  for (const l of limits) await d.or.setLimit(l.hash, l.limit);
+  const limits = computeLimits(yieldUsd, d.store.keysForVault(vault), d.params, frozen);
+  await syncCompanyKey(d, vault, limits);
   return limits;
 }
 
@@ -101,6 +120,56 @@ export async function reportAll(d: KeeperDeps, now: number = Date.now()): Promis
   d.store.setMeta("lastReport", String(now));
 }
 
+/**
+ * Compares each company key's cumulative usage on OpenRouter with the model cost recorded here since the vault
+ * was registered. Logs the drift and corrects nothing: it is the alarm for lost metering.
+ */
+export async function checkDrift(d: KeeperDeps): Promise<void> {
+  for (const v of d.store.listVaults()) {
+    const orKey = d.store.openRouterKeyFor(v.vault);
+    if (!orKey) continue;
+    try {
+      const live = await d.or.getKey(orKey.hash);
+      const recorded = d.store.totalModelCost(v.vault);
+      const drift = Math.round((live.usage - recorded) * 1e6) / 1e6;
+      d.log(`drift ${v.vault}: openrouter usage ${live.usage} recorded ${recorded} drift ${drift}`);
+    } catch (e) {
+      d.log(`drift ${v.vault} check failed: ${(e as Error).message}`);
+    }
+  }
+}
+
+/** Fills in the cost of calls whose usage never reached the proxy, through OpenRouter's generation lookup. */
+export async function resolvePendingModelCalls(d: KeeperDeps, now: number = Date.now()): Promise<void> {
+  const apiKeys = new Map<string, string | undefined>();
+  for (const row of d.store.listPendingModelCalls()) {
+    if (!apiKeys.has(row.vault)) {
+      const orKey = d.store.openRouterKeyFor(row.vault);
+      apiKeys.set(row.vault, orKey ? d.decrypt(orKey.encryptedSecret) : undefined);
+    }
+    const apiKey = apiKeys.get(row.vault);
+    if (!apiKey) {
+      d.log(`model call ${row.generationId} for ${row.vault}: no OpenRouter key on file`);
+      continue;
+    }
+    try {
+      const g = await d.or.getGeneration(row.generationId, apiKey);
+      if (g) {
+        if (d.store.resolveModelCall(row.generationId, g.totalCost)) {
+          d.log(`model call ${row.generationId} on key ${row.keyId} resolved: $${g.totalCost}`);
+        }
+        continue;
+      }
+    } catch (e) {
+      d.log(`model call ${row.generationId} lookup failed: ${(e as Error).message}`);
+    }
+    const age = now - row.at;
+    if (age >= DAY_MS) {
+      d.log(`model call ${row.generationId} on key ${row.keyId} unresolved for ${Math.round(age / 3_600_000)} h: operator attention needed`);
+    }
+  }
+}
+
 async function resync(d: KeeperDeps, vault: string, why: string): Promise<void> {
   try {
     await syncVault(d, vault);
@@ -110,7 +179,7 @@ async function resync(d: KeeperDeps, vault: string, why: string): Promise<void> 
 }
 
 /**
- * Applies a mined settlement's bookkeeping (settlement row, baselines, new period, pending row cleared,
+ * Applies a mined settlement's bookkeeping (settlement row, new period, pending row and settling flag cleared,
  * month marker) in one store transaction, then re-syncs. Returns false, applying nothing, if the pending
  * row for this tx is gone (applied or cleared by someone else).
  */
@@ -124,7 +193,7 @@ async function applySettlement(d: KeeperDeps, p: PendingSettlement): Promise<boo
   return true;
 }
 
-/** Clears a reverted settlement's row (only if it is still this tx) and reopens the keys. */
+/** Clears a reverted settlement's row (only if it is still this tx) and reopens the vault. */
 async function clearReverted(d: KeeperDeps, p: { vault: string; tx: string }): Promise<void> {
   d.store.clearPendingSettlement(p.vault, p.tx);
   d.log(`settlement ${p.tx} for ${p.vault} reverted: nothing moved`);
@@ -158,7 +227,7 @@ async function reconcileOne(d: KeeperDeps, p: PendingSettlement, now: number): P
   }
   const minutes = Math.round(age / 60_000);
   if (known) {
-    d.log(`settlement ${p.tx} for ${p.vault} still unmined after ${minutes} min: keys stay frozen`);
+    d.log(`settlement ${p.tx} for ${p.vault} still unmined after ${minutes} min: vault stays closed`);
     return "pending";
   }
   // never accepted by the node: nothing can mine, so the month rule may settle the vault again
@@ -200,9 +269,11 @@ async function waitForStatus(d: KeeperDeps, vault: string, tx: string): Promise<
 }
 
 /**
- * Freeze, re-read, sign the settlement, persist it as pending, broadcast, then wait for its receipt.
- * The bookkeeping is applied only once the receipt shows success; a settlement not yet confirmed (or whose
- * broadcast failed ambiguously) is left pending for reconcilePending and returned with pending: true.
+ * Close the vault (proxy refuses, backstop pinned at usage), drain in-flight metering, read this period's spend,
+ * sign the settlement, persist it as pending, broadcast, then wait for its receipt. The bookkeeping is applied
+ * only once the receipt shows success; a settlement not yet confirmed (or whose broadcast failed ambiguously)
+ * is left pending for reconcilePending and returned with pending: true. The vault reopens when the pending row
+ * is completed or cleared.
  */
 export async function settleVault(d: KeeperDeps, vault: string, now: number = Date.now()): Promise<SettleResult | null> {
   const key = vault.toLowerCase();
@@ -230,17 +301,20 @@ export async function settleVault(d: KeeperDeps, vault: string, now: number = Da
       d.log(`settle ${vault} skipped: loss pending`);
       return null;
     }
-    const keys = d.store.keysForVault(vault);
-    await refreshUsage(d, keys);
-    for (const k of keys) await d.or.setLimit(k.hash, k.usageTotal);
-    await refreshUsage(d, keys); // catch requests that were in flight during the freeze
-    const usage = usageMicro(keys, d.params);
-    const baselines = keys.map((k) => ({ hash: k.hash, baseline: k.usageTotal }));
+    d.store.setSettling(vault, true);
+    let usage = 0n;
+    let baselines: SpendSnapshot[] = [];
     let prepared;
     try {
+      await syncCompanyKey(d, vault, []); // the backstop closes at current usage
+      await (d.drain ?? noDrain)(vault, d.drainMs ?? DEFAULT_DRAIN_MS); // requests already past the budget check finish metering
+      const keys = d.store.keysForVault(vault);
+      usage = usageMicro(keys, d.params);
+      baselines = keys.map((k) => ({ keyId: k.id, spentUsd: k.modelSpent + k.toolSpent }));
       prepared = await d.chain.prepareSettle(vault, usage);
     } catch (e) {
-      // nothing was signed or sent: back off, and reopen the keys meanwhile
+      // nothing was signed or sent: reopen the vault now and back off
+      d.store.setSettling(vault, false);
       d.store.setMeta(retryAfterKey(vault), String(now + (d.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS)));
       d.log(`settle ${vault} failed to prepare: ${(e as Error).message}`);
       await resync(d, vault, "failed settlement");
@@ -250,7 +324,8 @@ export async function settleVault(d: KeeperDeps, vault: string, now: number = Da
     const pending: PendingSettlement = { vault: key, usageMicro: usage, baselines, tx, createdAt: now };
     if (!d.store.setPendingSettlement(vault, pending)) {
       // another settlement (e.g. from the CLI in another process) persisted first: never broadcast a second one.
-      // The signed transaction is discarded unsent, so its nonce was never consumed.
+      // The signed transaction is discarded unsent, so its nonce was never consumed. The vault stays closed
+      // until that other settlement completes or is cleared.
       const other = d.store.pendingSettlement(vault);
       d.log(`settle ${vault} not broadcast: settlement ${other?.tx ?? "(unknown)"} is already pending for this vault`);
       return other ? { usage: other.usageMicro, tx: other.tx, pending: true } : { usage, tx, pending: true };
@@ -270,7 +345,7 @@ export async function settleVault(d: KeeperDeps, vault: string, now: number = Da
       await clearReverted(d, pending);
       return null;
     }
-    d.log(`settlement ${tx} for ${vault} not confirmed yet: left pending, keys stay frozen`);
+    d.log(`settlement ${tx} for ${vault} not confirmed yet: left pending, vault stays closed`);
     return { usage, tx, pending: true };
   } finally {
     settlingVaults.delete(key);
@@ -282,9 +357,13 @@ export async function tick(d: KeeperDeps, now: number = Date.now()): Promise<voi
   ticking = true;
   try {
     await reconcilePending(d, now);
+    await resolvePendingModelCalls(d, now);
     await syncAll(d);
     const lastReport = Number(d.store.getMeta("lastReport") ?? 0);
-    if (now - lastReport >= DAY_MS) await reportAll(d, now);
+    if (now - lastReport >= DAY_MS) {
+      await reportAll(d, now);
+      await checkDrift(d);
+    }
     const month = monthOf(now);
     // a vault without a marker starts at the last month the keeper ran (this month on the first tick ever)
     const initial = d.store.getMeta("lastSettleMonth") ?? month;
@@ -309,11 +388,12 @@ export async function tick(d: KeeperDeps, now: number = Date.now()): Promise<voi
   }
 }
 
-export function toolBudgetFor(store: Store, params: Params, keyHash: string): number {
-  const key = store.keyByHash(keyHash);
-  if (!key) return 0;
+/** USDC a key may still spend on tools from the last synced state. Zero for a revoked key or a closed vault. */
+export function toolBudgetFor(store: Store, params: Params, keyId: string): number {
+  const key = store.keyById(keyId);
+  if (!key || key.revoked) return 0;
   const v = store.vault(key.vault);
-  if (!v) return 0;
-  const l = computeLimits(v.yieldUsd, store.keysForVault(key.vault), params, v.frozen).find((x) => x.hash === keyHash);
+  if (!v || v.settling) return 0;
+  const l = computeLimits(v.yieldUsd, store.keysForVault(key.vault), params, v.frozen).find((x) => x.id === keyId);
   return l ? toolBudgetUsd(l, params) : 0;
 }
