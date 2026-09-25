@@ -29,7 +29,7 @@
 1. **A vault over an unvetted yield source.** Anyone can call the factory; a fake ERC-4626 could report yield that does not exist, and we would open limits against it. Expected: `createVault` reverts for any target not on the owner's allowlist, and the API refuses to register a vault the factory did not create. Tests: Task 3 `test_createVault_revertsForTargetNotAllowed`, Task 12 `POST /api/vaults rejects a vault the factory does not know`.
 2. **A loss in the yield source before the keeper reports it.** Until `report()` runs, the Splitter's shares are valued at the stale, higher total, so limits would open against yield that is gone. Expected: the keeper detects live assets below stored assets, freezes every key at its current usage, and skips settlement for that vault. Tests: Task 9 `freezes limits when a loss is pending`, `skips settlement when a loss is pending`.
 3. **Spend racing the monthly settlement.** Requests keep landing between reading usage and calling `settle`. Expected: settlement first pins every key's limit to its current usage, re-reads usage, then settles, so nothing spent after the read goes unbilled. Test: Task 9 `settle freezes keys, re-reads usage, then settles`.
-4. **A paid tool call on a key with no yield left.** Expected: the gateway refuses before any payment is signed, and the payment cap passed to x402 never exceeds the key's remaining budget. Tests: Task 10 `refuses a run when the budget is exhausted`, `caps the x402 payment at the remaining budget`.
+4. **A paid tool call on a key with no yield left, or one that times out.** Expected: the gateway refuses before any payment is signed, the payment cap passed to x402 never exceeds the key's remaining budget, and a failed or ambiguous paid call is never retried automatically (Orthogonal's guidance: check usage before retrying). Tests: Task 10 `refuses a run when the budget is exhausted`, `caps the x402 payment at the remaining budget`, `never retries a paid call`.
 5. **Unauthenticated callers.** Expected: the MCP endpoint rejects unknown bearer tokens with 401, and every mutating API route requires the admin token. Tests: Task 12 `MCP rejects an unknown key`, `mutating routes require the admin token`.
 
 ---
@@ -2004,7 +2004,8 @@ git commit -m "Add the keeper: minute sync, daily report, monthly settle with a 
   - `type ToolHit = { api: string; path: string; method: string; description: string; priceUsd: number }`
   - `type ToolCall = { api: string; path: string; method?: string; body?: unknown; query?: Record<string, string> }`
   - `class BudgetExhausted extends Error`
-  - `toolGateway(d: { orthogonalKey: string; fetchFn: typeof fetch; makePayingFetch: PayingFetchFactory; budgetUsd: (keyHash: string) => number; record: (keyHash: string, api: string, path: string, priceUsd: number) => void })` returning `{ search(prompt: string, limit?: number): Promise<ToolHit[]>; run(keyHash: string, call: ToolCall): Promise<unknown> }`
+  - `toolGateway(d: { orthogonalKey: string; fetchFn: typeof fetch; makePayingFetch: PayingFetchFactory; budgetUsd: (keyHash: string) => number; record: (keyHash: string, api: string, path: string, priceUsd: number) => void })` returning `{ search(prompt: string, limit?: number): Promise<ToolHit[]>; details(api: string, path: string): Promise<unknown>; run(keyHash: string, call: ToolCall): Promise<unknown> }`
+  - `details` calls `POST https://api.orthogonal.com/v1/details` (free) and returns the endpoint's full parameter schema and price, so agents never guess parameter names before paying.
   - `type ToolGateway = ReturnType<typeof toolGateway>`
   - `x402PayingFetch(privateKey: `0x${string}`): PayingFetchFactory`
 
@@ -2069,6 +2070,32 @@ test("refuses a run when the budget is exhausted", async () => {
   assert.equal(paid.length, 0);
 });
 
+test("details posts api and path to the free details endpoint", async () => {
+  const calls: { url: string; body: string }[] = [];
+  const fetchFn = (async (url: string, init: RequestInit) => {
+    calls.push({ url, body: String(init.body) });
+    return new Response(JSON.stringify({ success: true, endpoint: { path: "/v1/scrapes", price: "0.005" } }), { status: 200 });
+  }) as unknown as typeof fetch;
+  const g = toolGateway({ orthogonalKey: "orth", fetchFn, makePayingFetch: () => { throw new Error("must not pay"); }, budgetUsd: () => 1, record: () => {} });
+  const out: any = await g.details("olostep", "/v1/scrapes");
+  assert.equal(calls[0].url, "https://api.orthogonal.com/v1/details");
+  assert.deepEqual(JSON.parse(calls[0].body), { api: "olostep", path: "/v1/scrapes" });
+  assert.equal(out.endpoint.price, "0.005");
+});
+
+test("never retries a paid call", async () => {
+  let attempts = 0;
+  const g = toolGateway({
+    orthogonalKey: "orth",
+    fetchFn: (async () => new Response("{}")) as unknown as typeof fetch,
+    makePayingFetch: () => (async () => { attempts++; throw new Error("socket hang up"); }) as unknown as typeof fetch,
+    budgetUsd: () => 1,
+    record: () => { throw new Error("must not record"); },
+  });
+  await assert.rejects(g.run("h1", { api: "olostep", path: "/v1/scrapes" }), /socket hang up/);
+  assert.equal(attempts, 1);
+});
+
 test("rejects paths that could escape the API", async () => {
   const { g } = gateway(1);
   await assert.rejects(g.run("h1", { api: "olostep", path: "/../admin" }), /invalid/);
@@ -2098,6 +2125,7 @@ export type ToolCall = { api: string; path: string; method?: string; body?: unkn
 export class BudgetExhausted extends Error {}
 
 const SEARCH_URL = "https://api.orthogonal.com/v1/search";
+const DETAILS_URL = "https://api.orthogonal.com/v1/details";
 const X402_BASE = "https://x402.orthogonal.com";
 const API_SLUG = /^[a-z0-9-]+$/i;
 const PATH = /^\/[A-Za-z0-9\-._~/]*$/;
@@ -2128,6 +2156,18 @@ export function toolGateway(d: {
       );
     },
 
+    async details(api: string, path: string): Promise<unknown> {
+      if (!API_SLUG.test(api) || !PATH.test(path) || path.includes("..")) throw new Error(`invalid tool ${api}${path}`);
+      const res = await d.fetchFn(DETAILS_URL, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${d.orthogonalKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ api, path }),
+      });
+      if (!res.ok) throw new Error(`Orthogonal details failed: ${res.status}`);
+      return res.json();
+    },
+
+    /** One attempt only. A failed or ambiguous paid call is never retried here: the caller checks usage first. */
     async run(keyHash: string, call: ToolCall): Promise<unknown> {
       if (!API_SLUG.test(call.api) || !PATH.test(call.path) || call.path.includes("..")) {
         throw new Error(`invalid tool ${call.api}${call.path}`);
@@ -2185,7 +2225,7 @@ git commit -m "Add the Orthogonal tool gateway with a per-key x402 payment cap"
 
 **Interfaces:**
 - Consumes: `ToolGateway`, `BudgetExhausted` (Task 10).
-- Produces: `buildMcpServer(gateway: ToolGateway, keyHash: string): McpServer` exposing tools `search_tools({ prompt, limit? })` and `run_tool({ api, path, method?, body?, query? })`.
+- Produces: `buildMcpServer(gateway: ToolGateway, keyHash: string): McpServer` exposing tools `search_tools({ prompt, limit? })`, `tool_details({ api, path })` and `run_tool({ api, path, method?, body?, query? })`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -2209,16 +2249,23 @@ async function connect(gateway: ToolGateway) {
 
 const gateway = {
   search: async (prompt: string) => [{ api: "olostep", path: "/v1/scrapes", method: "POST", description: prompt, priceUsd: 0.005 }],
+  details: async (api: string, path: string) => ({ api, path, parameters: [{ name: "url_to_scrape", in: "body", required: true }] }),
   run: async (keyHash: string, call: { api: string }) => {
     if (call.api === "broke") throw new BudgetExhausted("no yield left for tools on this key");
     return { keyHash, api: call.api };
   },
 } as unknown as ToolGateway;
 
-test("lists both tools", async () => {
+test("lists the three tools", async () => {
   const client = await connect(gateway);
   const { tools } = await client.listTools();
-  assert.deepEqual(tools.map((t) => t.name).sort(), ["run_tool", "search_tools"]);
+  assert.deepEqual(tools.map((t) => t.name).sort(), ["run_tool", "search_tools", "tool_details"]);
+});
+
+test("tool_details returns the parameter schema", async () => {
+  const client = await connect(gateway);
+  const r: any = await client.callTool({ name: "tool_details", arguments: { api: "olostep", path: "/v1/scrapes" } });
+  assert.equal(JSON.parse(r.content[0].text).parameters[0].name, "url_to_scrape");
 });
 
 test("run_tool passes the authenticated key hash", async () => {
@@ -2265,9 +2312,22 @@ export function buildMcpServer(gateway: ToolGateway, keyHash: string): McpServer
   );
 
   server.registerTool(
+    "tool_details",
+    {
+      description:
+        "Exact parameters (name, location: path, query or body) and price for one tool. " +
+        "Call this before run_tool; never guess parameter names. Free.",
+      inputSchema: { api: z.string(), path: z.string() },
+    },
+    async ({ api, path }) => text(await gateway.details(api, path)),
+  );
+
+  server.registerTool(
     "run_tool",
     {
-      description: "Run a tool found with search_tools. Paid per call from this key's yield.",
+      description:
+        "Run a tool found with search_tools, using the parameters from tool_details. Paid per call from this key's yield. " +
+        "If a call fails or times out, do not repeat it blindly.",
       inputSchema: {
         api: z.string(),
         path: z.string(),
@@ -2351,7 +2411,7 @@ async function start(customer = "0x00000000000000000000000000000000000000cc") {
       report: async () => "0x", settle: async () => "0x",
       customerOf: async (v) => (v === V ? customer : ZERO),
     },
-    gateway: { search: async () => [], run: async () => ({}) } as unknown as ToolGateway,
+    gateway: { search: async () => [], details: async () => ({}), run: async () => ({}) } as unknown as ToolGateway,
     params: HACKATHON_PARAMS,
     adminToken: "admin",
     publicConfig: { chainId: 42161 },
@@ -2954,7 +3014,7 @@ await mcp.connect(new StreamableHTTPClientTransport(new URL(`${API}/mcp`), { req
 const { tools } = await mcp.listTools();
 const fnTools = tools.map((t) => ({ type: "function", function: { name: t.name, description: t.description ?? "", parameters: t.inputSchema } }));
 const messages: any[] = [
-  { role: "system", content: "You are a research agent. Use search_tools to find a web search or scraping tool, call it with run_tool, then answer." },
+  { role: "system", content: "You are a research agent. Use search_tools to find a web search or scraping tool, read its parameters with tool_details, call it once with run_tool, then answer." },
   { role: "user", content: TASK },
 ];
 for (let turn = 0; turn < 6; turn++) {
