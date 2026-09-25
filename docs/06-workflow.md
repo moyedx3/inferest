@@ -175,86 +175,13 @@ The cap is structural: only profit reaches the Splitter.
 
 A treasury demo (ICP1) and an agent demo (ICP2), each standing on its own. Scripts below.
 
-### 6. Vault loss
-
-On a loss, `report()` **burns the Splitter's shares of that vault first**. So unsettled yield is the first-loss buffer, and principal is only hit by a loss larger than that buffer. Limits shrink with the Splitter balance on the next sync, so spend never exceeds what is backed.
-
----
-
-## What the contracts enforce
-
-| Guarantee | Enforced by |
-|---|---|
-| Principal stays in the customer's wallet | YDS shares are held by the customer; profit never raises their price per share |
-| Only yield reaches us | Only profit is minted to the Splitter; the Splitter can only redeem its own shares |
-| We take at most the yield, and at most 10% of what the customer did not use | `paid = min(usage, y)`, fee computed on-chain from leftover |
-| Yield we take goes only to our two addresses | `floatAddress`, `feeAddress` immutable in the Splitter |
-| We cannot trap funds | Withdrawal is standard ERC-4626 and needs nothing from us |
-| We are never owed money | Limits open only up to yield already in the Splitter |
-| **Not enforced:** that reported usage is honest | Usage is off-chain OpenRouter data. Bounded by yield in the Splitter. Customer can check it against per-key usage on the dashboard |
-
-### Splitter interface (sketch)
-
-```solidity
-// immutables: asset, floatAddress, feeAddress, feeBps, keeper, factory
-function settle(address vault, uint256 usage) external onlyKeeper;
-function yieldOf(address vault) external view returns (uint256);   // convertToAssets(balanceOf(vault shares))
-function customerOf(address vault) external view returns (address); // set by the factory at deploy
-```
-
----
-
-## Deployability
-
-Checked 2026-09-25 against Octant v2 core (`golemfoundation/octant-v2-core`, audited by Spearbit, Cantina and Bailsec, AGPL-3.0).
-
-- **The whole stack deploys on any EVM chain.** The strategy takes its `TokenizedStrategy` implementation address as a constructor argument, so we deploy the implementation ourselves; nothing depends on a pre-existing Octant deployment. Compiled with `evm_version = prague`; recompile for an older target if a chain requires it.
-- **Ready-made strategies:** `ERC4626Strategy` wraps any ERC-4626 vault (Morpho, Euler, Fluid, Spark savings); `AaveV3Strategy` wraps Aave v3 directly.
-- **Yield sources:** every target chain has at least one audited USDC (or USDG) source with millions in TVL. Per-chain picks are kept outside the repo.
-- **License:** our Splitter only calls the vault through its interface, so it is not a derivative of the AGPL code. Forking or modifying Octant's contracts would be.
-
-**Fallback A** applies only if a chain cannot host this stack: see decision 1.
-
----
-
-## Decisions
-
-### 1. Custody. **Decided: D, with A as fallback**
-
-| Option | How | Cost |
-|---|---|---|
-| **D. One YDS vault per customer, donation address = Splitter (chosen)** | Described above | Limits step up once per `report()`. One vault per customer. Depends on the Octant stack |
-| A. Settler holds the shares (fallback) | Deposit goes through our Settler; shares leave only via settle (yield) or withdraw after a request, freeze and final settlement, with a 24h window | Shares sit in our contract, not the customer's wallet. About one minute of spend exposed. All custom code |
-| B. Keep approval, watch it | Customer approves shares to us; worker freezes keys on revoke | Up to a day of usage exposed; "principal never moves" rests on our behavior |
-| C. Prepay each month | Customer pays expected usage up front | Breaks "pay with yield" |
-
-### 2. Principal withdrawal. **Resolved by D**
-
-Standard ERC-4626, any time, no window. The 24h request window exists only under fallback A.
-
-### 3. Splitting yield across keys. **Decided: admin-set weights, default equal**
-
-With $2,225 of credit and three keys, each gets about $742. One key's unused share does not flow to the others until the admin changes weights. Rejected: a shared pool (between syncs every key can spend the whole pool, so overshoot up to N times) and fixed dollar amounts (the admin has to guess the yield).
-
-### 4. Cap us on-chain. **Resolved by D**
-
-The cap is structural: only profit reaches the Splitter.
-
-### 5. Agents in the demo
-
-| Option | Cost |
-|---|---|
-| **A. One of the three keys is an agent (OpenClaw) (Recommended)** | Shows ICP2 in the same three minutes. An agent depositing from its own wallet is the same vault with a different depositor: say it in the pitch, do not demo it |
-| B. Separate agent-wallet flow | A second deposit, a second dashboard view. Does not fit three minutes |
-| C. Treasury only | Loses ICP2 entirely |
-
 ### 6. Vault loss. **Mostly resolved by D**
 
 YDS burns the Splitter's shares first, and limits only ever open up to the Splitter balance, so spend is always backed. Open only for fallback A.
 
 ### 7. Leftover yield. **Decided: redeposit**
 
-The Splitter deposits `leftover − fee` back into the customer's vault with the customer as receiver, so it becomes principal and compounds.
+The Splitter transfers the leftover shares, worth `leftover − fee`, to the customer, so they become principal and compound.
 
 ### 8. How often the keeper calls `report()`. **Decided: daily**
 
