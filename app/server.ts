@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
-import { createHash } from "node:crypto";
+import { sha256 } from "./crypto.ts";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -17,7 +17,7 @@ export type AppDeps = {
   adminToken: string; publicConfig: Record<string, unknown>; keeper: KeeperDeps;
 };
 
-export const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
+export { sha256 } from "./crypto.ts";
 
 const DASHBOARD = fileURLToPath(new URL("./dashboard/", import.meta.url));
 const ZERO = /^0x0{40}$/i;

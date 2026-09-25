@@ -6,7 +6,7 @@ type Hex = `0x${string}`;
 export type Config = {
   rpcUrl: string; chainId: number; usdc: Hex; target: Hex; factory: Hex; splitter: Hex;
   keeperKey: Hex; openRouterKey: string; orthogonalKey: string; toolWalletKey?: Hex;
-  adminToken: string; dbPath: string; port: number; params: Params;
+  adminToken: string; keyEncryptionKey: string; publicUrl: string; dbPath: string; port: number; params: Params;
 };
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
@@ -25,6 +25,9 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   }
   const railFee = Number(env.RAIL_FEE ?? "0");
   if (!(railFee >= 0 && railFee < 1)) throw new Error("RAIL_FEE must be in [0, 1)");
+  const keyEncryptionKey = need("KEY_ENCRYPTION_KEY");
+  if (!/^[0-9a-f]{64}$/i.test(keyEncryptionKey)) throw new Error("KEY_ENCRYPTION_KEY must be 32 bytes as 64 hex characters");
+  const port = Number(env.PORT ?? 8787);
   return {
     rpcUrl: need("RPC_URL"),
     chainId: Number(dep.chainId),
@@ -37,8 +40,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     orthogonalKey: env.ORTHOGONAL_API_KEY ?? "",
     toolWalletKey: env.TOOL_WALLET_PRIVATE_KEY ? (env.TOOL_WALLET_PRIVATE_KEY as Hex) : undefined,
     adminToken: need("ADMIN_TOKEN"),
+    keyEncryptionKey,
+    publicUrl: (env.PUBLIC_URL ?? `http://localhost:${port}`).replace(/\/+$/, ""),
     dbPath: env.DB_PATH ?? "inferest.db",
-    port: Number(env.PORT ?? 8787),
+    port,
     params: { ...HACKATHON_PARAMS, railFee },
   };
 }

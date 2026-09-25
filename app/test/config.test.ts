@@ -14,6 +14,7 @@ function envFor(depChainId: number, chainChainId: number, depTarget = "0x02", ch
   return {
     CHAIN_CONFIG: chainPath, DEPLOYMENTS: depPath, RPC_URL: "http://localhost:8545",
     KEEPER_PRIVATE_KEY: "0x05", OPENROUTER_MANAGEMENT_KEY: "or", ADMIN_TOKEN: "admin",
+    KEY_ENCRYPTION_KEY: "ab".repeat(32), PORT: "8787",
   };
 }
 
@@ -33,4 +34,19 @@ test("throws when the deployments target differs from the chain config target", 
 
 test("compares targets case-insensitively", () => {
   assert.equal(loadConfig(envFor(42161, 42161, "0xAB", "0xab")).target, "0xAB");
+});
+
+test("refuses to start without a key encryption key", () => {
+  const env = envFor(42161, 42161);
+  delete env.KEY_ENCRYPTION_KEY;
+  assert.throws(() => loadConfig(env), /missing env KEY_ENCRYPTION_KEY/);
+});
+
+test("refuses a key encryption key that is not 64 hex characters", () => {
+  assert.throws(() => loadConfig({ ...envFor(42161, 42161), KEY_ENCRYPTION_KEY: "abc" }), /64 hex/);
+});
+
+test("public url defaults to localhost on the port", () => {
+  assert.equal(loadConfig(envFor(42161, 42161)).publicUrl, "http://localhost:8787");
+  assert.equal(loadConfig({ ...envFor(42161, 42161), PUBLIC_URL: "https://inferest.example/" }).publicUrl, "https://inferest.example");
 });
