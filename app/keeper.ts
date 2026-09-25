@@ -21,6 +21,9 @@ export type KeeperDeps = {
   maxPendingMs?: number;
   /** How long a vault waits before retrying a settlement that failed to prepare (default 10 min). */
   retryDelayMs?: number;
+  /** Age of a settling flag with no pending row, held by no process here, before a sync treats it as a crash
+   *  leftover rather than another process still between its freeze and its pending row (default 15 min). */
+  staleSettlingMs?: number;
 };
 
 export type SettleResult = { usage: bigint; tx: string; pending?: true };
@@ -31,6 +34,7 @@ const DEFAULT_WAIT_ATTEMPTS = 60;
 const DEFAULT_MAX_PENDING_MS = 30 * 60_000;
 const DEFAULT_RETRY_DELAY_MS = 10 * 60_000;
 const DEFAULT_DRAIN_MS = 10_000;
+const DEFAULT_STALE_SETTLING_MS = 15 * 60_000;
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const noDrain = async (): Promise<void> => {};
 
@@ -67,14 +71,20 @@ async function syncCompanyKey(d: KeeperDeps, vault: string, limits: KeyLimit[]):
   d.store.setVaultState(vault, { orLimit: limit, orUsage: live.usage });
 }
 
-export async function syncVault(d: KeeperDeps, vault: string): Promise<KeyLimit[]> {
+export async function syncVault(d: KeeperDeps, vault: string, now: number = Date.now()): Promise<KeyLimit[]> {
   if (d.store.pendingSettlement(vault)) {
     // the vault stays closed until the settlement's receipt is seen
     d.log(`sync ${vault} skipped: settlement pending`);
     return [];
   }
-  if (d.store.vault(vault)?.settling && !settlingVaults.has(vault.toLowerCase())) {
-    // a settling flag with no pending row and no settlement in this process is left over from a crash
+  const v = d.store.vault(vault);
+  if (v?.settling && !settlingVaults.has(vault.toLowerCase())) {
+    if (now - v.settlingSince < (d.staleSettlingMs ?? DEFAULT_STALE_SETTLING_MS)) {
+      // another process (e.g. the CLI) may still be between its freeze and its pending row: leave it alone
+      d.log(`sync ${vault} skipped: settling`);
+      return [];
+    }
+    // held longer than staleSettlingMs with no pending row and no settlement in this process: a crash leftover
     d.store.setSettling(vault, false);
     d.log(`sync ${vault}: stale settling flag cleared`);
   }
@@ -143,9 +153,22 @@ export async function checkDrift(d: KeeperDeps): Promise<void> {
 export async function resolvePendingModelCalls(d: KeeperDeps, now: number = Date.now()): Promise<void> {
   const apiKeys = new Map<string, string | undefined>();
   for (const row of d.store.listPendingModelCalls()) {
+    // a vault closed for settlement is skipped: resolving into its current period here would bill a cost the
+    // settlement's snapshot never saw, and completePendingSettlement is about to bump the period out from under it
+    if (d.store.vault(row.vault)?.settling || d.store.pendingSettlement(row.vault) || settlingVaults.has(row.vault.toLowerCase())) continue;
     if (!apiKeys.has(row.vault)) {
       const orKey = d.store.openRouterKeyFor(row.vault);
-      apiKeys.set(row.vault, orKey ? d.decrypt(orKey.encryptedSecret) : undefined);
+      if (!orKey) {
+        apiKeys.set(row.vault, undefined);
+      } else {
+        try {
+          apiKeys.set(row.vault, d.decrypt(orKey.encryptedSecret));
+        } catch (e) {
+          apiKeys.set(row.vault, undefined);
+          d.log(`model call ${row.generationId} for ${row.vault}: cannot decrypt the OpenRouter key: ${(e as Error).message}`);
+          continue;
+        }
+      }
     }
     const apiKey = apiKeys.get(row.vault);
     if (!apiKey) {
@@ -301,7 +324,7 @@ export async function settleVault(d: KeeperDeps, vault: string, now: number = Da
       d.log(`settle ${vault} skipped: loss pending`);
       return null;
     }
-    d.store.setSettling(vault, true);
+    d.store.setSettling(vault, true, now);
     let usage = 0n;
     let baselines: SpendSnapshot[] = [];
     let prepared;

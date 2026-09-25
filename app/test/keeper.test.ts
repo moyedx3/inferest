@@ -208,6 +208,31 @@ test("a pending model call unresolved for a day is logged, not dropped", async (
   assert.equal(store.listPendingModelCalls().length, 1);
 });
 
+test("a vault whose OpenRouter key cannot be decrypted does not stop the keeper", async () => {
+  const { d, store, events, logs } = setup();
+  store.recordPendingModelCall({ keyId: "k1", model: "m", generationId: "gen-1" });
+  d.decrypt = () => { throw new Error("bad tag"); };
+  await tick(d, OCT);
+  assert.equal(store.listPendingModelCalls().length, 1);
+  assert.ok(logs.includes(`model call gen-1 for ${V}: cannot decrypt the OpenRouter key: bad tag`), logs.join("\n"));
+  assert.ok(events.some((e) => e.startsWith(`limit:${OR}:`))); // syncAll still ran
+});
+
+test("a pending call resolved while a settlement is open is billed in the next period", async () => {
+  const { d, store, events, ctl, spend } = setup({ orUsage: [100], status: "pending" });
+  spend("k1", 100);
+  await settleVault(d, V, OCT); // pending row for 0xs; the vault is closed
+  store.recordPendingModelCall({ keyId: "k1", model: "m", generationId: "gen-late" });
+  ctl.generations["gen-late"] = 0.4;
+  await tick(d, OCT + MIN);
+  assert.equal(store.modelCall("gen-late")!.status, "pending");
+  assert.ok(!events.some((e) => e.startsWith("gen:gen-late")));
+  ctl.status = "success";
+  await tick(d, OCT + 2 * MIN); // applies the settlement, then resolves the call into the new period
+  assert.equal(store.modelCall("gen-late")!.period, 1);
+  assert.equal(store.keyById("k1")!.modelSpent, 0.4);
+});
+
 test("overlapping ticks do not run twice", async () => {
   const { d, events } = setup();
   let release!: () => void;
@@ -278,10 +303,19 @@ test("a sync during settlement does not reopen the backstop", async () => {
 
 test("a stale settling flag is cleared by the next sync", async () => {
   const { d, store, logs } = setup();
-  store.setSettling(V, true); // e.g. the process died between the freeze and the pending row
+  store.setSettling(V, true, Date.now() - 16 * MIN); // e.g. the process died between the freeze and the pending row
   await syncVault(d, V);
   assert.equal(store.vault(V)!.settling, false);
   assert.ok(logs.some((m) => m.includes("stale settling flag cleared")));
+});
+
+test("a fresh settling flag from another process is left alone", async () => {
+  const { d, store, events, logs } = setup();
+  store.setSettling(V, true); // e.g. the CLI just froze the backstop and has not yet persisted a pending row
+  await syncVault(d, V);
+  assert.equal(store.vault(V)!.settling, true);
+  assert.ok(!events.some((e) => e.startsWith("limit:")));
+  assert.ok(logs.some((m) => m.includes(`sync ${V} skipped: settling`)));
 });
 
 test("settling an unknown vault does nothing", async () => {

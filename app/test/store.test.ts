@@ -173,12 +173,14 @@ test("the company OpenRouter key is filed per vault and never on the vault row",
 test("vault state, settling flag, settlements and meta round-trip", () => {
   const s = fresh();
   s.setVaultState(V, { frozen: true, yieldUsd: 12.5 });
-  s.setSettling(V, true);
+  s.setSettling(V, true, 123);
   assert.equal(s.vault(V)!.frozen, true);
   assert.equal(s.vault(V)!.yieldUsd, 12.5);
   assert.equal(s.vault(V)!.settling, true);
+  assert.equal(s.vault(V)!.settlingSince, 123);
   s.setSettling(V, false);
   assert.equal(s.vault(V)!.settling, false);
+  assert.equal(s.vault(V)!.settlingSince, 0);
   s.recordSettlement(V, 1_500_000n, "0xtx");
   assert.deepEqual(s.listSettlements().map((r) => [r.vault, r.usageMicro, r.tx]), [[V.toLowerCase(), "1500000", "0xtx"]]);
   s.setMeta("lastReport", "5");

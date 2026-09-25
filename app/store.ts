@@ -4,6 +4,8 @@ export type VaultRow = {
   vault: string; customer: string; label: string; period: number; frozen: boolean; yieldUsd: number;
   /** set while a settlement is in progress; the proxy refuses new requests for the vault */
   settling: boolean;
+  /** epoch ms the settling flag was set, 0 while open; lets a flag left by a crash be told apart from a fresh one */
+  settlingSince: number;
   /** the company's OpenRouter key on the Management API (an identifier, not a secret) and its last synced limit and usage */
   orKeyHash: string | null; orLimit: number; orUsage: number;
 };
@@ -113,7 +115,8 @@ export function openStore(path: string) {
 
   const toVault = (r: any): VaultRow => ({
     vault: r.vault, customer: r.customer, label: r.label, period: Number(r.period),
-    frozen: Number(r.frozen) === 1, yieldUsd: Number(r.yield_usd), settling: Number(r.settling) === 1,
+    frozen: Number(r.frozen) === 1, yieldUsd: Number(r.yield_usd), settling: Number(r.settling) > 0,
+    settlingSince: Number(r.settling),
     orKeyHash: r.or_key_hash ?? null, orLimit: Number(r.or_limit), orUsage: Number(r.or_usage),
   });
   const toKey = (r: any): KeyRow => ({
@@ -174,8 +177,10 @@ export function openStore(path: string) {
       if (s.orLimit !== undefined) db.prepare("UPDATE vaults SET or_limit = ? WHERE vault = ?").run(s.orLimit, lc(vault));
       if (s.orUsage !== undefined) db.prepare("UPDATE vaults SET or_usage = ? WHERE vault = ?").run(s.orUsage, lc(vault));
     },
-    setSettling(vault: string, settling: boolean): void {
-      db.prepare("UPDATE vaults SET settling = ? WHERE vault = ?").run(settling ? 1 : 0, lc(vault));
+    /** The settling flag doubles as its own timestamp: `now` while set, 0 while open, so a sync can tell an old
+     *  flag left by a crash apart from a fresh one another process just set. */
+    setSettling(vault: string, settling: boolean, now: number = Date.now()): void {
+      db.prepare("UPDATE vaults SET settling = ? WHERE vault = ?").run(settling ? now : 0, lc(vault));
     },
     /** Files the company's OpenRouter key: its hash for the Management API and its secret, encrypted by the caller. */
     setVaultOpenRouterKey(vault: string, hash: string, encryptedSecret: string): void {
