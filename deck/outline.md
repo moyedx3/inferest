@@ -20,3 +20,5 @@ _Content spec for design. Every number traces to [`../docs/`](../docs/) or [`../
 | 8 | Economics | A deposit of about 23x the annual AI budget covers it entirely | unit economics table | `docs/04` |
 | 9 | Target | Principal never leaves the customer's wallet | Octant YDS target architecture | `docs/03` |
 | 10 | Next | Five treasury interviews, one rail contract, one non-custodial pilot | | `hackathon/PLAN.md` |
+
+Float top-up, speaker note for slides 6 and 9: OpenRouter is prefunded by us, and settlement sends each month's usage in USDC to our float wallet. Refilling OpenRouter from that wallet is manual today, because OpenRouter has no crypto purchase API, only a hosted checkout. Production phase: a programmable card funded from the float wallet pays that checkout automatically, or an enterprise invoice removes the float entirely.

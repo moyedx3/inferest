@@ -107,7 +107,7 @@ customer wallet ──deposit──▶ ERC-4626 vault (shares stay in the custom
 ## Scope
 
 **Build (hackathon)**
-- Deposit and withdraw against an ERC-4626 USDC vault (Morpho where deployed) on a mainnet fork
+- Deposit and withdraw against an ERC-4626 USDC vault (Fluid USDC on Arbitrum One) on a mainnet fork
 - Ledger plus a worker that syncs OpenRouter key limits to accrued yield and settles each period
 - One dashboard: deposit, yield counter, issued keys
 - Time-warp demo script
