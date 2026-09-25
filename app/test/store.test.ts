@@ -105,6 +105,19 @@ test("pending model calls count as zero until resolved, and resolve once", () =>
   assert.equal(s.modelCall("g2")!.costUsd, 0.1);
 });
 
+test("a pending call resolved after its period settled is billed in the current period", () => {
+  const s = fresh();
+  s.recordPendingModelCall({ keyId: "k1", model: "m", generationId: "g1" });
+  s.startNewPeriod(V);
+  assert.equal(s.resolveModelCall("g1", 0.3), true);
+  assert.equal(s.modelCall("g1")!.period, 1);
+  assert.equal(s.keyById("k1")!.modelSpent, 0.3);
+  assert.equal(s.totalModelCost(V), 0.3);
+  s.recordPendingModelCall({ keyId: "k1", model: "m", generationId: "g2" });
+  assert.equal(s.resolveModelCall("g2", 0.2), true);
+  assert.equal(s.modelCall("g2")!.period, 1);
+});
+
 test("model and tool calls reject an unknown key", () => {
   const s = fresh();
   assert.throws(() => s.recordToolCall("nope", "a", "/b", 1), /unknown key/);

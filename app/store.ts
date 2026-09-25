@@ -43,6 +43,8 @@ CREATE TABLE IF NOT EXISTS model_calls (
   id INTEGER PRIMARY KEY, key_id TEXT NOT NULL, vault TEXT NOT NULL, period INTEGER NOT NULL,
   model TEXT NOT NULL, cost_usd REAL, generation_id TEXT NOT NULL UNIQUE, status TEXT NOT NULL, at INTEGER NOT NULL
 );
+CREATE INDEX IF NOT EXISTS model_calls_key_period ON model_calls(key_id, period, status);
+CREATE INDEX IF NOT EXISTS tool_calls_key_period ON tool_calls(key_id, period);
 CREATE TABLE IF NOT EXISTS settlements (
   id INTEGER PRIMARY KEY, vault TEXT NOT NULL, usage_micro TEXT NOT NULL, tx TEXT NOT NULL, at INTEGER NOT NULL
 );
@@ -54,23 +56,30 @@ CREATE TABLE IF NOT EXISTS pending_settlements (
 
 export const SCHEMA_VERSION = "3";
 
-/** Brings an older database up to SCHEMA_VERSION. Returns the version it ends at. */
+/** Brings an older database up to SCHEMA_VERSION. Returns the version it ends at. Runs as one transaction, so a crash midway leaves the file at its starting version instead of half migrated. */
 function migrate(db: DatabaseSync, from: string): string {
-  let at = from;
-  if (at === "1") at = "2"; // version 2 only added pending_settlements, which SCHEMA has already created
-  if (at === "2") {
-    // Version 3 files keys under our own ids and meters spend in our own rows. The old keys, tool_calls and
-    // pending_settlements rows were keyed by OpenRouter hashes that mean nothing now; they came from demos and
-    // are dropped. Vault rows and the settlement history survive, with the new vault columns added.
-    db.exec("DROP TABLE IF EXISTS keys; DROP TABLE IF EXISTS tool_calls; DROP TABLE IF EXISTS pending_settlements;");
-    const cols = ["settling INTEGER NOT NULL DEFAULT 0", "or_key_hash TEXT", "or_key_secret TEXT",
-      "or_limit REAL NOT NULL DEFAULT 0", "or_usage REAL NOT NULL DEFAULT 0"];
-    for (const col of cols) db.exec(`ALTER TABLE vaults ADD COLUMN ${col}`);
-    db.exec(SCHEMA);
-    at = "3";
+  db.exec("BEGIN");
+  try {
+    let at = from;
+    if (at === "1") at = "2"; // version 2 only added pending_settlements, which SCHEMA has already created
+    if (at === "2") {
+      // Version 3 files keys under our own ids and meters spend in our own rows. The old keys, tool_calls and
+      // pending_settlements rows were keyed by OpenRouter hashes that mean nothing now; they came from demos and
+      // are dropped. Vault rows and the settlement history survive, with the new vault columns added.
+      db.exec("DROP TABLE IF EXISTS keys; DROP TABLE IF EXISTS tool_calls; DROP TABLE IF EXISTS pending_settlements;");
+      const cols = ["settling INTEGER NOT NULL DEFAULT 0", "or_key_hash TEXT", "or_key_secret TEXT",
+        "or_limit REAL NOT NULL DEFAULT 0", "or_usage REAL NOT NULL DEFAULT 0"];
+      for (const col of cols) db.exec(`ALTER TABLE vaults ADD COLUMN ${col}`);
+      db.exec(SCHEMA);
+      at = "3";
+    }
+    if (at !== from) db.prepare("UPDATE meta SET v = ? WHERE k = ?").run(at, "schemaVersion");
+    db.exec("COMMIT");
+    return at;
+  } catch (e) {
+    db.exec("ROLLBACK");
+    throw e;
   }
-  if (at !== from) db.prepare("UPDATE meta SET v = ? WHERE k = ?").run(at, "schemaVersion");
-  return at;
 }
 
 const KEY_SELECT = `
@@ -87,7 +96,11 @@ export const settledMonthKey = (vault: string): string => `settledMonth:${lc(vau
 
 export function openStore(path: string) {
   const db = new DatabaseSync(path);
-  db.exec(SCHEMA);
+  // Bootstrap only `meta` first: an old (pre-3) database already has `keys` and `tool_calls` under their old
+  // column names, and SCHEMA now indexes those tables by their new columns. Running the full SCHEMA before
+  // migrate() has a chance to drop and recreate those tables would fail with "no such column". `meta` itself
+  // is unchanged since version 1, so creating it alone is always safe to check the version by.
+  db.exec("CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);");
 
   const versionRow = db.prepare("SELECT v FROM meta WHERE k = ?").get("schemaVersion") as { v: string } | undefined;
   if (!versionRow) {
@@ -95,6 +108,8 @@ export function openStore(path: string) {
   } else if (migrate(db, String(versionRow.v)) !== SCHEMA_VERSION) {
     throw new Error(`unsupported schema version ${versionRow.v}, expected ${SCHEMA_VERSION}`);
   }
+  // Safe now: a fresh database has no conflicting tables, and a migrated one has already been brought current.
+  db.exec(SCHEMA);
 
   const toVault = (r: any): VaultRow => ({
     vault: r.vault, customer: r.customer, label: r.label, period: Number(r.period),
@@ -210,8 +225,15 @@ export function openStore(path: string) {
       db.prepare(`${MODEL_CALL_INSERT} ON CONFLICT(generation_id) DO NOTHING`)
         .run(c.model, null, c.generationId, "pending", now, c.keyId);
     },
+    /**
+     * Resolves a pending call once its cost is known. If the vault has already moved past the call's period
+     * (a late resolution, after that period settled), the row is stamped with the vault's current period
+     * instead, so the cost is billed in the period in which it resolves rather than lost to an already-closed one.
+     */
     resolveModelCall(generationId: string, costUsd: number): boolean {
-      const r = db.prepare("UPDATE model_calls SET cost_usd = ?, status = 'recorded' WHERE generation_id = ? AND status = 'pending'")
+      const r = db.prepare(`UPDATE model_calls SET cost_usd = ?, status = 'recorded',
+        period = MAX(period, COALESCE((SELECT v.period FROM vaults v WHERE v.vault = model_calls.vault), period))
+        WHERE generation_id = ? AND status = 'pending'`)
         .run(costUsd, generationId);
       return Number(r.changes) > 0;
     },
