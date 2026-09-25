@@ -1,5 +1,4 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
-import { sha256 } from "./crypto.ts";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -10,17 +9,21 @@ import type { Store } from "./store.ts";
 import type { ToolGateway } from "./tools.ts";
 import { buildMcpServer } from "./mcp.ts";
 import { computeLimits } from "./limits.ts";
+import { sha256, newInferestKey, type SecretBox } from "./crypto.ts";
 import { syncAll, syncVault, reportAll, settleVault, markRegistered, isSettling, type KeeperDeps } from "./keeper.ts";
+
+export { sha256 } from "./crypto.ts";
 
 export type AppDeps = {
   store: Store; or: OpenRouter; chain: Chain; gateway: ToolGateway; params: Params;
   adminToken: string; publicConfig: Record<string, unknown>; keeper: KeeperDeps;
+  /** Encrypts each vault's OpenRouter key at rest. */
+  secrets: SecretBox;
 };
-
-export { sha256 } from "./crypto.ts";
 
 const DASHBOARD = fileURLToPath(new URL("./dashboard/", import.meta.url));
 const ZERO = /^0x0{40}$/i;
+const KEY_ROUTE = /^\/api\/keys\/([0-9a-f]{16})\/(weight|revoke|rotate)$/;
 
 function send(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { "Content-Type": "application/json" });
@@ -39,6 +42,7 @@ function bearer(req: IncomingMessage): string {
   return h.startsWith("Bearer ") ? h.slice(7) : "";
 }
 
+/** The public state: field by field, never a spread of a store row, so a new secret column can never leak. */
 function state(d: AppDeps) {
   return {
     config: d.publicConfig,
@@ -46,10 +50,12 @@ function state(d: AppDeps) {
       const keys = d.store.keysForVault(v.vault);
       const limits = computeLimits(v.yieldUsd, keys, d.params, v.frozen);
       return {
-        ...v,
+        vault: v.vault, customer: v.customer, label: v.label, period: v.period, frozen: v.frozen, settling: v.settling,
+        yieldUsd: v.yieldUsd, orLimit: v.orLimit, orUsage: v.orUsage, hasOpenRouterKey: v.orKeyHash !== null,
         keys: keys.map((k, i) => ({
-          hash: k.hash, name: k.name, weight: k.weight, toolSpent: k.toolSpent,
-          budget: limits[i].budget, spent: limits[i].spent, remaining: limits[i].remaining, limit: limits[i].limit,
+          id: k.id, name: k.name, weight: k.weight, revoked: k.revoked, createdAt: k.createdAt,
+          modelSpent: k.modelSpent, toolSpent: k.toolSpent,
+          budget: limits[i].budget, spent: limits[i].spent, remaining: limits[i].remaining,
         })),
       };
     }),
@@ -72,15 +78,22 @@ async function serveStatic(res: ServerResponse, pathname: string): Promise<void>
   }
 }
 
+/** Mints the vault's single OpenRouter key (limit 0 until the keeper syncs) unless it already has one. */
+async function ensureCompanyKey(d: AppDeps, vault: string): Promise<void> {
+  if (d.store.openRouterKeyFor(vault)) return;
+  const { key, hash } = await d.or.createKey(`inferest:vault:${vault.slice(2, 10)}`, 0);
+  d.store.setVaultOpenRouterKey(vault, hash, d.secrets.encrypt(key));
+}
+
 async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url ?? "/", "http://localhost");
 
   if (url.pathname === "/mcp") {
     const key = d.store.keyBySecret(sha256(bearer(req)));
-    if (!key) return send(res, 401, { error: "unknown key" });
+    if (!key || key.revoked) return send(res, 401, { error: "unknown key" });
     const body = req.method === "POST" ? await readJson(req) : undefined;
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-    const server = buildMcpServer(d.gateway, key.hash);
+    const server = buildMcpServer(d.gateway, key.id);
     res.on("close", () => { void transport.close(); void server.close(); });
     await server.connect(transport);
     await transport.handleRequest(req, res, body);
@@ -100,6 +113,7 @@ async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse): Pro
       if (!customer || ZERO.test(customer)) return send(res, 400, { error: "not a vault from our factory" });
       d.store.addVault(vault, customer, String(body.label ?? "customer"));
       markRegistered(d.store, vault); // a vault added mid-month is first settled next month
+      await ensureCompanyKey(d, vault);
       return send(res, 201, { vault, customer: customer.toLowerCase() });
     }
     if (url.pathname === "/api/keys") {
@@ -108,17 +122,29 @@ async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse): Pro
       const weight = Number(body.weight ?? 1);
       if (!(weight >= 0)) return send(res, 400, { error: "weight must be >= 0" });
       const name = String(body.name ?? "key");
-      const { key, hash } = await d.or.createKey(`inferest:${name}`, 0);
-      d.store.addKey({ hash, vault, name, weight, secretSha256: sha256(key) });
-      return send(res, 201, { key, hash });
+      const { id, secret } = newInferestKey();
+      d.store.addKey({ id, vault, name, weight, secretSha256: sha256(secret) });
+      return send(res, 201, { key: secret, id });
     }
-    const w = url.pathname.match(/^\/api\/keys\/([0-9a-zA-Z]+)\/weight$/);
-    if (w) {
-      if (!d.store.keyByHash(w[1])) return send(res, 404, { error: "unknown key" });
-      const weight = Number(body.weight);
-      if (!(weight >= 0)) return send(res, 400, { error: "weight must be >= 0" });
-      d.store.setWeight(w[1], weight);
-      return send(res, 200, { ok: true });
+    const m = url.pathname.match(KEY_ROUTE);
+    if (m) {
+      const [, id, action] = m;
+      const key = d.store.keyById(id);
+      if (!key) return send(res, 404, { error: "unknown key" });
+      if (action === "weight") {
+        const weight = Number(body.weight);
+        if (!(weight >= 0)) return send(res, 400, { error: "weight must be >= 0" });
+        d.store.setWeight(id, weight);
+        return send(res, 200, { ok: true });
+      }
+      if (action === "revoke") {
+        d.store.revokeKey(id); // already revoked is fine: the outcome is the same
+        return send(res, 200, { ok: true });
+      }
+      if (key.revoked) return send(res, 409, { error: "key is revoked" });
+      const { secret } = newInferestKey();
+      d.store.rotateKey(id, sha256(secret));
+      return send(res, 200, { key: secret, id });
     }
     if (url.pathname === "/api/admin/sync") { await syncAll(d.keeper); return send(res, 200, { ok: true }); }
     if (url.pathname === "/api/admin/report") { await reportAll(d.keeper); return send(res, 200, { ok: true }); }
@@ -138,7 +164,7 @@ async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse): Pro
       d.keeper.log(`admin clearing pending settlement ${tx} for ${vault} (${p.usageMicro} micro-USD)`);
       d.store.clearPendingSettlement(vault, tx);
       try {
-        await syncVault(d.keeper, vault); // reopen the keys now rather than on the next tick
+        await syncVault(d.keeper, vault); // reopen the vault now rather than on the next tick
       } catch (e) {
         d.keeper.log(`sync ${vault} after clearing pending settlement failed: ${(e as Error).message}`);
       }

@@ -29,7 +29,7 @@ const [cmd, arg] = process.argv.slice(2);
 switch (cmd) {
   case "serve": {
     const app = createApp({
-      store, or, chain, gateway, params: cfg.params, adminToken: cfg.adminToken, keeper,
+      store, or, chain, gateway, params: cfg.params, adminToken: cfg.adminToken, keeper, secrets: box,
       publicConfig: { chainId: cfg.chainId, factory: cfg.factory, splitter: cfg.splitter, usdc: cfg.usdc, target: cfg.target },
     });
     app.listen(cfg.port, () => console.log(`Inferest on http://localhost:${cfg.port} (MCP at /mcp)`));
