@@ -123,12 +123,15 @@ Settled 2026-09-24. Where they depart from the source notes in [`sources/`](sour
 | 7 | Custody | **One Octant YDS vault per customer; shares stay in the customer's wallet; profit is minted to our Splitter, which spends only `usage + fee`.** Fallback: our own Settler holds shares | Decided 2026-09-25. Deployability checked on every target chain. See [`docs/06-workflow.md`](docs/06-workflow.md) |
 | 8 | Settlement period | **Monthly.** In the demo, settlement is triggered by hand | Easy to change: the kernel has no notion of period length |
 | 9 | Leftover yield | **Redeposited into the customer's vault** as new principal | Matches `settle` in the kernel |
+| 10 | Key budgets | **Admin-set weights per key, default equal** | |
+| 11 | Demos | **Two separate demos**: treasury (ICP1) and agent (ICP2) | |
+| 12 | Paid tools | **Orthogonal, through an Inferest MCP server**, paid per call in USDC from the same yield | See `docs/06` decision 9 |
 
 ## Open
 
 | | Status |
 |---|---|
-| Key weights, agent key in the demo, float funding | recommendations in [`docs/06-workflow.md`](docs/06-workflow.md), not yet picked |
+| `report()` cadence, rail fee in the hackathon build | recommendations in [`docs/06-workflow.md`](docs/06-workflow.md), not yet picked |
 
 ---
 
