@@ -3,9 +3,22 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test engine/*.test.ts"
+    "test": "node --test engine/*.test.ts app/test/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "serve": "node app/cli.ts serve"
   },
   "engines": {
     "node": ">=22.6"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.1",
+    "viem": "^2.56.9",
+    "x402": "^1.2.0",
+    "x402-fetch": "^1.2.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "typescript": "^5.9.3"
   }
 }

@@ -37,8 +37,21 @@ Inferest removes both:
 | [`deck/outline.md`](deck/outline.md) | Pitch deck content spec |
 
 ```bash
-npm test    # node --test, no dependencies (Node 22.6+ for native TypeScript)
+npm install
+npm test                                  # ledger kernel + app, no network
+cd contracts && forge test                # Splitter, factory, lifecycle
+cp .env.example .env                      # then fill it in
+# deploy: export RPC_URL, DEPLOYER_PRIVATE_KEY, KEEPER, FLOAT_ADDRESS, FEE_ADDRESS, EMERGENCY_ADMIN,
+# TARGET_VAULT (and optionally FEE_BPS) in the shell first; this writes contracts/deployments/<chainId>.json,
+# which DEPLOYMENTS in .env points at
+(cd contracts && forge script script/Deploy.s.sol --rpc-url $RPC_URL --private-key $DEPLOYER_PRIVATE_KEY --broadcast --slow)
+node --env-file=.env app/cli.ts serve     # dashboard, API, MCP at /mcp
+node --env-file=.env demo/treasury.ts     # or demo/agent.ts
 ```
+
+`forge test` prints diagnostics from an upstream Foundry lint bug before its results; read the `Suite result` lines.
+
+The demos run against a Tenderly Virtual TestNet or a local anvil fork of the target chain; the demo helpers support both. A virtual testnet must keep chain id 42161: the deploy script names its file after `block.chainid`, and that name has to match `config/arbitrum-one.json`.
 
 ### Background
 
@@ -155,10 +168,10 @@ Settled 2026-09-24. Where they depart from the source notes in [`sources/`](sour
 
 ```
 engine/       ledger kernel + tests (source of truth for the math)
-app/          dashboard + limit-sync worker
-contracts/    anything on-chain beyond the vault we plug into
-hackathon/    build plan, demo script
-deck/         pitch outline
-docs/         problem, landscape, architecture, economics, risks
+contracts/    Splitter, VaultFactory (Octant YDS per customer), tests, deploy script
+app/          keeper, OpenRouter keys, Orthogonal tools over MCP, HTTP API, dashboard
+demo/         treasury and agent scripts for a forked chain
+config/       per-chain addresses
+docs/         problem, landscape, architecture, economics, risks, workflow, plans
 sources/      original Korean notes, unedited
 ```

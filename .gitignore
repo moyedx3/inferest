@@ -19,3 +19,11 @@ anvil-state.json
 
 # local-only notes, never committed
 private/
+
+# foundry
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+# app
+inferest.db
+!.env.example

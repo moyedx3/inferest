@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   open, accruedYield, creditLimit, remaining, spend, settle,
   requiredPrincipal, priceAfter, DEFAULT_PARAMS, HACKATHON_PARAMS, operatorNet,
+  spendOnTool, usageCost,
 } from "./ledger.ts";
 
 const close = (a: number, b: number, tol = 1e-6) => assert.ok(Math.abs(a - b) <= tol, `${a} != ${b}`);
@@ -120,4 +121,20 @@ test("passing the rail fee through costs us nothing", () => {
   const p = open(100_000, 1);
   const s = settle(spend(p, 500, 1.01), 1.01);
   close(operatorNet(s), s.fee);
+});
+
+test("tool spend counts toward usage and shrinks the remaining credit", () => {
+  const H = HACKATHON_PARAMS;
+  const p0 = open(100_000, 1);
+  const p1 = spendOnTool(spend(p0, 300, 1.01, H), 200, 1.01, H);
+  close(usageCost(p1, H), 500);
+  close(remaining(p1, 1.01, H), 1_000 - 500);
+  const s = settle(p1, 1.01, H);
+  close(s.usage, 500);
+  close(s.fee, 50);
+});
+
+test("tool spend cannot exceed what is left", () => {
+  const p = open(100_000, 1);
+  assert.throws(() => spendOnTool(p, 1, 1.0, HACKATHON_PARAMS), /over limit/);
 });

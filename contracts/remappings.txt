@@ -1,0 +1,4 @@
+forge-std/=lib/forge-std/src/
+@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/
+octant/=lib/octant-v2-core/src/
+lib/octant-v2-core/:src/=lib/octant-v2-core/src/
