@@ -321,19 +321,25 @@ test("a failure inside the proxy answers 500 in the error shape", async () => {
   server.close();
 });
 
-/** An SSE body that emits the given events, waiting for `gate` (if given) before the last one, or erroring at `breakAt`. */
+/** An SSE body that emits the given events, waiting for `gate` (if given) before the last one, or erroring at `breakAt`.
+ *  Pull-driven: the reader consumes each chunk before the next is produced, so an error can never discard queued chunks. */
 function sse(events: unknown[], opts: { gate?: Promise<void>; breakAt?: number } = {}) {
   const enc = new TextEncoder();
+  const frames: (string | Error)[] = [": OPENROUTER PROCESSING\n\n"];
+  for (const [i, e] of events.entries()) {
+    if (opts.breakAt === i) { frames.push(new Error("upstream reset")); break; }
+    frames.push(`data: ${JSON.stringify(e)}\n\n`);
+  }
+  if (opts.breakAt === undefined) frames.push("data: [DONE]\n\n");
+  const gateBefore = opts.gate ? events.length : -1; // the frame index of the last event
+  let next = 0;
   const stream = new ReadableStream<Uint8Array>({
-    async start(c) {
-      c.enqueue(enc.encode(": OPENROUTER PROCESSING\n\n"));
-      for (const [i, e] of events.entries()) {
-        if (opts.breakAt === i) { c.error(new Error("upstream reset")); return; }
-        if (i === events.length - 1 && opts.gate) await opts.gate;
-        c.enqueue(enc.encode(`data: ${JSON.stringify(e)}\n\n`));
-      }
-      c.enqueue(enc.encode("data: [DONE]\n\n"));
-      c.close();
+    async pull(c) {
+      if (next === gateBefore) await opts.gate;
+      if (next >= frames.length) { c.close(); return; }
+      const f = frames[next++];
+      if (f instanceof Error) c.error(f);
+      else c.enqueue(enc.encode(f));
     },
   });
   return new Response(stream, { status: 200, headers: { "content-type": "text/event-stream", "x-openrouter-trace": "leak" } });
