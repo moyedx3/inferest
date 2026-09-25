@@ -113,6 +113,14 @@ test("500 bodies do not leak URLs", async () => {
   assert.ok(!body.error.includes("secret-rpc"));
   assert.ok(body.error.includes("[url]"));
   assert.equal(store.listSettlements().length, 0);
+
+  d.chain.settle = async () => { throw new Error("boom HTTPS://secret-rpc.example/abc?key=1"); };
+  const r2 = await post(base, "/api/admin/settle", { vault: V });
+  assert.equal(r2.status, 500);
+  const body2: any = await r2.json();
+  assert.ok(!body2.error.includes("secret-rpc"));
+  assert.ok(body2.error.includes("[url]"));
+
   server.close();
 });
 

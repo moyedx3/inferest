@@ -79,9 +79,19 @@ async function render() {
       ${v.keys.map((k) => `<tr><td>${esc(k.name)}</td><td>${k.weight}</td><td>$${k.budget.toFixed(2)}</td>
         <td>$${k.spent.toFixed(4)}</td><td>$${k.toolSpent.toFixed(4)}</td><td>$${k.remaining.toFixed(2)}</td></tr>`).join("")}
       </table>
-      <button onclick="window.settle('${esc(v.vault)}')">Settle now</button>
+      <button class="settle" data-vault="${esc(v.vault)}">Settle now</button>
     </div>`).join("");
 }
-window.settle = async (vault) => { const r = await api("/api/admin/settle", { vault }); log(`settle: ${JSON.stringify(r)}`); await render(); };
+$("vaults").addEventListener("click", async (e) => {
+  const b = e.target.closest("button.settle");
+  if (!b) return;
+  try {
+    const r = await api("/api/admin/settle", { vault: b.dataset.vault });
+    log(`settle: ${JSON.stringify(r)}`);
+    await render();
+  } catch (err) {
+    log(String(err));
+  }
+});
 
 render().catch((e) => log(String(e)));

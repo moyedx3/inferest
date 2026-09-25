@@ -108,7 +108,7 @@ async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse): Pro
       d.store.addKey({ hash, vault, name, weight, secretSha256: sha256(key) });
       return send(res, 201, { key, hash });
     }
-    const w = url.pathname.match(/^\/api\/keys\/([^/]+)\/weight$/);
+    const w = url.pathname.match(/^\/api\/keys\/([0-9a-zA-Z]+)\/weight$/);
     if (w) {
       if (!d.store.keyByHash(w[1])) return send(res, 404, { error: "unknown key" });
       const weight = Number(body.weight);
@@ -131,14 +131,14 @@ async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse): Pro
 }
 
 function sanitizeError(message: string): string {
-  return message.replace(/https?:\/\/\S+/g, "[url]").slice(0, 300);
+  return message.replace(/https?:\/\/\S+/gi, "[url]").slice(0, 300);
 }
 
 export function createApp(d: AppDeps): Server {
   return createServer((req, res) => {
     route(d, req, res).catch((e) => {
       const err = e as Error;
-      console.error(err.message, err.stack);
+      console.error(err.stack ?? err.message);
       if (res.headersSent) { res.end(); return; }
       send(res, 500, { error: sanitizeError(err.message) });
     });
