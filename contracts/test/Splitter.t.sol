@@ -13,12 +13,12 @@ contract SplitterTest is BaseTest {
         vm.expectRevert(Splitter.ZeroAddress.selector);
         new Splitter(address(0), keeper, floatAddr, feeAddr, FEE_BPS);
         vm.expectRevert(Splitter.ZeroAddress.selector);
-        new Splitter(address(registry), keeper, address(0), feeAddr, FEE_BPS);
+        new Splitter(address(factory), keeper, address(0), feeAddr, FEE_BPS);
     }
 
     function test_constructor_rejectsFeeAboveCap() public {
         vm.expectRevert(abi.encodeWithSelector(Splitter.FeeTooHigh.selector, uint16(2_001)));
-        new Splitter(address(registry), keeper, floatAddr, feeAddr, 2_001);
+        new Splitter(address(factory), keeper, floatAddr, feeAddr, 2_001);
     }
 
     function test_settle_onlyKeeper() public {

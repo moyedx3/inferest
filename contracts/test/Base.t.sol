@@ -5,15 +5,9 @@ import { Test } from "forge-std/Test.sol";
 import { ERC20Mock } from "@openzeppelin/contracts/mocks/token/ERC20Mock.sol";
 import { ERC4626Mock } from "@openzeppelin/contracts/mocks/token/ERC4626Mock.sol";
 import { YieldDonatingTokenizedStrategy } from "octant/strategies/yieldDonating/YieldDonatingTokenizedStrategy.sol";
-import { ERC4626Strategy } from "octant/strategies/yieldDonating/ERC4626Strategy.sol";
 import { ITokenizedStrategy } from "octant/core/interfaces/ITokenizedStrategy.sol";
-import { IVaultRegistry } from "../src/interfaces/IVaultRegistry.sol";
 import { Splitter } from "../src/Splitter.sol";
-
-contract RegistryStub is IVaultRegistry {
-    mapping(address => address) public customerOf;
-    function set(address vault, address customer) external { customerOf[vault] = customer; }
-}
+import { VaultFactory } from "../src/VaultFactory.sol";
 
 abstract contract BaseTest is Test {
     uint16 internal constant FEE_BPS = 1_000;
@@ -22,7 +16,7 @@ abstract contract BaseTest is Test {
     ERC20Mock internal usdc;
     ERC4626Mock internal target;
     YieldDonatingTokenizedStrategy internal impl;
-    RegistryStub internal registry;
+    VaultFactory internal factory;
     Splitter internal splitter;
 
     address internal keeper = makeAddr("keeper");
@@ -30,25 +24,26 @@ abstract contract BaseTest is Test {
     address internal feeAddr = makeAddr("fee");
     address internal emergency = makeAddr("emergency");
     address internal customer = makeAddr("customer");
+    address internal owner = makeAddr("owner");
 
     function setUp() public virtual {
         usdc = new ERC20Mock();
         target = new ERC4626Mock(address(usdc));
         impl = new YieldDonatingTokenizedStrategy();
-        registry = new RegistryStub();
-        splitter = new Splitter(address(registry), keeper, floatAddr, feeAddr, FEE_BPS);
+        address predicted = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
+        splitter = new Splitter(predicted, keeper, floatAddr, feeAddr, FEE_BPS);
+        factory = new VaultFactory(owner, address(splitter), address(impl), keeper, emergency);
+        assertEq(address(factory), predicted, "factory address prediction");
+        vm.prank(owner);
+        factory.setAllowedTarget(address(target), true);
     }
 
     /// Deploys a customer vault donating to the Splitter and deposits `amount` for `who`.
     function _openVault(address who, uint256 amount) internal virtual returns (ITokenizedStrategy vault) {
-        ERC4626Strategy s = new ERC4626Strategy(
-            address(target), address(usdc), "Inferest Test", "infTEST",
-            who, keeper, emergency, address(splitter), true, address(impl)
-        );
-        vm.prank(who);
-        s.setLossLimitRatio(9_999);
-        registry.set(address(s), who);
-        vault = ITokenizedStrategy(address(s));
+        vm.startPrank(who);
+        vault = ITokenizedStrategy(factory.createVault(address(target), "Inferest Test", "infTEST"));
+        vault.acceptManagement();
+        vm.stopPrank();
         _deposit(vault, who, amount);
     }
 
