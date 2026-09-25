@@ -4,7 +4,7 @@
 //
 // Per settlement period:
 //   yield     = convertToAssets(shares) - principal
-//   usage     = credits spent / (1 - railFee)        USDC it took to buy those credits
+//   usage     = credits spent / (1 - railFee) + tool spend   USDC it took to buy those credits and tools
 //   leftover  = yield - usage                        never negative: the limit stops spend at yield
 //   fee       = ourFee * leftover                    we earn only on yield the customer did not use
 //   pull      = usage + fee                          the only shares that leave the customer's position
@@ -28,12 +28,13 @@ export const RAIL_COST = 0.05; // OpenRouter crypto purchase fee
 export type Position = {
   principal: number; // USD basis that is never spent; grows when leftover yield is returned
   shares: number;    // ERC-4626 vault shares, held in the customer's own wallet
-  spent: number;     // credits consumed this period across all keys, USD of credits
+  spent: number;     // model credits consumed this period across all keys, USD of credits
+  toolSpent: number; // paid tool calls this period, USDC (no rail fee: paid in USDC directly)
 };
 
 export function open(principal: number, pricePerShare: number): Position {
   if (principal <= 0) throw new Error("principal must be positive");
-  return { principal, shares: principal / pricePerShare, spent: 0 };
+  return { principal, shares: principal / pricePerShare, spent: 0, toolSpent: 0 };
 }
 
 // convertToAssets(shares) - principal. Floors at zero: a vault loss never creates negative yield to spend.
@@ -43,7 +44,7 @@ export function accruedYield(p: Position, pricePerShare: number): number {
 }
 
 export function usageCost(p: Position, params: Params = DEFAULT_PARAMS): number {
-  return p.spent / (1 - params.railFee);
+  return p.spent / (1 - params.railFee) + p.toolSpent;
 }
 
 // Credits this period's yield can buy in total. Opens only up to yield already earned, never ahead of it.
@@ -52,13 +53,19 @@ export function creditLimit(p: Position, pricePerShare: number, params: Params =
 }
 
 export function remaining(p: Position, pricePerShare: number, params: Params = DEFAULT_PARAMS): number {
-  return Math.max(0, creditLimit(p, pricePerShare, params) - p.spent);
+  return Math.max(0, (accruedYield(p, pricePerShare) - usageCost(p, params)) * (1 - params.railFee));
 }
 
 export function spend(p: Position, amount: number, pricePerShare: number, params: Params = DEFAULT_PARAMS): Position {
   if (amount < 0) throw new Error("amount must be non-negative");
   if (amount > remaining(p, pricePerShare, params) + 1e-9) throw new Error("over limit");
   return { ...p, spent: p.spent + amount };
+}
+
+export function spendOnTool(p: Position, usd: number, pricePerShare: number, params: Params = DEFAULT_PARAMS): Position {
+  if (usd < 0) throw new Error("amount must be non-negative");
+  if (usd * (1 - params.railFee) > remaining(p, pricePerShare, params) + 1e-9) throw new Error("over limit");
+  return { ...p, toolSpent: p.toolSpent + usd };
 }
 
 export type Settlement = {
@@ -81,7 +88,7 @@ export function settle(p: Position, pricePerShare: number, params: Params = DEFA
   const pull = usage + fee;
   const pulledShares = pull / pricePerShare;
   return {
-    position: { principal: p.principal + returned, shares: p.shares - pulledShares, spent: 0 },
+    position: { principal: p.principal + returned, shares: p.shares - pulledShares, spent: 0, toolSpent: 0 },
     yield: y, usage, leftover, fee, returned, pull, pulledShares,
   };
 }
