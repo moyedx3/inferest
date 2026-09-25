@@ -99,11 +99,19 @@ test("pending settlements round-trip", () => {
 
 test("clearing a stale tx leaves a newer pending settlement in place", () => {
   const s = fresh();
-  s.setPendingSettlement(V, { usageMicro: 1n, baselines: [], tx: "0xold" });
   s.setPendingSettlement(V, { usageMicro: 2n, baselines: [], tx: "0xnew" });
-  s.clearPendingSettlement(V, "0xold");
+  assert.equal(s.clearPendingSettlement(V, "0xold"), false);
   assert.equal(s.pendingSettlement(V)!.tx, "0xnew");
   assert.equal(s.pendingSettlement(V)!.usageMicro, 2n);
+});
+
+test("setPendingSettlement does not overwrite an existing row and reports it", () => {
+  const s = fresh();
+  assert.equal(s.setPendingSettlement(V, { usageMicro: 1n, baselines: [{ hash: "h1", baseline: 1 }], tx: "0xfirst" }), true);
+  assert.equal(s.setPendingSettlement(V.toLowerCase(), { usageMicro: 2n, baselines: [], tx: "0xsecond" }), false);
+  const p = s.pendingSettlement(V)!;
+  assert.deepEqual([p.tx, p.usageMicro, p.baselines], ["0xfirst", 1n, [{ hash: "h1", baseline: 1 }]]);
+  assert.equal(s.listPendingSettlements().length, 1);
 });
 
 test("completing a pending settlement applies it once, only for its tx", () => {

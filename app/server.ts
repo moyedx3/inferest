@@ -10,7 +10,7 @@ import type { Store } from "./store.ts";
 import type { ToolGateway } from "./tools.ts";
 import { buildMcpServer } from "./mcp.ts";
 import { computeLimits } from "./limits.ts";
-import { syncAll, reportAll, settleVault, markRegistered, type KeeperDeps } from "./keeper.ts";
+import { syncAll, syncVault, reportAll, settleVault, markRegistered, isSettling, type KeeperDeps } from "./keeper.ts";
 
 export type AppDeps = {
   store: Store; or: OpenRouter; chain: Chain; gateway: ToolGateway; params: Params;
@@ -132,10 +132,16 @@ async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse): Pro
       // manual escape hatch for a settlement the operator has confirmed will never mine
       const vault = String(body.vault ?? "").toLowerCase();
       const tx = String(body.tx ?? "");
+      if (isSettling(vault)) return send(res, 409, { error: "vault is settling" });
       const p = d.store.pendingSettlement(vault);
       if (!p || p.tx !== tx) return send(res, 404, { error: "no such pending settlement" });
       d.keeper.log(`admin clearing pending settlement ${tx} for ${vault} (${p.usageMicro} micro-USD)`);
       d.store.clearPendingSettlement(vault, tx);
+      try {
+        await syncVault(d.keeper, vault); // reopen the keys now rather than on the next tick
+      } catch (e) {
+        d.keeper.log(`sync ${vault} after clearing pending settlement failed: ${(e as Error).message}`);
+      }
       return send(res, 200, { ok: true });
     }
     return send(res, 404, { error: "not found" });

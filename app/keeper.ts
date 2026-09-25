@@ -40,6 +40,9 @@ export function markRegistered(store: Store, vault: string, now: number = Date.n
 let ticking = false;
 const settlingVaults = new Set<string>();
 
+/** Whether this process is settling or reconciling the vault right now. */
+export const isSettling = (vault: string): boolean => settlingVaults.has(vault.toLowerCase());
+
 async function refreshUsage(d: KeeperDeps, keys: KeyRow[]): Promise<void> {
   for (const k of keys) {
     const live = await d.or.getKey(k.hash);
@@ -237,7 +240,13 @@ export async function settleVault(d: KeeperDeps, vault: string, now: number = Da
     }
     const tx = prepared.hash;
     const pending: PendingSettlement = { vault: key, usageMicro: usage, baselines, tx, createdAt: now };
-    d.store.setPendingSettlement(vault, pending);
+    if (!d.store.setPendingSettlement(vault, pending)) {
+      // another settlement (e.g. from the CLI in another process) persisted first: never broadcast a second one.
+      // The signed transaction is discarded unsent, so its nonce was never consumed.
+      const other = d.store.pendingSettlement(vault);
+      d.log(`settle ${vault} not broadcast: settlement ${other?.tx ?? "(unknown)"} is already pending for this vault`);
+      return other ? { usage: other.usageMicro, tx: other.tx, pending: true } : { usage, tx, pending: true };
+    }
     try {
       await prepared.send();
     } catch (e) {

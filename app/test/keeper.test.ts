@@ -410,3 +410,38 @@ test("a settlement known to the node but unmined stays pending past the age limi
   assert.equal(store.pendingSettlement(V)!.tx, "0xs");
   assert.ok(logs.some((m) => m.includes("still unmined after 31 min")));
 });
+
+test("a second settle that loses the persist race does not broadcast", async () => {
+  // a second copy of the keeper module has its own in-process guard, like the CLI in another process
+  const other: typeof import("../keeper.ts") = await import(new URL("../keeper.ts?process=cli", import.meta.url).href);
+  const { d, store, events, ctl } = setup({ usage: { h1: [100], h2: [0] }, status: "pending" });
+  const orig = d.chain.prepareSettle;
+  const gates: (() => void)[] = [];
+  const entered: Promise<void>[] = [];
+  const arrivals: (() => void)[] = [];
+  for (let i = 0; i < 2; i++) entered.push(new Promise<void>((r) => { arrivals.push(r); }));
+  let calls = 0;
+  d.chain.prepareSettle = async (v, u) => {
+    const i = calls++;
+    const p = await orig(v, u);
+    await new Promise<void>((r) => { gates[i] = r; arrivals[i](); });
+    return p;
+  };
+  const first = settleVault(d, V, OCT); // the server's settlement: 0xs
+  const second = other.settleVault(d, V, OCT); // the CLI's: 0xs2, signed while the first is in flight
+  await Promise.all(entered);
+  gates[0]();
+  assert.deepEqual(await first, { usage: 100_000_000n, tx: "0xs", pending: true });
+  gates[1]();
+  const r2 = await second;
+  assert.equal(settles(events), 1); // exactly one broadcast
+  assert.equal(store.pendingSettlement(V)!.tx, "0xs");
+  assert.deepEqual(r2, { usage: 100_000_000n, tx: "0xs", pending: true });
+  assert.equal(store.getMeta("settleRetryAfter:" + V), undefined);
+  ctl.status = "success";
+  await reconcilePending(d, OCT + MIN);
+  await other.reconcilePending(d, OCT + 2 * MIN);
+  assert.deepEqual(store.listSettlements().map((x) => x.tx), ["0xs"]);
+  assert.equal(store.vault(V)!.period, 1);
+  assert.equal(store.pendingSettlement(V), undefined);
+});

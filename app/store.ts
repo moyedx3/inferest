@@ -152,11 +152,15 @@ export function openStore(path: string) {
     recordSettlement(vault: string, usageMicro: bigint, tx: string): void {
       insertSettlement(vault, usageMicro, tx);
     },
-    setPendingSettlement(vault: string, p: { usageMicro: bigint; baselines: Baseline[]; tx: string; createdAt?: number }): void {
-      db.prepare(`INSERT INTO pending_settlements (vault, usage_micro, baselines, tx, created_at) VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(vault) DO UPDATE SET usage_micro = excluded.usage_micro, baselines = excluded.baselines,
-          tx = excluded.tx, created_at = excluded.created_at`)
+    /**
+     * Persists a settlement about to be broadcast. Insert-only: returns false, changing nothing, when the vault
+     * already has a pending settlement (possibly from another process), so the caller must not broadcast.
+     */
+    setPendingSettlement(vault: string, p: { usageMicro: bigint; baselines: Baseline[]; tx: string; createdAt?: number }): boolean {
+      const r = db.prepare(`INSERT INTO pending_settlements (vault, usage_micro, baselines, tx, created_at) VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(vault) DO NOTHING`)
         .run(lc(vault), p.usageMicro.toString(), JSON.stringify(p.baselines), p.tx, p.createdAt ?? Date.now());
+      return Number(r.changes) === 1;
     },
     pendingSettlement(vault: string): PendingSettlement | undefined {
       const r = db.prepare("SELECT * FROM pending_settlements WHERE vault = ?").get(lc(vault));

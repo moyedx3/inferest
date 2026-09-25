@@ -176,17 +176,42 @@ test("the admin settle route reports whether the settlement is pending", async (
 });
 
 test("the admin route clears a specific pending settlement", async () => {
-  const { base, server, store } = await start();
+  const { base, server, store, d } = await start();
   await post(base, "/api/vaults", { vault: V });
+  await post(base, "/api/keys", { vault: V, name: "dev-1", weight: 1 });
   store.setPendingSettlement(V, { usageMicro: 5n, baselines: [], tx: "0xtx" });
   assert.equal((await post(base, "/api/admin/pending/clear", { vault: V, tx: "0xtx" }, "wrong")).status, 401);
   const wrongTx = await post(base, "/api/admin/pending/clear", { vault: V, tx: "0xother" });
   assert.equal(wrongTx.status, 404);
   assert.deepEqual(await wrongTx.json(), { error: "no such pending settlement" });
   assert.equal(store.pendingSettlement(V)!.tx, "0xtx");
+  const limits: number[] = [];
+  d.or.setLimit = async (_h, l) => { limits.push(l); };
   const ok = await post(base, "/api/admin/pending/clear", { vault: V, tx: "0xtx" });
   assert.equal(ok.status, 200);
+  assert.equal(limits.length, 1); // the vault was re-synced at once
   assert.equal(store.pendingSettlement(V), undefined);
   assert.equal((await post(base, "/api/admin/pending/clear", { vault: V, tx: "0xtx" })).status, 404);
+  server.close();
+});
+
+test("clearing a pending settlement is refused while the vault is settling", async () => {
+  const { base, server, store, d } = await start();
+  await post(base, "/api/vaults", { vault: V });
+  store.setPendingSettlement(V, { usageMicro: 5n, baselines: [], tx: "0xtx" });
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  let entered!: () => void;
+  const waiting = new Promise<void>((r) => { entered = r; });
+  // hold the vault in-process: the reconcile of the existing row waits on its receipt
+  d.chain.settleStatus = async () => { entered(); await gate; return "pending"; };
+  const settling = post(base, "/api/admin/settle", { vault: V });
+  await waiting;
+  const r = await post(base, "/api/admin/pending/clear", { vault: V, tx: "0xtx" });
+  assert.equal(r.status, 409);
+  assert.deepEqual(await r.json(), { error: "vault is settling" });
+  release();
+  assert.equal((await settling).status, 200);
+  assert.equal(store.pendingSettlement(V)!.tx, "0xtx");
   server.close();
 });
