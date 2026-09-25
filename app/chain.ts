@@ -1,13 +1,30 @@
-import { createPublicClient, createWalletClient, defineChain, http, parseAbi } from "viem";
+import {
+  createPublicClient, createWalletClient, defineChain, encodeFunctionData, http, keccak256, parseAbi,
+  TransactionNotFoundError, TransactionReceiptNotFoundError,
+} from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import type { Config } from "./config.ts";
+
+export type TxStatus = "success" | "reverted" | "pending";
+
+/** A settle transaction signed locally: its hash is known before anything is broadcast. */
+export type PreparedSettle = { hash: string; send: () => Promise<void> };
 
 export interface Chain {
   yieldOf(vault: string): Promise<bigint>;
   /** True when the yield source is worth less than the vault last reported: limits must freeze. */
   lossPending(vault: string): Promise<boolean>;
   report(vault: string): Promise<string>;
+  /** Sends settle and waits for the receipt: sendSettle followed by a wait. Throws if it reverts. */
   settle(vault: string, usageMicro: bigint): Promise<string>;
+  /** Simulates, prepares and signs settle without broadcasting; send() broadcasts the signed transaction. */
+  prepareSettle(vault: string, usageMicro: bigint): Promise<PreparedSettle>;
+  /** prepareSettle then send, returning the hash without waiting for the receipt. */
+  sendSettle(vault: string, usageMicro: bigint): Promise<string>;
+  /** The receipt status of a sent transaction; "pending" while no receipt exists. */
+  settleStatus(tx: string): Promise<TxStatus>;
+  /** Whether the node knows the transaction at all (mined or in its mempool). */
+  transactionKnown(tx: string): Promise<boolean>;
   customerOf(vault: string): Promise<string>;
 }
 
@@ -37,12 +54,30 @@ export function makeChain(cfg: Config): Chain {
   const account = privateKeyToAccount(cfg.keeperKey);
   const wallet = createWalletClient({ chain, account, transport: http(cfg.rpcUrl) });
 
-  async function write(address: Hex, abi: any, functionName: string, args: unknown[]): Promise<string> {
+  async function send(address: Hex, abi: any, functionName: string, args: unknown[]): Promise<Hex> {
     const { request } = await pub.simulateContract({ account, address, abi, functionName, args } as any);
-    const hash = await wallet.writeContract(request as any);
+    return wallet.writeContract(request as any);
+  }
+
+  async function write(address: Hex, abi: any, functionName: string, args: unknown[]): Promise<string> {
+    const hash = await send(address, abi, functionName, args);
     const receipt = await pub.waitForTransactionReceipt({ hash });
     if (receipt.status !== "success") throw new Error(`${functionName} reverted: ${hash}`);
     return hash;
+  }
+
+  async function prepareSettle(vault: string, usageMicro: bigint): Promise<PreparedSettle> {
+    const args = [vault as Hex, usageMicro] as const;
+    await pub.simulateContract({ account, address: cfg.splitter, abi: splitterAbi, functionName: "settle", args });
+    const data = encodeFunctionData({ abi: splitterAbi, functionName: "settle", args });
+    const request = await wallet.prepareTransactionRequest({ account, chain, to: cfg.splitter, data });
+    const serializedTransaction = await wallet.signTransaction(request as any);
+    return {
+      hash: keccak256(serializedTransaction),
+      async send() {
+        await wallet.sendRawTransaction({ serializedTransaction });
+      },
+    };
   }
 
   return {
@@ -63,6 +98,30 @@ export function makeChain(cfg: Config): Chain {
     },
     report: (vault) => write(vault as Hex, strategyAbi, "report", []),
     settle: (vault, usageMicro) => write(cfg.splitter, splitterAbi, "settle", [vault, usageMicro]),
+    prepareSettle,
+    async sendSettle(vault, usageMicro) {
+      const prepared = await prepareSettle(vault, usageMicro);
+      await prepared.send();
+      return prepared.hash;
+    },
+    async settleStatus(tx) {
+      try {
+        const receipt = await pub.getTransactionReceipt({ hash: tx as Hex });
+        return receipt.status === "success" ? "success" : "reverted";
+      } catch (e) {
+        if (e instanceof TransactionReceiptNotFoundError) return "pending";
+        throw e;
+      }
+    },
+    async transactionKnown(tx) {
+      try {
+        await pub.getTransaction({ hash: tx as Hex });
+        return true;
+      } catch (e) {
+        if (e instanceof TransactionNotFoundError) return false;
+        throw e;
+      }
+    },
     customerOf: (vault) =>
       pub.readContract({ address: cfg.factory, abi: factoryAbi, functionName: "customerOf", args: [vault as Hex] }),
   };

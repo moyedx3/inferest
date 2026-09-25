@@ -22,6 +22,8 @@ async function start(customer = "0x00000000000000000000000000000000000000cc") {
     chain: {
       yieldOf: async () => 0n, lossPending: async () => false,
       report: async () => "0x", settle: async () => "0x",
+      prepareSettle: async () => ({ hash: "0x", send: async () => {} }), sendSettle: async () => "0x",
+      settleStatus: async () => "success" as const, transactionKnown: async () => true,
       customerOf: async (v) => (v === V ? customer : ZERO),
     },
     gateway: { search: async () => [], details: async () => ({}), run: async () => ({}) } as unknown as ToolGateway,
@@ -30,7 +32,7 @@ async function start(customer = "0x00000000000000000000000000000000000000cc") {
     publicConfig: { chainId: 42161 },
     keeper: undefined as unknown as AppDeps["keeper"],
   };
-  d.keeper = { chain: d.chain, store, or: d.or, params: d.params, log: () => {} };
+  d.keeper = { chain: d.chain, store, or: d.or, params: d.params, log: () => {}, sleep: async () => {} };
   const server = createApp(d);
   await new Promise<void>((r) => server.listen(0, r));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -106,7 +108,7 @@ test("settle rejects an unknown vault with 404", async () => {
 test("500 bodies do not leak URLs", async () => {
   const { base, server, store, d } = await start();
   await post(base, "/api/vaults", { vault: V });
-  d.chain.settle = async () => { throw new Error("boom https://secret-rpc.example/abc?key=1"); };
+  d.chain.prepareSettle = async () => { throw new Error("boom https://secret-rpc.example/abc?key=1"); };
   const r = await post(base, "/api/admin/settle", { vault: V });
   assert.equal(r.status, 500);
   const body: any = await r.json();
@@ -114,7 +116,7 @@ test("500 bodies do not leak URLs", async () => {
   assert.ok(body.error.includes("[url]"));
   assert.equal(store.listSettlements().length, 0);
 
-  d.chain.settle = async () => { throw new Error("boom HTTPS://secret-rpc.example/abc?key=1"); };
+  d.chain.prepareSettle = async () => { throw new Error("boom HTTPS://secret-rpc.example/abc?key=1"); };
   const r2 = await post(base, "/api/admin/settle", { vault: V });
   assert.equal(r2.status, 500);
   const body2: any = await r2.json();
@@ -139,5 +141,77 @@ test("weight change on a known key updates it", async () => {
   const r = await post(base, "/api/keys/h1/weight", { weight: 2 });
   assert.equal(r.status, 200);
   assert.equal(store.keyByHash("h1")!.weight, 2);
+  server.close();
+});
+
+test("registering a vault marks it settled for the current month", async () => {
+  const { base, server, store } = await start();
+  await post(base, "/api/vaults", { vault: V });
+  assert.equal(store.getMeta("settledMonth:" + V), new Date().toISOString().slice(0, 7));
+  server.close();
+});
+
+test("state exposes pending settlements", async () => {
+  const { base, server, store } = await start();
+  await post(base, "/api/vaults", { vault: V });
+  store.setPendingSettlement(V, { usageMicro: 12_345_678_901_234n, baselines: [], tx: "0xtx" });
+  const state: any = await (await fetch(base + "/api/state")).json();
+  assert.equal(state.pendingSettlements.length, 1);
+  const p = state.pendingSettlements[0];
+  assert.deepEqual([p.vault, p.usageMicro, p.tx, typeof p.createdAt], [V, "12345678901234", "0xtx", "number"]);
+  assert.equal("baselines" in p, false);
+  server.close();
+});
+
+test("the admin settle route reports whether the settlement is pending", async () => {
+  const { base, server, d } = await start();
+  await post(base, "/api/vaults", { vault: V });
+  const r = await post(base, "/api/admin/settle", { vault: V });
+  assert.equal(r.status, 200);
+  assert.deepEqual(await r.json(), { usageMicro: "0", tx: "0x", pending: false });
+  d.chain.settleStatus = async () => "pending";
+  const r2 = await post(base, "/api/admin/settle", { vault: V });
+  assert.deepEqual(await r2.json(), { usageMicro: "0", tx: "0x", pending: true });
+  server.close();
+});
+
+test("the admin route clears a specific pending settlement", async () => {
+  const { base, server, store, d } = await start();
+  await post(base, "/api/vaults", { vault: V });
+  await post(base, "/api/keys", { vault: V, name: "dev-1", weight: 1 });
+  store.setPendingSettlement(V, { usageMicro: 5n, baselines: [], tx: "0xtx" });
+  assert.equal((await post(base, "/api/admin/pending/clear", { vault: V, tx: "0xtx" }, "wrong")).status, 401);
+  const wrongTx = await post(base, "/api/admin/pending/clear", { vault: V, tx: "0xother" });
+  assert.equal(wrongTx.status, 404);
+  assert.deepEqual(await wrongTx.json(), { error: "no such pending settlement" });
+  assert.equal(store.pendingSettlement(V)!.tx, "0xtx");
+  const limits: number[] = [];
+  d.or.setLimit = async (_h, l) => { limits.push(l); };
+  const ok = await post(base, "/api/admin/pending/clear", { vault: V, tx: "0xtx" });
+  assert.equal(ok.status, 200);
+  assert.equal(limits.length, 1); // the vault was re-synced at once
+  assert.equal(store.pendingSettlement(V), undefined);
+  assert.equal((await post(base, "/api/admin/pending/clear", { vault: V, tx: "0xtx" })).status, 404);
+  server.close();
+});
+
+test("clearing a pending settlement is refused while the vault is settling", async () => {
+  const { base, server, store, d } = await start();
+  await post(base, "/api/vaults", { vault: V });
+  store.setPendingSettlement(V, { usageMicro: 5n, baselines: [], tx: "0xtx" });
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  let entered!: () => void;
+  const waiting = new Promise<void>((r) => { entered = r; });
+  // hold the vault in-process: the reconcile of the existing row waits on its receipt
+  d.chain.settleStatus = async () => { entered(); await gate; return "pending"; };
+  const settling = post(base, "/api/admin/settle", { vault: V });
+  await waiting;
+  const r = await post(base, "/api/admin/pending/clear", { vault: V, tx: "0xtx" });
+  assert.equal(r.status, 409);
+  assert.deepEqual(await r.json(), { error: "vault is settling" });
+  release();
+  assert.equal((await settling).status, 200);
+  assert.equal(store.pendingSettlement(V)!.tx, "0xtx");
   server.close();
 });
