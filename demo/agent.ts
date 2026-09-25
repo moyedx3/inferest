@@ -31,6 +31,8 @@ for (let turn = 0; turn < 6; turn++) {
     console.log(`   tool: ${call.function.name} ${call.function.arguments.slice(0, 80)}`);
     const out: any = await mcp.callTool({ name: call.function.name, arguments: JSON.parse(call.function.arguments || "{}") });
     messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(out.content).slice(0, 6_000) });
+    const preview = (out.content ?? []).map((c: any) => c.text ?? "").join(" ").replace(/\s+/g, " ").slice(0, 160);
+    console.log(out.isError ? `   error: ${preview}` : `   result: ${preview}`);
   }
 }
 await mcp.close();

@@ -1,7 +1,5 @@
-import { wrapFetchWithPayment } from "x402-fetch";
-import { selectPaymentRequirements } from "x402/client";
-import { createWalletClient, http } from "viem";
-import { base } from "viem/chains";
+import { wrapFetchWithPayment, x402Client } from "@x402/fetch";
+import { ExactEvmScheme } from "@x402/evm";
 import { privateKeyToAccount } from "viem/accounts";
 
 export type PayingFetchFactory = (maxMicro: bigint, onAmount: (micro: bigint) => void) => typeof fetch;
@@ -125,15 +123,25 @@ export function toolGateway(d: {
 
 export type ToolGateway = ReturnType<typeof toolGateway>;
 
-/** Real x402 payments in USDC on Base from our tool wallet, capped per call. */
+const BASE_NETWORK = "eip155:8453";
+const BASE_USDC = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+
+/** Real x402 (protocol version 2) payments in USDC on Base from our tool wallet, capped per call. */
 export function x402PayingFetch(privateKey: `0x${string}`): PayingFetchFactory {
-  const wallet = createWalletClient({ account: privateKeyToAccount(privateKey), chain: base, transport: http() });
-  return (maxMicro, onAmount) =>
-    wrapFetchWithPayment(fetch, wallet as any, maxMicro, (reqs: any, network: any, scheme: any) => {
-      const chosen = selectPaymentRequirements(reqs, network, scheme);
-      const amount = BigInt(chosen.maxAmountRequired);
-      // x402-fetch checks the cap after this selector and throws unsigned; report only amounts it will sign
-      if (amount <= maxMicro) onAmount(amount);
-      return chosen;
-    }) as unknown as typeof fetch;
+  const scheme = new ExactEvmScheme(privateKeyToAccount(privateKey));
+  return (maxMicro, onAmount) => {
+    const client = new x402Client()
+      .register(BASE_NETWORK, scheme)
+      .setSpendControls(false) // the cap below is the key's remaining budget, not the library's default $1
+      .registerPolicy((_version, reqs) =>
+        reqs.filter((r) => r.scheme === "exact" && r.network === BASE_NETWORK && r.asset.toLowerCase() === BASE_USDC.toLowerCase()),
+      )
+      .onBeforePaymentCreation(async ({ selectedRequirements }) => {
+        const amount = BigInt(selectedRequirements.amount);
+        // this hook runs before signing and an abort throws unsigned; report only amounts that will be signed
+        if (amount > maxMicro) return { abort: true, reason: `price ${amount} exceeds the cap of ${maxMicro} micro USDC` };
+        onAmount(amount);
+      });
+    return wrapFetchWithPayment(fetch, client) as typeof fetch;
+  };
 }
