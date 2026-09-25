@@ -15,7 +15,7 @@ async function start(customer = "0x00000000000000000000000000000000000000cc") {
   const d: AppDeps = {
     store,
     or: {
-      createKey: async (name) => { created.push(name); return { key: "sk-or-v1-secret", hash: "h1" }; },
+      createKey: async (name) => { created.push(name); return { key: "sk-or-v1-company", hash: "orhash" }; },
       getKey: async (h) => ({ hash: h, usage: 0, limit: 0, disabled: false }),
       setLimit: async () => {},
       deleteKey: async () => {},
@@ -32,9 +32,10 @@ async function start(customer = "0x00000000000000000000000000000000000000cc") {
     params: HACKATHON_PARAMS,
     adminToken: "admin",
     publicConfig: { chainId: 42161 },
+    secrets: { encrypt: (p) => `enc:${p}`, decrypt: (e) => e.replace(/^enc:/, "") },
     keeper: undefined as unknown as AppDeps["keeper"],
   };
-  d.keeper = { chain: d.chain, store, or: d.or, params: d.params, log: () => {}, sleep: async () => {} };
+  d.keeper = { chain: d.chain, store, or: d.or, params: d.params, log: () => {}, sleep: async () => {}, decrypt: d.secrets.decrypt };
   const server = createApp(d);
   await new Promise<void>((r) => server.listen(0, r));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -44,6 +45,13 @@ async function start(customer = "0x00000000000000000000000000000000000000cc") {
 const post = (base: string, path: string, body: unknown, token = "admin") =>
   fetch(base + path, { method: "POST", headers: { "Content-Type": "application/json", "x-admin-token": token }, body: JSON.stringify(body) });
 
+const mcpList = (base: string, bearer: string) =>
+  fetch(base + "/mcp", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${bearer}`, "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+  });
+
 test("mutating routes require the admin token", async () => {
   const { base, server } = await start();
   assert.equal((await post(base, "/api/vaults", { vault: V }, "wrong")).status, 401);
@@ -52,23 +60,52 @@ test("mutating routes require the admin token", async () => {
 });
 
 test("POST /api/vaults rejects a vault the factory does not know", async () => {
-  const { base, server } = await start();
+  const { base, server, created } = await start();
   const r = await post(base, "/api/vaults", { vault: "0x00000000000000000000000000000000000000bb" });
   assert.equal(r.status, 400);
+  assert.equal(created.length, 0);
   server.close();
 });
 
-test("registering a vault and a key returns the secret once and stores only its hash", async () => {
+test("registering a vault creates its company OpenRouter key once and files it encrypted", async () => {
   const { base, server, store, created } = await start();
+  const r = await post(base, "/api/vaults", { vault: V, label: "Treasury" });
+  assert.equal(r.status, 201);
+  assert.deepEqual(await r.json(), { vault: V, customer: "0x00000000000000000000000000000000000000cc" });
+  assert.deepEqual(created, ["inferest:vault:00000000"]);
+  assert.deepEqual(store.openRouterKeyFor(V), { hash: "orhash", encryptedSecret: "enc:sk-or-v1-company" });
   assert.equal((await post(base, "/api/vaults", { vault: V, label: "Treasury" })).status, 201);
+  assert.equal(created.length, 1); // registering again does not mint a second key
+  const state = await (await fetch(base + "/api/state")).text();
+  assert.ok(!state.includes("sk-or-v1-company"));
+  assert.ok(!state.includes("enc:"));
+  assert.equal(JSON.parse(state).vaults[0].hasOpenRouterKey, true);
+  server.close();
+});
+
+test("creating a key returns an sk-inf secret once and stores only its hash", async () => {
+  const { base, server, store, created } = await start();
+  await post(base, "/api/vaults", { vault: V, label: "Treasury" });
   const r = await post(base, "/api/keys", { vault: V, name: "dev-1", weight: 1 });
   assert.equal(r.status, 201);
-  assert.deepEqual(await r.json(), { key: "sk-or-v1-secret", hash: "h1" });
-  assert.equal(created[0], "inferest:dev-1");
-  assert.equal(store.keyBySecret(sha256("sk-or-v1-secret"))!.hash, "h1");
+  const body: any = await r.json();
+  assert.match(body.key, /^sk-inf-[A-Za-z0-9_-]{32}$/);
+  assert.match(body.id, /^[0-9a-f]{16}$/);
+  assert.equal(store.keyBySecret(sha256(body.key))!.id, body.id);
+  assert.equal(created.length, 1); // no OpenRouter key per developer any more
   const state: any = await (await fetch(base + "/api/state")).json();
-  assert.equal(state.vaults[0].keys[0].name, "dev-1");
-  assert.ok(!JSON.stringify(state).includes("sk-or-v1-secret"));
+  const k = state.vaults[0].keys[0];
+  assert.equal(k.name, "dev-1");
+  assert.equal(k.id, body.id);
+  assert.equal(k.revoked, false);
+  assert.deepEqual([k.modelSpent, k.toolSpent, k.spent], [0, 0, 0]);
+  assert.ok(!JSON.stringify(state).includes(body.key));
+  server.close();
+});
+
+test("creating a key for an unknown vault returns 404", async () => {
+  const { base, server } = await start();
+  assert.equal((await post(base, "/api/keys", { vault: V, name: "x", weight: 1 })).status, 404);
   server.close();
 });
 
@@ -81,12 +118,17 @@ test("negative weights are rejected", async () => {
 
 test("MCP rejects an unknown key", async () => {
   const { base, server } = await start();
-  const r = await fetch(base + "/mcp", {
-    method: "POST",
-    headers: { Authorization: "Bearer nope", "Content-Type": "application/json", Accept: "application/json, text/event-stream" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
-  });
-  assert.equal(r.status, 401);
+  assert.equal((await mcpList(base, "nope")).status, 401);
+  server.close();
+});
+
+test("MCP rejects a revoked key", async () => {
+  const { base, server } = await start();
+  await post(base, "/api/vaults", { vault: V });
+  const { key, id } = await (await post(base, "/api/keys", { vault: V, name: "dev-1", weight: 1 })).json();
+  assert.notEqual((await mcpList(base, key)).status, 401);
+  assert.equal((await post(base, `/api/keys/${id}/revoke`, {})).status, 200);
+  assert.equal((await mcpList(base, key)).status, 401);
   server.close();
 });
 
@@ -128,21 +170,49 @@ test("500 bodies do not leak URLs", async () => {
   server.close();
 });
 
-test("weight change on an unknown key returns 404", async () => {
+test("weight, revoke and rotate on an unknown key return 404", async () => {
   const { base, server } = await start();
-  const r = await post(base, "/api/keys/deadbeef/weight", { weight: 2 });
-  assert.equal(r.status, 404);
-  assert.deepEqual(await r.json(), { error: "unknown key" });
+  for (const action of ["weight", "revoke", "rotate"]) {
+    const r = await post(base, `/api/keys/deadbeefdeadbeef/${action}`, { weight: 2 });
+    assert.equal(r.status, 404, action);
+    assert.deepEqual(await r.json(), { error: "unknown key" });
+  }
   server.close();
 });
 
 test("weight change on a known key updates it", async () => {
   const { base, server, store } = await start();
   await post(base, "/api/vaults", { vault: V });
-  await post(base, "/api/keys", { vault: V, name: "dev-1", weight: 1 });
-  const r = await post(base, "/api/keys/h1/weight", { weight: 2 });
+  const { id } = await (await post(base, "/api/keys", { vault: V, name: "dev-1", weight: 1 })).json();
+  const r = await post(base, `/api/keys/${id}/weight`, { weight: 2 });
   assert.equal(r.status, 200);
-  assert.equal(store.keyByHash("h1")!.weight, 2);
+  assert.equal(store.keyById(id)!.weight, 2);
+  assert.equal((await post(base, `/api/keys/${id}/weight`, { weight: -3 })).status, 400);
+  server.close();
+});
+
+test("rotate issues a new secret on the same key; revoke keeps the row and refuses further rotation", async () => {
+  const { base, server, store } = await start();
+  await post(base, "/api/vaults", { vault: V });
+  const { key, id } = await (await post(base, "/api/keys", { vault: V, name: "dev-1", weight: 1 })).json();
+  const rot = await post(base, `/api/keys/${id}/rotate`, {});
+  assert.equal(rot.status, 200);
+  const rotated: any = await rot.json();
+  assert.equal(rotated.id, id);
+  assert.match(rotated.key, /^sk-inf-/);
+  assert.notEqual(rotated.key, key);
+  assert.equal(store.keyBySecret(sha256(key)), undefined);
+  assert.equal(store.keyBySecret(sha256(rotated.key))!.id, id);
+  const rev = await post(base, `/api/keys/${id}/revoke`, {});
+  assert.equal(rev.status, 200);
+  assert.deepEqual(await rev.json(), { ok: true });
+  assert.equal(store.keyById(id)!.revoked, true);
+  assert.equal((await post(base, `/api/keys/${id}/revoke`, {})).status, 200); // idempotent
+  const again = await post(base, `/api/keys/${id}/rotate`, {});
+  assert.equal(again.status, 409);
+  assert.deepEqual(await again.json(), { error: "key is revoked" });
+  const state: any = await (await fetch(base + "/api/state")).json();
+  assert.equal(state.vaults[0].keys[0].revoked, true);
   server.close();
 });
 
@@ -153,11 +223,13 @@ test("registering a vault marks it settled for the current month", async () => {
   server.close();
 });
 
-test("state exposes pending settlements", async () => {
+test("state exposes pending settlements and the settling flag", async () => {
   const { base, server, store } = await start();
   await post(base, "/api/vaults", { vault: V });
+  store.setSettling(V, true);
   store.setPendingSettlement(V, { usageMicro: 12_345_678_901_234n, baselines: [], tx: "0xtx" });
   const state: any = await (await fetch(base + "/api/state")).json();
+  assert.equal(state.vaults[0].settling, true);
   assert.equal(state.pendingSettlements.length, 1);
   const p = state.pendingSettlements[0];
   assert.deepEqual([p.vault, p.usageMicro, p.tx, typeof p.createdAt], [V, "12345678901234", "0xtx", "number"]);

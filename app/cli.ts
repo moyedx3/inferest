@@ -1,4 +1,5 @@
 import { loadConfig } from "./config.ts";
+import { secretBox } from "./crypto.ts";
 import { openStore } from "./store.ts";
 import { makeChain } from "./chain.ts";
 import { openRouter } from "./openrouter.ts";
@@ -10,7 +11,11 @@ const cfg = loadConfig();
 const store = openStore(cfg.dbPath);
 const chain = makeChain(cfg);
 const or = openRouter(cfg.openRouterKey);
-const keeper: KeeperDeps = { chain, store, or, params: cfg.params, log: (m) => console.log(new Date().toISOString(), m) };
+const box = secretBox(cfg.keyEncryptionKey);
+const keeper: KeeperDeps = {
+  chain, store, or, params: cfg.params, decrypt: box.decrypt,
+  log: (m) => console.log(new Date().toISOString(), m),
+};
 const noWallet: PayingFetchFactory = () => { throw new Error("TOOL_WALLET_PRIVATE_KEY is not set"); };
 const gateway = toolGateway({
   orthogonalKey: cfg.orthogonalKey,
@@ -24,7 +29,7 @@ const [cmd, arg] = process.argv.slice(2);
 switch (cmd) {
   case "serve": {
     const app = createApp({
-      store, or, chain, gateway, params: cfg.params, adminToken: cfg.adminToken, keeper,
+      store, or, chain, gateway, params: cfg.params, adminToken: cfg.adminToken, keeper, secrets: box,
       publicConfig: { chainId: cfg.chainId, factory: cfg.factory, splitter: cfg.splitter, usdc: cfg.usdc, target: cfg.target },
     });
     app.listen(cfg.port, () => console.log(`Inferest on http://localhost:${cfg.port} (MCP at /mcp)`));
