@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS settlements (
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
 `;
 
+export const SCHEMA_VERSION = "1";
+
 const KEY_SELECT = `
 SELECT k.hash, k.vault, k.name, k.weight, k.baseline, k.usage_total AS usageTotal,
   COALESCE((SELECT SUM(t.price) FROM tool_calls t WHERE t.key_hash = k.hash AND t.period = v.period), 0) AS toolSpent
@@ -34,6 +36,13 @@ const lc = (a: string) => a.toLowerCase();
 export function openStore(path: string) {
   const db = new DatabaseSync(path);
   db.exec(SCHEMA);
+
+  const versionRow = db.prepare("SELECT v FROM meta WHERE k = ?").get("schemaVersion") as { v: string } | undefined;
+  if (!versionRow) {
+    db.prepare("INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").run("schemaVersion", SCHEMA_VERSION);
+  } else if (String(versionRow.v) !== SCHEMA_VERSION) {
+    throw new Error(`unsupported schema version ${versionRow.v}, expected ${SCHEMA_VERSION}`);
+  }
 
   const toVault = (r: any): VaultRow => ({
     vault: r.vault, customer: r.customer, label: r.label, period: Number(r.period),
@@ -113,6 +122,9 @@ export function openStore(path: string) {
     },
     setMeta(k: string, v: string): void {
       db.prepare("INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").run(k, v);
+    },
+    close(): void {
+      db.close();
     },
   };
 }

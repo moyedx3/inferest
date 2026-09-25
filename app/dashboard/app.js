@@ -14,6 +14,7 @@ const erc20Abi = parseAbi(["function approve(address spender, uint256 amount) re
 
 const $ = (id) => document.getElementById(id);
 const log = (m) => { $("log").textContent += m + "\n"; };
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 let wallet, pub, account, cfg, myVault;
 
 async function api(path, body) {
@@ -72,15 +73,25 @@ async function render() {
   cfg = s.config;
   $("vaults").innerHTML = s.vaults.map((v) => `
     <div class="card">
-      <h3>${v.label} <span class="muted">${v.vault}</span></h3>
+      <h3>${esc(v.label)} <span class="muted">${esc(v.vault)}</span></h3>
       <p>Yield in Splitter: <b>$${v.yieldUsd.toFixed(2)}</b> ${v.frozen ? "<b>(frozen: loss pending)</b>" : ""} &middot; period ${v.period}</p>
       <table><tr><th>Key</th><th>Weight</th><th>Budget</th><th>Spent</th><th>Tools</th><th>Left</th></tr>
-      ${v.keys.map((k) => `<tr><td>${k.name}</td><td>${k.weight}</td><td>$${k.budget.toFixed(2)}</td>
+      ${v.keys.map((k) => `<tr><td>${esc(k.name)}</td><td>${k.weight}</td><td>$${k.budget.toFixed(2)}</td>
         <td>$${k.spent.toFixed(4)}</td><td>$${k.toolSpent.toFixed(4)}</td><td>$${k.remaining.toFixed(2)}</td></tr>`).join("")}
       </table>
-      <button onclick="window.settle('${v.vault}')">Settle now</button>
+      <button class="settle" data-vault="${esc(v.vault)}">Settle now</button>
     </div>`).join("");
 }
-window.settle = async (vault) => { const r = await api("/api/admin/settle", { vault }); log(`settle: ${JSON.stringify(r)}`); await render(); };
+$("vaults").addEventListener("click", async (e) => {
+  const b = e.target.closest("button.settle");
+  if (!b) return;
+  try {
+    const r = await api("/api/admin/settle", { vault: b.dataset.vault });
+    log(`settle: ${JSON.stringify(r)}`);
+    await render();
+  } catch (err) {
+    log(String(err));
+  }
+});
 
 render().catch((e) => log(String(e)));

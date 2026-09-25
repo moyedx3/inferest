@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { rmSync } from "node:fs";
 import { openStore } from "../store.ts";
 
 const V = "0xAbC0000000000000000000000000000000000001";
@@ -67,4 +70,21 @@ test("startNewPeriod accepts explicit baselines", () => {
 test("recordToolCall rejects an unknown key", () => {
   const s = fresh();
   assert.throws(() => s.recordToolCall("nope", "a", "/b", 1), /unknown key nope/);
+});
+
+test("a fresh store records schema version 1", () => {
+  const s = fresh();
+  assert.equal(s.getMeta("schemaVersion"), "1");
+});
+
+test("an unsupported schema version is refused", () => {
+  const path = join(tmpdir(), `inferest-test-${process.pid}-${Date.now()}.db`);
+  try {
+    const s = openStore(path);
+    s.setMeta("schemaVersion", "99");
+    s.close();
+    assert.throws(() => openStore(path), /unsupported schema version 99/);
+  } finally {
+    rmSync(path, { force: true });
+  }
 });
