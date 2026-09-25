@@ -8,7 +8,7 @@
 
 | Layer | Choice |
 |---|---|
-| Chain and vault | Any EVM chain with an audited ERC-4626 USDC vault, set in config. Morpho where deployed (read with `@morpho-org/blue-sdk-viem`), plain ERC-4626 calls otherwise |
+| Chain and vault | Any EVM chain with an audited ERC-4626 USDC vault, set in config. Fluid USDC on Arbitrum One, plain ERC-4626 calls otherwise |
 | Ledger and worker | Node cron worker reads vault share value, computes per-user accrued yield, syncs key limits, and settles each period. Math lives in [`../engine/ledger.ts`](../engine/ledger.ts) |
 | Keys | OpenRouter Management API keys under our account (decided: no proxy). The worker sets each key's limit and reads each key's usage |
 | Custody | One Octant YDS vault per customer, shares in the customer's wallet, yield minted to our Splitter. `report()` and settlement by hand in the demo |

@@ -2,6 +2,6 @@
   "chainId": 42161,
   "name": "Arbitrum One",
   "usdc": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
-  "target": "0x5c0C306Aaa9F877de636f4d5822cA9F2E81563BA",
-  "targetName": "Morpho Steakhouse High Yield USDC"
+  "target": "0x1A996cb54bb95462040408C06122D45D6Cdb6096",
+  "targetName": "Fluid USDC"
 }

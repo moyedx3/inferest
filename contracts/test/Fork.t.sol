@@ -12,9 +12,9 @@ import { VaultFactory } from "../src/VaultFactory.sol";
 /// Runs only when ARBITRUM_RPC_URL is set.
 contract ForkTest is Test {
     address constant USDC = 0xaf88d065e77c8cC2239327C5EDb3A432268e5831;
-    address constant TARGET = 0x5c0C306Aaa9F877de636f4d5822cA9F2E81563BA;
+    address constant TARGET = 0x1A996cb54bb95462040408C06122D45D6Cdb6096;
 
-    function test_fork_cycleAgainstRealMorphoVault() public {
+    function test_fork_cycleAgainstRealFluidVault() public {
         string memory rpc = vm.envOr("ARBITRUM_RPC_URL", string(""));
         if (bytes(rpc).length == 0) return;
         vm.createSelectFork(rpc);
@@ -39,7 +39,7 @@ contract ForkTest is Test {
         skip(182 days);
         vm.prank(keeper);
         (uint256 profit,) = vault.report();
-        assertGt(profit, 0, "Morpho vault accrued nothing");
+        assertGt(profit, 0, "Fluid vault accrued nothing");
         uint256 y = splitter.yieldOf(address(vault));
         assertGt(y, 0);
 
