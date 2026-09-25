@@ -19,19 +19,7 @@
 
 ## Tasks
 
-- [ ] Fund OpenRouter float, issue a Management key
-- [ ] Fork the target chain with Anvil, fund test wallet with USDC
-- [ ] Chain config: RPC, USDC, vault address per chain
-- [ ] Deploy Octant's `TokenizedStrategy` implementation and a YDS strategy over the target chain's USDC source
-- [ ] Splitter contract: donation address for every customer vault; `settle(vault, usage)` pays usage and fee, redeposits the rest
-- [ ] Factory: deploys a customer vault with donation = Splitter, management = customer
-- [ ] Deposit and withdraw scripts (ERC-4626 `deposit`, `convertToAssets`)
-- [ ] Ledger plus limit-sync worker (wrap `engine/ledger.ts`)
-- [ ] Settlement script: read key usage, redeem `usage + fee` from the customer's shares
-- [ ] Dashboard: deposit, yield counter, key issuance
-- [ ] Time-warp demo script (`evm_increaseTime`)
-- [ ] Connect an issued key to OpenClaw and make a live call
-- [ ] Pitch deck: problem, demo, unit economics table, non-custodial target architecture ([`../deck/outline.md`](../deck/outline.md))
+The build is tracked task by task in [`../docs/superpowers/plans/2026-09-25-general-build.md`](../docs/superpowers/plans/2026-09-25-general-build.md).
 
 ---
 

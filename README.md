@@ -37,8 +37,15 @@ Inferest removes both:
 | [`deck/outline.md`](deck/outline.md) | Pitch deck content spec |
 
 ```bash
-npm test    # node --test, no dependencies (Node 22.6+ for native TypeScript)
+npm install
+npm test                                  # ledger kernel + app, no network
+cd contracts && forge test                # Splitter, factory, lifecycle
+cp .env.example .env                      # then fill it in
+node --env-file=.env app/cli.ts serve     # dashboard, API, MCP at /mcp
+node --env-file=.env demo/treasury.ts     # or demo/agent.ts
 ```
+
+The demos run against a Tenderly Virtual TestNet or a local anvil fork of the target chain; the demo helpers support both.
 
 ### Background
 
@@ -155,10 +162,10 @@ Settled 2026-09-24. Where they depart from the source notes in [`sources/`](sour
 
 ```
 engine/       ledger kernel + tests (source of truth for the math)
-app/          dashboard + limit-sync worker
-contracts/    anything on-chain beyond the vault we plug into
-hackathon/    build plan, demo script
-deck/         pitch outline
-docs/         problem, landscape, architecture, economics, risks
+contracts/    Splitter, VaultFactory (Octant YDS per customer), tests, deploy script
+app/          keeper, OpenRouter keys, Orthogonal tools over MCP, HTTP API, dashboard
+demo/         treasury and agent scripts for a forked chain
+config/       per-chain addresses
+docs/         problem, landscape, architecture, economics, risks, workflow, plans
 sources/      original Korean notes, unedited
 ```
