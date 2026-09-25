@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Inferest</title>
+  <style>
+    body { font: 15px/1.5 system-ui, sans-serif; max-width: 880px; margin: 0 auto; padding: 16px; color: #111; background: #fff; }
+    h1 { margin: 0 0 4px; } .muted { color: #666; } .card { border: 1px solid #ddd; border-radius: 8px; padding: 12px 16px; margin: 12px 0; }
+    table { width: 100%; border-collapse: collapse; } td, th { text-align: left; padding: 4px 6px; border-bottom: 1px solid #eee; }
+    button { padding: 6px 12px; margin: 4px 4px 4px 0; cursor: pointer; } input { padding: 5px; }
+    pre { background: #f6f6f6; padding: 8px; overflow-x: auto; }
+  </style>
+</head>
+<body>
+  <h1>Inferest</h1>
+  <p class="muted">Your interest, now inference.</p>
+
+  <div class="card">
+    <h3>Wallet</h3>
+    <button id="connect">Connect wallet</button> <span id="account" class="muted"></span>
+    <div>
+      <input id="amount" type="number" value="100000" /> USDC
+      <button id="open">Create vault and deposit</button>
+      <button id="withdraw">Withdraw everything</button>
+    </div>
+    <pre id="log"></pre>
+  </div>
+
+  <div class="card">
+    <h3>Admin</h3>
+    <input id="token" type="password" placeholder="admin token" />
+    <button id="sync">Sync limits</button><button id="report">Report yield</button>
+    <div><input id="keyname" placeholder="key name" value="dev-1" /> weight <input id="weight" type="number" value="1" style="width:60px" />
+      <button id="addkey">Create key</button></div>
+  </div>
+
+  <div id="vaults"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
