@@ -164,15 +164,79 @@ export function createProxy(d: ProxyDeps): Proxy {
     record(key, typeof j?.model === "string" ? j.model : model, generationId, cost, up.status, started);
   }
 
+  /**
+   * Streaming: relay every SSE event byte for byte while parsing the data lines for the generation id and the
+   * usage event. The upstream stream is read to its end even after the client has gone, because the provider
+   * bills the whole generation regardless. A stream that breaks before the cost arrives leaves a pending row
+   * for the generation id seen in the first event, which the keeper resolves through the generation lookup.
+   */
+  async function relayStream(res: ServerResponse, up: Response, key: KeyRow, model: string, started: number): Promise<void> {
+    res.writeHead(up.status, { ...relayHeaders(up), "Cache-Control": "no-cache", "X-Accel-Buffering": "no" });
+    res.flushHeaders();
+    let clientGone = false;
+    res.on("close", () => { clientGone = true; }); // fires early only if the client left; otherwise after end()
+    let generationId = "";
+    let usedModel = model;
+    let cost: number | undefined;
+    let buffer = "";
+    const consume = (text: string) => {
+      buffer += text.replace(/\r\n/g, "\n");
+      let i: number;
+      while ((i = buffer.indexOf("\n\n")) >= 0) {
+        const event = buffer.slice(0, i);
+        buffer = buffer.slice(i + 2);
+        for (const line of event.split("\n")) {
+          if (!line.startsWith("data:")) continue;
+          const data = line.slice(5).trim();
+          if (!data || data === "[DONE]") continue;
+          try {
+            const j = JSON.parse(data);
+            if (!generationId && typeof j?.id === "string") generationId = j.id;
+            if (typeof j?.model === "string") usedModel = j.model;
+            if (typeof j?.usage?.cost === "number") cost = j.usage.cost;
+          } catch {
+            // a partial or non-JSON data line is the provider's business; it is relayed regardless
+          }
+        }
+      }
+    };
+    let broken: Error | undefined;
+    if (!up.body) {
+      broken = new Error("empty upstream body");
+    } else {
+      const reader = up.body.getReader();
+      const decoder = new TextDecoder();
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (!clientGone && !res.destroyed) res.write(value);
+          consume(decoder.decode(value, { stream: true }));
+        }
+        consume(decoder.decode());
+      } catch (e) {
+        broken = e as Error;
+      }
+    }
+    if (!clientGone && !res.destroyed) res.end();
+    if (!generationId) {
+      d.log(`proxy key ${key.id} model ${model} stream without a generation id: nothing to meter${broken ? ` (${broken.message})` : ""}`);
+      return;
+    }
+    if (cost === undefined && broken) d.log(`proxy key ${key.id} model ${usedModel} gen ${generationId} stream broke before usage: ${broken.message}`);
+    record(key, usedModel, generationId, cost, up.status, started);
+  }
+
   /** Forwards a checked request with the company key and relays the answer. Runs tracked, so drain() can wait on it. */
   async function forward(res: ServerResponse, body: any, key: KeyRow, apiKey: string): Promise<void> {
     const model = String(body.model ?? "");
+    const streaming = body.stream === true;
     const started = Date.now();
     let up: Response;
     try {
       up = await d.fetchFn(`${upstream}/chat/completions`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json", Accept: "application/json" },
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json", Accept: streaming ? "text/event-stream" : "application/json" },
         body: JSON.stringify(body),
       });
     } catch (e) {
@@ -180,6 +244,7 @@ export function createProxy(d: ProxyDeps): Proxy {
       return fail(res, 502, "upstream_error", "could not reach the model provider");
     }
     if (!up.ok) return relayError(res, up, key, model, started);
+    if (streaming && (up.headers.get("content-type") ?? "").includes("text/event-stream")) return relayStream(res, up, key, model, started);
     return relayJson(res, up, key, model, started);
   }
 
@@ -202,8 +267,7 @@ export function createProxy(d: ProxyDeps): Proxy {
       d.log(`proxy key ${key.id}: vault ${key.vault} has no OpenRouter key on file`);
       return fail(res, 503, "server_error", "this key's vault has no provider key yet; ask the admin to re-register it");
     }
-    if (body.stream === true) return fail(res, 400, "invalid_request_error", "streaming is not served yet; send stream: false");
-    body.usage = { ...(body.usage && typeof body.usage === "object" ? body.usage : {}), include: true };
+    body.usage = { ...(body.usage && typeof body.usage === "object" && !Array.isArray(body.usage) ? body.usage : {}), include: true };
     const work = forward(res, body, key, d.decrypt(orKey.encryptedSecret));
     track(key.vault, work);
     await work;
@@ -218,9 +282,15 @@ export function createProxy(d: ProxyDeps): Proxy {
         fail(res, 401, "authentication_error", "unknown or revoked Inferest key; send it as Authorization: Bearer sk-inf-...");
         return true;
       }
-      if (url.pathname === "/v1/models" && req.method === "GET") await relayModels(res);
-      else if (url.pathname === "/v1/chat/completions" && req.method === "POST") await completions(req, res, key);
-      else fail(res, 404, "invalid_request_error", "only POST /v1/chat/completions and GET /v1/models are served");
+      try {
+        if (url.pathname === "/v1/models" && req.method === "GET") await relayModels(res);
+        else if (url.pathname === "/v1/chat/completions" && req.method === "POST") await completions(req, res, key);
+        else fail(res, 404, "invalid_request_error", "only POST /v1/chat/completions and GET /v1/models are served");
+      } catch (e) {
+        d.log(`proxy key ${key.id} failed: ${(e as Error).message}`);
+        if (!res.headersSent) fail(res, 500, "server_error", "internal error");
+        else if (!res.writableEnded) res.end();
+      }
       return true;
     },
     async drain(vault, ms) {

@@ -6,6 +6,7 @@ import { createProxy, MAX_BODY_BYTES } from "../proxy.ts";
 import { openStore } from "../store.ts";
 import { HACKATHON_PARAMS } from "../../engine/ledger.ts";
 import type { ToolGateway } from "../tools.ts";
+import { resolvePendingModelCalls } from "../keeper.ts";
 
 const V = "0x00000000000000000000000000000000000000aa";
 const SECRET = "sk-inf-test-key";
@@ -26,7 +27,7 @@ async function start(upstream: Upstream, opts: { yieldUsd?: number; frozen?: boo
     calls.push({ url, init });
     return upstream(url, init);
   }) as unknown as typeof fetch;
-  const decrypt = (e: string) => e.replace(/^enc:/, "");
+  const decrypt = (e: string) => { if (!e.startsWith("enc:")) throw new Error("bad secret"); return e.slice(4); };
   const proxy = createProxy({
     store, params: HACKATHON_PARAMS, decrypt, fetchFn, upstream: "https://up.test/api/v1/", dashboardUrl: "https://dash.test", log: (m) => logs.push(m),
   });
@@ -51,7 +52,7 @@ async function start(upstream: Upstream, opts: { yieldUsd?: number; frozen?: boo
   const server = createApp(d);
   await new Promise<void>((r) => server.listen(0, r));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  return { base, server, store, calls, logs, proxy };
+  return { base, server, store, calls, logs, proxy, d };
 }
 
 const json = (body: unknown, status = 200, headers: Record<string, string> = {}) =>
@@ -90,6 +91,8 @@ test("usage.include is forced on even when the client sets it false", async () =
   const { base, server, calls } = await start(() => completion("gen-2", 0));
   await chat(base, { ...MSG, usage: { include: false, other: 1 } });
   assert.deepEqual(JSON.parse(String(calls[0].init.body)).usage, { other: 1, include: true });
+  await chat(base, { ...MSG, usage: [1] });
+  assert.deepEqual(JSON.parse(String(calls[1].init.body)).usage, { include: true });
   server.close();
 });
 
@@ -259,14 +262,6 @@ test("other /v1 paths are 404 in the error shape", async () => {
   server.close();
 });
 
-test("streaming is refused until the stream relay lands", async () => {
-  const { base, server, calls } = await start(() => completion("g", 0));
-  const r = await chat(base, { ...MSG, stream: true });
-  assert.equal(r.status, 400);
-  assert.equal(calls.length, 0);
-  server.close();
-});
-
 test("drain waits for in-flight metering and returns at once when nothing is in flight", async () => {
   let release!: () => void;
   const gate = new Promise<void>((r) => { release = r; });
@@ -313,5 +308,125 @@ test("the log line names key, model, cost and status, never the prompt or a secr
   assert.ok(!all.includes("TOP SECRET"));
   assert.ok(!all.includes(COMPANY));
   assert.ok(!all.includes(SECRET));
+  server.close();
+});
+
+test("a failure inside the proxy answers 500 in the error shape", async () => {
+  const { base, server, store, calls } = await start(() => completion("gen-f", 0));
+  store.setVaultOpenRouterKey(V, "orhash", "garbage");
+  const r = await chat(base, MSG);
+  assert.equal(r.status, 500);
+  assert.equal(((await r.json()) as any).error.type, "server_error");
+  assert.equal(calls.length, 0);
+  server.close();
+});
+
+/** An SSE body that emits the given events, waiting for `gate` (if given) before the last one, or erroring at `breakAt`.
+ *  Pull-driven: the reader consumes each chunk before the next is produced, so an error can never discard queued chunks. */
+function sse(events: unknown[], opts: { gate?: Promise<void>; breakAt?: number } = {}) {
+  const enc = new TextEncoder();
+  const frames: (string | Error)[] = [": OPENROUTER PROCESSING\n\n"];
+  for (const [i, e] of events.entries()) {
+    if (opts.breakAt === i) { frames.push(new Error("upstream reset")); break; }
+    frames.push(`data: ${JSON.stringify(e)}\n\n`);
+  }
+  if (opts.breakAt === undefined) frames.push("data: [DONE]\n\n");
+  const gateBefore = opts.gate ? events.length : -1; // the frame index of the last event
+  let next = 0;
+  const stream = new ReadableStream<Uint8Array>({
+    async pull(c) {
+      if (next === gateBefore) await opts.gate;
+      if (next >= frames.length) { c.close(); return; }
+      const f = frames[next++];
+      if (f instanceof Error) c.error(f);
+      else c.enqueue(enc.encode(f));
+    },
+  });
+  return new Response(stream, { status: 200, headers: { "content-type": "text/event-stream", "x-openrouter-trace": "leak" } });
+}
+const chunk = (id: string, content: string) => ({ id, model: "openai/gpt-4o-mini", choices: [{ delta: { content } }] });
+const usageEvent = (id: string, cost: number) => ({ id, model: "openai/gpt-4o-mini", choices: [], usage: { prompt_tokens: 3, completion_tokens: 2, cost } });
+const STREAM = { ...MSG, stream: true };
+
+test("a streamed answer is relayed event by event and metered from the final usage event", async () => {
+  const { base, server, store, calls } = await start(() => sse([chunk("gen-s", "Hel"), chunk("gen-s", "lo"), usageEvent("gen-s", 0.005)]));
+  const r = await chat(base, STREAM);
+  assert.equal(r.status, 200);
+  assert.equal(r.headers.get("content-type"), "text/event-stream");
+  assert.equal(r.headers.get("x-openrouter-trace"), null);
+  const text = await r.text();
+  assert.ok(text.startsWith(": OPENROUTER PROCESSING\n\n")); // byte for byte, comments included
+  const datas = text.split("\n\n").filter((e) => e.startsWith("data:")).map((e) => e.slice(5).trim());
+  assert.equal(datas.length, 4);
+  assert.equal(JSON.parse(datas[0]).choices[0].delta.content, "Hel");
+  assert.equal(JSON.parse(datas[1]).choices[0].delta.content, "lo");
+  assert.equal(JSON.parse(datas[2]).usage.cost, 0.005);
+  assert.equal(datas[3], "[DONE]");
+  assert.deepEqual([store.modelCall("gen-s")!.costUsd, store.modelCall("gen-s")!.status], [0.005, "recorded"]);
+  const sent = JSON.parse(String(calls[0].init.body));
+  assert.equal(sent.stream, true);
+  assert.deepEqual(sent.usage, { include: true });
+  assert.equal((calls[0].init.headers as Record<string, string>).Accept, "text/event-stream");
+  server.close();
+});
+
+test("a client that disconnects mid-stream is still metered once the upstream finishes", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  const { base, server, store, proxy } = await start(() => sse([chunk("gen-c", "a"), chunk("gen-c", "b"), usageEvent("gen-c", 0.007)], { gate }));
+  const ac = new AbortController();
+  const r = await fetch(base + "/v1/chat/completions", {
+    method: "POST", headers: { Authorization: `Bearer ${SECRET}`, "Content-Type": "application/json" },
+    body: JSON.stringify(STREAM), signal: ac.signal,
+  });
+  assert.equal(r.status, 200);
+  await r.body!.getReader().read(); // the first bytes arrived
+  ac.abort(); // the developer's client goes away
+  await new Promise((res) => setTimeout(res, 50));
+  assert.equal(proxy.inFlight(V), 1); // the proxy is still reading the upstream
+  assert.equal(store.modelCall("gen-c"), undefined);
+  release();
+  await proxy.drain(V, 5_000);
+  assert.equal(proxy.inFlight(V), 0);
+  assert.deepEqual([store.modelCall("gen-c")!.costUsd, store.modelCall("gen-c")!.status], [0.007, "recorded"]);
+  server.close();
+});
+
+test("an upstream stream that breaks before usage leaves a pending row that the keeper resolves", async () => {
+  const { base, server, store, logs, d } = await start(() => sse([chunk("gen-b", "a"), chunk("gen-b", "b")], { breakAt: 1 }));
+  const r = await chat(base, STREAM);
+  assert.equal(r.status, 200);
+  await r.text().catch(() => {});
+  assert.equal(store.modelCall("gen-b")!.status, "pending");
+  assert.ok(logs.some((m) => m.includes("gen-b") && m.includes("cost pending")));
+  d.or.getGeneration = async (id, apiKey) => (apiKey === COMPANY ? { id, model: "openai/gpt-4o-mini", totalCost: 0.009 } : undefined);
+  await resolvePendingModelCalls(d.keeper);
+  assert.deepEqual([store.modelCall("gen-b")!.costUsd, store.modelCall("gen-b")!.status], [0.009, "recorded"]);
+  assert.equal(store.keyById("k1")!.modelSpent, 0.009);
+  server.close();
+});
+
+test("a stream without a generation id meters nothing and says so", async () => {
+  const { base, server, store, logs } = await start(() => sse([{ choices: [{ delta: { content: "?" } }] }]));
+  await (await chat(base, STREAM)).text();
+  assert.equal(store.listPendingModelCalls().length, 0);
+  assert.ok(logs.some((m) => m.includes("without a generation id")));
+  server.close();
+});
+
+test("a streaming request whose upstream answers with a JSON error relays the error", async () => {
+  const { base, server } = await start(() => json({ error: { message: "no such model", code: 404 } }, 404));
+  const r = await chat(base, STREAM);
+  assert.equal(r.status, 404);
+  assert.deepEqual(await r.json(), { error: { message: "no such model", code: 404 } });
+  server.close();
+});
+
+test("a streaming request answered with plain JSON is metered like a non-streaming one", async () => {
+  const { base, server, store } = await start(() => completion("gen-j", 0.01));
+  const r = await chat(base, STREAM);
+  assert.equal(r.status, 200);
+  assert.equal(((await r.json()) as any).usage.cost, 0.01);
+  assert.equal(store.modelCall("gen-j")!.costUsd, 0.01);
   server.close();
 });
