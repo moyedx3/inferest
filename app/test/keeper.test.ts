@@ -20,6 +20,7 @@ function setup(opts: { yieldMicro?: bigint; lossPending?: boolean; usage?: Recor
     yieldOf: async () => opts.yieldMicro ?? 2_000_000_000n,
     lossPending: async () => opts.lossPending ?? false,
     report: async (v) => { events.push(`report:${v}`); return "0xr"; },
+    totalAssets: async () => 1_000_000_000n,
     settle: async (v, u) => chain.sendSettle(v, u),
     // each prepared transaction gets its own hash: "0xs", then "0xs2", "0xs3", ...; send() records the broadcast
     prepareSettle: async (v, u) => {
@@ -90,6 +91,16 @@ test("reportAll reports every vault and survives a failing one", async () => {
   await reportAll(d, 5);
   assert.ok(events.includes("report:0x00000000000000000000000000000000000000bb"));
   assert.equal(store.getMeta("lastReport"), "5");
+});
+
+test("reportAll skips an empty vault", async () => {
+  const empty = "0x00000000000000000000000000000000000000bb";
+  const { d, store, events } = setup();
+  store.addVault(empty, "0x1", "U");
+  d.chain.totalAssets = async (v) => (v === empty ? 1_000n : 1_000_000_000n);
+  await reportAll(d, 5);
+  assert.ok(!events.includes(`report:${empty}`));
+  assert.ok(events.includes(`report:${V}`));
 });
 
 test("tick reports once a day and settles on a new month, not on first run", async () => {

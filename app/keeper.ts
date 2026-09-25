@@ -82,9 +82,17 @@ export async function syncAll(d: KeeperDeps): Promise<void> {
   }
 }
 
+/** Octant's minimum liquidity seed; a vault at or below this holds only dust and fails report()'s health check. */
+const MIN_REPORTABLE_ASSETS = 1_000n;
+
 export async function reportAll(d: KeeperDeps, now: number = Date.now()): Promise<void> {
   for (const v of d.store.listVaults()) {
     try {
+      const assets = await d.chain.totalAssets(v.vault);
+      if (assets <= MIN_REPORTABLE_ASSETS) {
+        d.log(`report ${v.vault} skipped: vault is empty`);
+        continue;
+      }
       await d.chain.report(v.vault);
     } catch (e) {
       d.log(`report ${v.vault} failed: ${(e as Error).message}`);

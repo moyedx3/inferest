@@ -40,12 +40,15 @@ export function buildMcpServer(gateway: ToolGateway, keyHash: string): McpServer
         path: z.string(),
         method: z.string().optional(),
         body: z.unknown().optional(),
-        query: z.record(z.string(), z.string()).optional(),
+        query: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
       },
     },
     async (args) => {
       try {
-        return text(await gateway.run(keyHash, args));
+        const query = args.query
+          ? Object.fromEntries(Object.entries(args.query).map(([k, v]) => [k, String(v)]))
+          : undefined;
+        return text(await gateway.run(keyHash, { ...args, query }));
       } catch (e) {
         const message = (e as Error).message;
         console.error(`run_tool ${keyHash}: ${message}`);

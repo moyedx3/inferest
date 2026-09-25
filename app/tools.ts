@@ -176,9 +176,13 @@ export function x402PayingFetch(privateKey: `0x${string}`): PayingFetchFactory {
       .onBeforePaymentCreation(async ({ paymentRequired, selectedRequirements }) => {
         capResourceDescription(paymentRequired);
         const amount = BigInt(selectedRequirements.amount);
-        // this hook runs before signing and an abort throws unsigned; report only amounts that will be signed
+        // this hook runs before signing; abort here so a rejected cap never reaches the scheme client
         if (amount > maxMicro) return { abort: true, reason: `price ${amount} exceeds the cap of ${maxMicro} micro USDC` };
-        onAmount(amount);
+      })
+      .onAfterPaymentCreation(async ({ selectedRequirements }) => {
+        // this hook runs only once the scheme has signed the payload, so a reported amount was actually signed;
+        // reporting it here (rather than in onBeforePaymentCreation) means a signing failure never records a spend
+        onAmount(BigInt(selectedRequirements.amount));
       });
     return wrapFetchWithPayment(fetch, client) as typeof fetch;
   };

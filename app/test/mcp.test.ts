@@ -17,9 +17,9 @@ async function connect(gateway: ToolGateway) {
 const gateway = {
   search: async (prompt: string) => [{ api: "olostep", path: "/v1/scrapes", method: "POST", description: prompt, priceUsd: 0.005 }],
   details: async (api: string, path: string) => ({ api, path, parameters: [{ name: "url_to_scrape", in: "body", required: true }] }),
-  run: async (keyHash: string, call: { api: string }) => {
+  run: async (keyHash: string, call: { api: string; query?: Record<string, string> }) => {
     if (call.api === "broke") throw new BudgetExhausted("no yield left for tools on this key");
-    return { keyHash, api: call.api };
+    return { keyHash, api: call.api, query: call.query };
   },
 } as unknown as ToolGateway;
 
@@ -39,6 +39,19 @@ test("run_tool passes the authenticated key hash", async () => {
   const client = await connect(gateway);
   const r: any = await client.callTool({ name: "run_tool", arguments: { api: "olostep", path: "/v1/scrapes" } });
   assert.deepEqual(JSON.parse(r.content[0].text), { keyHash: "h1", api: "olostep" });
+});
+
+test("run_tool converts numeric and boolean query values to strings", async () => {
+  const client = await connect(gateway);
+  const r: any = await client.callTool({
+    name: "run_tool",
+    arguments: { api: "olostep", path: "/v1/scrapes", query: { size: 5, safe: true } },
+  });
+  assert.deepEqual(JSON.parse(r.content[0].text), {
+    keyHash: "h1",
+    api: "olostep",
+    query: { size: "5", safe: "true" },
+  });
 });
 
 test("budget errors come back as tool errors, not crashes", async () => {
