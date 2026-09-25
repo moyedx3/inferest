@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { toolGateway, BudgetExhausted, ToolCallFailed, type PayingFetchFactory } from "../tools.ts";
+import { toolGateway, BudgetExhausted, ToolCallFailed, capResourceDescription, type PayingFetchFactory } from "../tools.ts";
 
 const searchBody = {
   success: true,
@@ -195,4 +195,17 @@ test("a paid replay answered with 402 was rejected, so it is not recorded", asyn
     return true;
   });
   assert.deepEqual(recorded, []);
+});
+
+test("capResourceDescription shortens a long echoed description and leaves short ones alone", () => {
+  const long = { resource: { url: "https://x", description: "a".repeat(551), mimeType: "" } };
+  capResourceDescription(long);
+  assert.equal(long.resource.description.length, 255);
+  const short = { resource: { url: "https://x", description: "fine", mimeType: "" } };
+  capResourceDescription(short);
+  assert.equal(short.resource.description, "fine");
+  const empty: { resource?: { description?: string } } = {};
+  const noDescription: { resource?: { description?: string } } = { resource: {} };
+  assert.doesNotThrow(() => capResourceDescription(empty));
+  assert.doesNotThrow(() => capResourceDescription(noDescription));
 });
