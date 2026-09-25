@@ -34,7 +34,7 @@ async function start(customer = "0x00000000000000000000000000000000000000cc") {
   const server = createApp(d);
   await new Promise<void>((r) => server.listen(0, r));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  return { base, server, store, created };
+  return { base, server, store, created, d };
 }
 
 const post = (base: string, path: string, body: unknown, token = "admin") =>
@@ -100,5 +100,36 @@ test("settle rejects an unknown vault with 404", async () => {
   assert.equal(r.status, 404);
   assert.deepEqual(await r.json(), { error: "unknown vault" });
   assert.equal(store.listSettlements().length, 0);
+  server.close();
+});
+
+test("500 bodies do not leak URLs", async () => {
+  const { base, server, store, d } = await start();
+  await post(base, "/api/vaults", { vault: V });
+  d.chain.settle = async () => { throw new Error("boom https://secret-rpc.example/abc?key=1"); };
+  const r = await post(base, "/api/admin/settle", { vault: V });
+  assert.equal(r.status, 500);
+  const body: any = await r.json();
+  assert.ok(!body.error.includes("secret-rpc"));
+  assert.ok(body.error.includes("[url]"));
+  assert.equal(store.listSettlements().length, 0);
+  server.close();
+});
+
+test("weight change on an unknown key returns 404", async () => {
+  const { base, server } = await start();
+  const r = await post(base, "/api/keys/deadbeef/weight", { weight: 2 });
+  assert.equal(r.status, 404);
+  assert.deepEqual(await r.json(), { error: "unknown key" });
+  server.close();
+});
+
+test("weight change on a known key updates it", async () => {
+  const { base, server, store } = await start();
+  await post(base, "/api/vaults", { vault: V });
+  await post(base, "/api/keys", { vault: V, name: "dev-1", weight: 1 });
+  const r = await post(base, "/api/keys/h1/weight", { weight: 2 });
+  assert.equal(r.status, 200);
+  assert.equal(store.keyByHash("h1")!.weight, 2);
   server.close();
 });
