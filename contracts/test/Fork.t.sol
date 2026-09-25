@@ -40,13 +40,14 @@ contract ForkTest is Test {
         vm.prank(keeper);
         (uint256 profit,) = vault.report();
         assertGt(profit, 0, "Morpho vault accrued nothing");
-        assertGt(splitter.yieldOf(address(vault)), 0);
+        uint256 y = splitter.yieldOf(address(vault));
+        assertGt(y, 0);
 
         vm.prank(keeper);
         splitter.settle(address(vault), 0);
         vm.startPrank(customer);
         uint256 got = vault.redeem(vault.balanceOf(customer), customer, customer);
         vm.stopPrank();
-        assertGt(got, 100_000e6 - 1_000, "customer did not get principal plus returned yield");
+        assertGt(got, 100_000e6 - 1_000 + y / 2, "customer did not get principal plus returned yield");
     }
 }
