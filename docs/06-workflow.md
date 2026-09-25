@@ -1,18 +1,19 @@
 # Workflow
 
-_**Draft, 2026-09-25.** Custody is decided (option D below, A as fallback). Choices still open are marked **Recommended**, with the alternatives next to them. Math: [`../engine/ledger.ts`](../engine/ledger.ts)._
+_Decided 2026-09-25 and built. Math: [`../engine/ledger.ts`](../engine/ledger.ts) and [`../app/limits.ts`](../app/limits.ts). Contracts: [`../contracts/src`](../contracts/src). Keeper: [`../app/keeper.ts`](../app/keeper.ts). Paid tools: [`../app/tools.ts`](../app/tools.ts)._
 
-This is the chain-agnostic mechanism: who sends which transaction, when, and what each party can and cannot do. Deployments differ only in chain, USDC address and yield source.
+This is the chain-agnostic mechanism: who sends which transaction, when, and what each party can and cannot do. A deployment differs only in chain, USDC address and yield source, all of which live in one config file per chain (`config/arbitrum-one.json`).
 
 ---
 
 ## Summary
 
-1. Each customer gets **their own Octant YDS vault**. They deposit USDC and **keep the vault shares in their own wallet**.
+1. Each customer gets **their own Octant yield-donating vault**, deployed by our factory over an allowlisted ERC-4626 yield source. They deposit USDC and **keep the vault shares in their own wallet**.
 2. The vault's donation address is our **Splitter**. When our keeper calls `report()`, the vault's profit is minted to the Splitter as vault shares. That is the customer's yield, now out of their position and in one place.
-3. The customer's admin creates keys and gives each a **weight**. Our worker keeps each OpenRouter key's limit at its weight's share of the yield **already in the Splitter**, so every dollar of credit is backed before it is spent.
-4. Once a month the Splitter settles: `usage` to our float, **10% of leftover** to us, the rest **redeposited into the customer's vault** as new principal.
-5. The customer withdraws principal any time through the standard ERC-4626 `withdraw`. We are not involved.
+3. The customer's admin creates keys and gives each a **weight**. Our keeper keeps each OpenRouter key's limit at its weight's share of the yield **already in the Splitter**, so every dollar of credit is backed before it is spent.
+4. Agents and developers can also buy **paid tools** through our MCP server. Each call is paid in USDC over x402 from our wallet, capped at the key's remaining budget, and recorded against the key like model spend.
+5. Once a month the Splitter settles: `usage` to our float, **10% of the leftover** to us, and the leftover shares **back to the customer's wallet** as new principal.
+6. The customer withdraws principal any time through the standard ERC-4626 `withdraw`. We are not involved.
 
 **Trust in one line:** we can only ever spend yield already sitting in the Splitter, and only to two addresses fixed at deploy. Principal is in the customer's wallet the whole time.
 
@@ -22,12 +23,15 @@ This is the chain-agnostic mechanism: who sends which transaction, when, and wha
 
 | Actor | What it is | Can do |
 |---|---|---|
-| **Customer** | Treasury wallet or Safe (ICP1), or an agent's wallet (ICP2) | Deposit, withdraw, set key weights. Holds the vault's **management** role |
-| **Key holders** | Developers or agents | Call models with their key, nothing on-chain |
-| **Customer vault** | Octant YDS strategy over an audited yield source, one per customer, deployed by our factory | Earns yield, mints profit to the Splitter on `report()`, burns Splitter shares first on a loss |
-| **Splitter** | Our contract, one per chain, immutable. The donation address of every customer vault | Holds each customer's reported yield (as that vault's shares), settles monthly |
-| **Keeper** | Our worker's signing key | Call `report()` on customer vaults and `settle()` on the Splitter. Nothing else |
-| **OpenRouter** | Our account, prefunded float | Serves requests, enforces per-key limits |
+| **Customer** | Treasury wallet or Safe (ICP1), or an agent's wallet (ICP2) | Deposit, withdraw, create keys, set key weights. Holds the vault's **management** role |
+| **Key holders** | Developers or agents | Call models with their key over OpenRouter, call paid tools with the same key over our MCP server. Nothing on-chain |
+| **Customer vault** | Octant `ERC4626Strategy` over an allowlisted yield source, one per customer | Earns yield, mints profit to the Splitter on `report()`, burns Splitter shares first on a loss |
+| **Factory** | Our contract, one per chain, owned by us | Deploys customer vaults, keeps the allowlist of yield sources, records which customer owns which vault |
+| **Splitter** | Our contract, one per chain, immutable. The donation address of every customer vault | Holds each customer's reported yield as that vault's shares, settles monthly |
+| **Keeper** | Our worker's signing key (`app/keeper.ts`) | Calls `report()` on customer vaults and `settle()` on the Splitter, syncs OpenRouter limits. Nothing else on-chain |
+| **OpenRouter** | Our account, prefunded float | Serves model requests, enforces per-key limits |
+| **Orthogonal** | Paid tool catalog (search, scraping, enrichment) | Answers each tool call with a price, has its payment facilitator verify and settle the x402 payment, runs the tool |
+| **Inferest MCP server** | Part of our HTTP server (`/mcp`) | Authenticates the key, searches the catalog, pays for and runs tools within the key's budget |
 
 Each customer vault is its own ERC-20 share token, so the Splitter's balance of vault X's shares is exactly customer X's unsettled yield. One Splitter serves every customer with no internal ledger.
 
@@ -37,41 +41,49 @@ Each customer vault is its own ERC-20 share token, so the Splitter's balance of 
 
 ```mermaid
 sequenceDiagram
-  participant C as Customer
-  participant V as Customer vault (YDS)
+  participant C as Customer wallet
+  participant V as Customer vault
   participant S as Splitter
-  participant W as Worker (keeper)
+  participant W as Keeper
   participant O as OpenRouter
-  participant K as Key holders
+  participant K as Key holder
+  participant T as Orthogonal
 
-  W->>V: deploy via factory (donation = Splitter, management = C)
-  C->>V: deposit(assets), shares to C's wallet
-  C->>W: create keys, set weights (dashboard)
-  W->>O: create keys, limit 0
+  W->>V: deploy through the factory, donation address is the Splitter
+  C->>V: deposit USDC, shares stay in the customer wallet
+  C->>W: create keys and set weights
+  W->>O: create keys with limit 0
   loop daily
-    W->>V: report(): profit minted to S as shares
+    W->>V: report, profit minted to the Splitter as shares
   end
   loop every minute
-    W->>S: read C's yield in S
-    W->>O: read usage per key, set each key's limit
+    W->>S: read the vault's yield in the Splitter
+    W->>O: read usage per key, set each limit
   end
-  K->>O: model calls within limit
+  K->>O: model calls within the limit
+  K->>W: run_tool over MCP
+  W->>T: paid call over x402, capped at the key's budget
+  T-->>W: result and price, recorded against the key
   Note over W,S: once a month
-  W->>S: settle(vault, usage)
-  S->>V: redeem usage + fee; redeposit the rest for C
+  W->>O: freeze every key at its usage, then re-read usage
+  W->>S: settle with the period's usage
+  S->>V: withdraw usage to the float and the fee to Inferest
+  S->>C: transfer the leftover shares to the customer
   Note over C,V: any time
-  C->>V: withdraw(assets)
+  C->>V: withdraw or redeem
 ```
 
 ### 1. Onboard
 
-Our factory deploys a YDS strategy for the customer over the chosen yield source, with `donationAddress = Splitter`, `keeper = our worker`, `management = customer`. The customer approves USDC and calls `deposit`. Shares land in their wallet.
+Our factory deploys an Octant `ERC4626Strategy` for the customer over an allowlisted yield source, with `donationAddress = Splitter`, `keeper = our worker`, and the customer as pending management. The customer accepts management, approves USDC and calls `deposit`. Shares land in their wallet. The customer then registers the vault with our server, which checks with the factory that the vault is one of ours before it will issue keys for it.
 
 **Why the customer holds management:** the only lever over yield is the donation address, and changing it takes a two-step process with a **14-day cooldown** during which depositors can exit. If the customer points it elsewhere, they have simply left Inferest; we lose nothing, because we only ever spend yield already in the Splitter. Emergency functions move funds from the yield source back into the vault, never out.
 
+**Why an allowlist:** anyone can call the factory, so a fake ERC-4626 could otherwise report yield that does not exist and we would open limits against it. The factory refuses any target the owner has not allowlisted, and the server refuses to register a vault the factory did not create.
+
 ### 2. Keys
 
-In the dashboard the admin creates keys and sets a weight per key (decision 3). The worker creates matching OpenRouter keys with limit 0.
+In the dashboard the admin creates keys and sets a weight per key (default 1). The keeper creates matching OpenRouter keys with limit 0. The key secret is shown once and only its hash is stored. The same secret authenticates the key holder to the MCP server.
 
 ### 3. Report and sync
 
@@ -85,30 +97,53 @@ spent_i   = (usage_i − usageAtPeriodStart_i) + toolSpend_i × (1 − railFee)
 limit_i   = usage_i + max(credit_i − spent_i, 0)        (OpenRouter limits are cumulative)
 ```
 
-A key's credit is fixed by its weight, so what one key leaves unused does not flow to the others (decision 3). The sum of open credit is capped at the pool: if reweighting would open more than the pool has left, every remaining budget is scaled down proportionally. Limits rise in a step after each report. Between syncs a key can overshoot by at most one minute of spend; we absorb that. If the yield source is worth less than the vault last reported, every key is frozen at its current usage until the next report.
+A key's credit is fixed by its weight, so what one key leaves unused does not flow to the others. The sum of open credit is capped at the pool: if reweighting would open more than the pool has left, every remaining budget is scaled down proportionally, so credit never opens ahead of yield. Limits rise in a step after each report. Between syncs a key can overshoot by at most one minute of spend; we absorb that.
 
-### 4. Settle (monthly)
+**Loss pending:** if the yield source is worth less than the vault last reported, every key is frozen at its current usage and settlement is skipped for that vault until the next `report()` books the loss.
 
-The keeper calls `Splitter.settle(vault, usage)` with the month's usage in USDC (credits spent / (1 − railFee)).
+### 4. Paid tools
+
+The key holder adds our MCP endpoint (`/mcp`, bearer token is the key secret) and gets three tools: `search_tools`, `tool_details` (free, returns the exact parameters and price) and `run_tool`. LLM calls do not go through us; they still go straight to OpenRouter on the same key.
+
+For `run_tool`, the server:
+
+1. Refuses before anything is signed when the key has no tool budget left. The budget is the key's remaining credit, shared with model spend under the same weight.
+2. Makes one paid request to Orthogonal over x402 (protocol version 2, USDC on Base). The payment cap handed to the x402 client is the key's remaining budget; a price above it is refused before signing. Concurrent calls on one key reserve budget so they cannot overspend together.
+3. Records the price against the key when the payment was signed. A payment the processor rejects costs nothing and is not recorded. A call that fails after payment is recorded and reported to the agent with the amount, so the agent checks usage before retrying. Nothing is ever retried automatically.
+
+Tools carry no rail fee, because they are paid in USDC directly. At settlement, `usage` = model credits / (1 − railFee) + tool spend.
+
+### 5. Settle (monthly)
+
+Settlement is the only time yield leaves the Splitter. The keeper:
+
+1. Pins every key's limit to its current usage, so nothing new can land.
+2. Re-reads usage from OpenRouter, so requests that were in flight during the freeze are counted.
+3. Calls `Splitter.settle(vault, usage)` with the period's usage in USDC base units.
+4. Records the settlement, starts a new period with the settled usage as each key's baseline, and re-syncs limits.
+
+On-chain:
 
 ```
 y        = convertToAssets(splitter's shares of vault)
 paid     = min(usage, y)
 leftover = y − paid
-fee      = feeBps × leftover
-redeem paid → FLOAT address, fee → FEE address          (both immutable)
-transfer the shares worth leftover − fee to the customer
+fee      = feeBps × leftover                              (feeBps = 1000)
+withdraw paid to FLOAT address, fee to FEE address        (both immutable)
+transfer the remaining shares, worth leftover − fee, to the customer
 ```
 
-The Splitter transfers the leftover shares to the customer's wallet, where they are now principal. This is the kernel's `settle`: principal grows by `leftover − fee`. Because limits never open beyond `y`, `usage ≤ y` always holds and nothing is ever owed.
+The leftover shares land in the customer's wallet, where they are principal. This is the kernel's `settle`: principal grows by `leftover − fee`. Because limits never open beyond `y`, `usage ≤ y` always holds and nothing is ever owed; if usage were ever reported above `y`, the contract pays `y` and emits the shortfall.
 
-### 5. Withdraw
+In the demos settlement is triggered by hand. In production the keeper settles on the first tick of a new month.
+
+### 6. Withdraw
 
 Standard ERC-4626 `withdraw` or `redeem` from the customer's own wallet, any time. Yield already reported sits in the Splitter and is settled on the normal schedule; yield accrued since the last report stays in the vault and is reported on the next `report()` against the remaining shares.
 
-### 6. Vault loss
+### 7. Vault loss
 
-On a loss, `report()` **burns the Splitter's shares of that vault first**. So unsettled yield is the first-loss buffer, and principal is only hit by a loss larger than that buffer. Limits shrink with the Splitter balance on the next sync, so spend never exceeds what is backed.
+On a loss, `report()` **burns the Splitter's shares of that vault first**. So unsettled yield is the first-loss buffer, and principal is only hit by a loss larger than that buffer. Limits shrink with the Splitter balance on the next sync, and the loss-pending freeze above stops spend against yield that is already gone before the loss is booked.
 
 ---
 
@@ -116,126 +151,104 @@ On a loss, `report()` **burns the Splitter's shares of that vault first**. So un
 
 | Guarantee | Enforced by |
 |---|---|
-| Principal stays in the customer's wallet | YDS shares are held by the customer; profit never raises their price per share |
-| Only yield reaches us | Only profit is minted to the Splitter; the Splitter can only redeem its own shares |
-| We take at most the yield, and at most 10% of what the customer did not use | `paid = min(usage, y)`, fee computed on-chain from leftover |
+| Principal stays in the customer's wallet | Vault shares are held by the customer; profit never raises their price per share |
+| Only yield reaches us | Only profit is minted to the Splitter; the Splitter can only withdraw against its own shares |
+| Only vetted yield sources | `createVault` reverts for a target not on the owner's allowlist |
+| We take at most the yield, and at most the deployed fee share of what the customer did not use | `paid = min(usage, y)`, fee computed on-chain from the leftover; `feeBps` is fixed at deploy (1000, or 10%, today) and the contract refuses anything above 20% |
 | Yield we take goes only to our two addresses | `floatAddress`, `feeAddress` immutable in the Splitter |
+| Only our keeper can settle, and only vaults from our factory | `NotKeeper`, `UnknownVault` |
 | We cannot trap funds | Withdrawal is standard ERC-4626 and needs nothing from us |
 | We are never owed money | Limits open only up to yield already in the Splitter |
-| **Not enforced:** that reported usage is honest | Usage is off-chain OpenRouter data. Bounded by yield in the Splitter. Customer can check it against per-key usage on the dashboard |
+| **Not enforced:** that reported usage is honest | Usage is off-chain OpenRouter and Orthogonal data. Bounded by yield in the Splitter. The customer can check it against per-key usage on the dashboard |
 
-### Splitter interface (sketch)
+### What the keeper enforces
+
+| Rule | Where |
+|---|---|
+| A limit never opens ahead of yield in the Splitter, including after reweighting | `computeLimits` in `app/limits.ts` |
+| Keys freeze at usage while a loss is unreported, and that vault is not settled | `syncVault`, `settleVault` |
+| Settlement freezes, re-reads, then settles, so nothing spent after the read goes unbilled | `settleVault` |
+| A vault the server does not track is never settled | `settleVault`, `POST /api/admin/settle` |
+| Overlapping ticks and duplicate settlements of one vault are skipped | in-flight guards in `app/keeper.ts` |
+| Tool payments are capped at the key's budget before signing, never retried, and rejected payments are not charged | `toolGateway`, `x402PayingFetch` in `app/tools.ts` |
+| Every mutating API route needs the admin token; the MCP endpoint needs a known key | `app/server.ts` |
+
+### Contract interfaces
 
 ```solidity
-// immutables: asset, floatAddress, feeAddress, feeBps, keeper, factory
-function settle(address vault, uint256 usage) external onlyKeeper;
-function yieldOf(address vault) external view returns (uint256);   // convertToAssets(balanceOf(vault shares))
-function customerOf(address vault) external view returns (address); // set by the factory at deploy
+// Splitter: immutables registry, keeper, floatAddress, feeAddress, feeBps (MAX_FEE_BPS = 2000)
+function yieldOf(address vault) external view returns (uint256);            // convertToAssets(balanceOf(vault shares))
+function settle(address vault, uint256 usage) external
+    returns (uint256 paid, uint256 fee, uint256 returnedShares);              // onlyKeeper, nonReentrant
+event Settled(address indexed vault, address indexed customer, uint256 yieldAssets,
+    uint256 paid, uint256 fee, uint256 returnedShares, uint256 shortfall);
+
+// VaultFactory: immutables splitter, tokenizedStrategy, keeper, emergencyAdmin; owner sets the allowlist
+function setAllowedTarget(address target, bool allowed) external;           // onlyOwner
+function createVault(address target, string name, string symbol) external returns (address vault);
+function customerOf(address vault) external view returns (address);         // zero for a vault we did not deploy
+function vaultsOf(address customer) external view returns (address[] memory);
+event VaultCreated(address indexed customer, address indexed vault, address indexed target);
 ```
 
 ---
 
-## Deployability
+## Deployment
 
-Checked 2026-09-25 against Octant v2 core (`golemfoundation/octant-v2-core`, audited by Spearbit, Cantina and Bailsec, AGPL-3.0).
-
-- **The whole stack deploys on any EVM chain.** The strategy takes its `TokenizedStrategy` implementation address as a constructor argument, so we deploy the implementation ourselves; nothing depends on a pre-existing Octant deployment. Compiled with `evm_version = prague`; recompile for an older target if a chain requires it.
-- **Ready-made strategies:** `ERC4626Strategy` wraps any ERC-4626 vault (Morpho, Euler, Fluid, Spark savings); `AaveV3Strategy` wraps Aave v3 directly.
-- **Yield sources:** every target chain has at least one audited USDC (or USDG) source with millions in TVL. Per-chain picks are kept outside the repo.
-- **License:** our Splitter only calls the vault through its interface, so it is not a derivative of the AGPL code. Forking or modifying Octant's contracts would be.
-
-**Fallback A** applies only if a chain cannot host this stack: see decision 1.
+- **Any EVM chain.** The Octant strategy takes its `TokenizedStrategy` implementation address as a constructor argument, so our deploy script deploys the implementation, the Splitter and the factory together and nothing depends on a pre-existing Octant deployment. Built with Solidity 0.8.33 and `evm_version = cancun`; Octant v2 core is pinned by commit.
+- **Yield source per chain.** `ERC4626Strategy` wraps any ERC-4626 vault. The Arbitrum One config points at **Fluid USDC** (`0x1A996cb54bb95462040408C06122D45D6Cdb6096`), chosen for native yield of about 4% on tens of millions of TVL and a rate model that holds on a fork. Morpho vaults use an adaptive rate that decays over a six-month time warp with no borrow activity, which understates their live yield in a demo; their live rate is similar.
+- **Deploy script** writes `contracts/deployments/<chainId>.json`, which the app reads. The app refuses a deployment whose chain id or target differs from the chain config.
+- **Fork test** (`contracts/test/Fork.t.sol`) runs the full cycle against the live Fluid vault when an Arbitrum One RPC is set.
+- **Demos** run on a Tenderly Virtual TestNet or a local anvil fork of Arbitrum One; the demo helpers support both. A virtual testnet must keep chain id 42161.
+- **License:** the Splitter only calls the vault through its interface, so it is not a derivative of the AGPL code. The factory imports Octant and is AGPL.
 
 ---
 
 ## Decisions
 
-### 1. Custody. **Decided: D, with A as fallback**
+The full decision table is in the [README](../README.md#decisions). What this workflow depends on:
 
-| Option | How | Cost |
-|---|---|---|
-| **D. One YDS vault per customer, donation address = Splitter (chosen)** | Described above | Limits step up once per `report()`. One vault per customer. Depends on the Octant stack |
-| A. Settler holds the shares (fallback) | Deposit goes through our Settler; shares leave only via settle (yield) or withdraw after a request, freeze and final settlement, with a 24h window | Shares sit in our contract, not the customer's wallet. About one minute of spend exposed. All custom code |
-| B. Keep approval, watch it | Customer approves shares to us; worker freezes keys on revoke | Up to a day of usage exposed; "principal never moves" rests on our behavior |
-| C. Prepay each month | Customer pays expected usage up front | Breaks "pay with yield" |
-
-### 2. Principal withdrawal. **Resolved by D**
-
-Standard ERC-4626, any time, no window. The 24h request window exists only under fallback A.
-
-### 3. Splitting yield across keys. **Decided: admin-set weights, default equal**
-
-With $2,225 of credit and three keys, each gets about $742. One key's unused share does not flow to the others until the admin changes weights. Rejected: a shared pool (between syncs every key can spend the whole pool, so overshoot up to N times) and fixed dollar amounts (the admin has to guess the yield).
-
-### 4. Cap us on-chain. **Resolved by D**
-
-The cap is structural: only profit reaches the Splitter.
-
-### 5. Demos. **Decided: two separate demos, equal weight**
-
-A treasury demo (ICP1) and an agent demo (ICP2), each standing on its own. Scripts below.
-
-### 6. Vault loss. **Mostly resolved by D**
-
-YDS burns the Splitter's shares first, and limits only ever open up to the Splitter balance, so spend is always backed. Open only for fallback A.
-
-### 7. Leftover yield. **Decided: redeposit**
-
-The Splitter transfers the leftover shares, worth `leftover − fee`, to the customer, so they become principal and compound.
-
-### 8. How often the keeper calls `report()`. **Decided: daily**
-
-`report()` is the vault's bookkeeping call. It measures what the vault's position in the yield source is worth now, compares that with the last report, and mints the difference to the Splitter as new shares (or burns Splitter shares on a loss). Until it is called, interest accrues inside the yield source but nobody can spend it, because it has not been booked.
-
-Daily means limits step up once a day, at one transaction per customer per day. Rejected: hourly (24 times the gas for smoother limits) and only at settlement (keys at zero all month).
-
-In the demos the keeper calls it by hand right after the time warp.
-
-### 9. Paid tools for agents. **Decided: Orthogonal, through an Inferest MCP server**
-
-Agents and developers using Inferest also get paid tools (web search, scraping, enrichment, research) with no extra accounts, paid from the same yield.
-
-- **How:** we run an MCP server. The customer adds one URL and authenticates with their Inferest key. Tool calls go to [Orthogonal](https://docs.orthogonal.com/) and are paid **per call in USDC on Base over x402** from our wallet. Each response carries its price, which we record against the key.
-- **Budget:** tool spend and model spend draw from the same pool under the same weights. At settlement, `usage` = model credits / (1 − railFee) + tool spend. Tools carry no top-up fee, because they are paid in USDC directly.
-- **LLM calls are unchanged:** they still go straight to OpenRouter on the customer's OpenRouter key. The MCP server only handles tools, so decision 5 in the README (no LLM proxy) stands.
-
-**Why Orthogonal over AgentCash:** Orthogonal is one server-side API (`search`, `details`, `run`) with a curated catalog, a price on every response, and x402 payment from a wallet we control. [AgentCash](https://agentcash.dev/docs/) has a bigger open catalog (3,200+ APIs), but it is built as a client-side CLI and MCP with a local wallet per user, and schemas vary by merchant. That fits one agent paying for itself, not a service paying on behalf of many customers. AgentCash stays a candidate for a later "bring your own agent wallet" mode.
-
-### 10. Rail fee. **Decided: we absorb it in the hackathon build**
-
-**The customer never sees the rail fee. It is our operating cost, handled entirely off-chain.**
-
-| Layer | What happens |
-|---|---|
-| Worker (limits) | `pool = yieldInSplitter − spentThisPeriod`. One USDC of yield opens one dollar of credit |
-| Splitter (on-chain) | Unchanged. `settle(vault, usage)` with `usage` = credits spent, 1:1 in USDC. The contract has no notion of a rail fee |
-| Our treasury (off-chain) | `usage` arrives at the float address. Buying that much OpenRouter credit costs about 5% more; the difference comes out of the fee address |
-| Kernel | `HACKATHON_PARAMS = { ourFee: 0.10, railFee: 0 }`; `operatorNet(settlement)` = fee − 5% of usage |
-
-**The cost of absorbing it:** our result per settlement is `10% × leftover − 5% × usage`, which is **negative once a customer uses more than two thirds of its yield** (pinned in `ledger.test.ts`). Fine for a hackathon float. For the real product it is a choice between passing the fee through (`DEFAULT_PARAMS`, `railFee = 0.05`), absorbing it as acquisition cost, or removing it with the enterprise invoice. Tools bought through Orthogonal carry no rail fee either way.
+1. **Custody:** one Octant yield-donating vault per customer, donation address is the Splitter, shares in the customer's wallet. The cap on what we can take is structural: only profit reaches the Splitter.
+2. **Splitting yield across keys:** admin-set weights, default equal. Unused credit on one key does not flow to another until the admin changes weights.
+3. **Cadence:** `report()` daily, limit sync every minute, `settle()` monthly. The kernel has no notion of period length, so this is configuration.
+4. **Leftover yield:** returned to the customer as vault shares, which is principal, so it compounds.
+5. **Paid tools:** Orthogonal, through our MCP server, paid per call over x402 from our wallet. One server-side catalog with a price on every response, which fits a service paying on behalf of many customers.
+6. **Rail fee:** absorbed in this build (`HACKATHON_PARAMS`, `railFee = 0`). One USDC of yield opens one dollar of credit; buying that credit costs us about 5% more, paid from the fee address. Our result per settlement is `10% × leftover − 5% × usage`, negative once a customer uses more than two thirds of its yield (pinned in `ledger.test.ts`). For the real product: pass the fee through (`DEFAULT_PARAMS`), absorb it as acquisition cost, or remove it with an enterprise invoice. Tools carry no rail fee either way.
+7. **Float top-up:** manual for now. OpenRouter is prefunded by us, settlement sends usage in USDC to our float wallet, and someone buys credit through OpenRouter's checkout; OpenRouter has no crypto purchase API. In production a programmable card funded from the float wallet pays that checkout, or an enterprise invoice removes the float.
+8. **Keys:** OpenRouter Management API keys under our account, not our own proxy. LLM calls never pass through us.
 
 ---
 
 ## Demo scripts
 
-_Numbers use `HACKATHON_PARAMS` (rail fee absorbed) and are pinned in `engine/ledger.test.ts`._
+_Numbers use `HACKATHON_PARAMS` at 4.5% APY and are pinned in `engine/ledger.test.ts`. The live Fluid vault decides the real figure; at its current rate six months on 100,000 USDC yields about $2,060._
 
-### Treasury (ICP1)
+### Treasury (ICP1), `demo/treasury.ts`
 
 1. Finance lead deposits 100,000 USDC into their vault. Shares appear in their wallet.
 2. Admin creates three developer keys at equal weight.
 3. Warp six months, call `report()`: **$2,225** yield lands in the Splitter and **$2,225** of credit opens, about **$742** per key.
-4. Developers call real models from their IDEs; say **$500** spent.
-5. Settle: **$500** to the float, **$173** fee (10% of the $1,725 left over), **$1,553** redeposited. Principal is now **$101,553**, still in their wallet.
+4. Developers call real models on their own keys; say **$500** spent.
+5. Settle: **$500** to the float, **$173** fee (10% of the $1,725 left over), **$1,553** of shares back to the customer. Principal is now **$101,553**, still in their wallet.
 6. Withdraw **$101,553** straight from the wallet. No request, no wait.
 
-### Agent (ICP2)
+### Agent (ICP2), `demo/agent.ts`
 
 1. An agent's own wallet deposits into its own vault. Same contracts, different depositor.
-2. The agent runs (OpenClaw or Hermes) with its Inferest key as its OpenRouter key, plus the Inferest MCP server for tools.
+2. The agent runs with its Inferest key as its OpenRouter key, plus the Inferest MCP server for tools. The script drives the loop directly; OpenClaw or Hermes work the same way with the key and the MCP URL.
 3. Warp, `report()`: the agent's limit rises from its own yield.
-4. The agent does a task that needs a model **and** paid tools (search, scrape) through Orthogonal. The dashboard shows model spend and tool spend drawing from the same yield.
+4. The agent does a task that needs a model **and** paid tools through Orthogonal. If a tool call is refused, it switches to another tool. The dashboard shows model spend and tool spend drawing from the same yield.
 5. Settle: leftover goes back into the agent's vault. **No human topped anything up.**
+
+---
+
+## Known gaps
+
+- **Settlement bookkeeping is not persisted across a failed receipt wait.** If the RPC fails while the keeper waits for the settle receipt, or the process dies before bookkeeping, the next month bills twice, bounded by the yield reported since. Failed settlements are not retried within the month. The fix is a persisted per-vault settlement record reconciled by transaction hash, to land before the keeper runs unattended.
+- **One OpenRouter account.** Every customer's keys live under our account. Per-company isolation would mean one OpenRouter account per company, each with its own float.
+- **Company admins use our admin token.** Self-service needs wallet login: the factory records the vault's owner, so a signed message from that wallet can authorize key creation for that vault.
+- **Orthogonal descriptions.** Coinbase's facilitator rejects a payment whose echoed resource description is longer than about 255 characters; our client caps it before signing. Any other client hits the same on long-description listings.
+- **A daily report on an emptied vault fails Octant's health check.** Harmless, logged, and skipped until the vault is funded again.
 
 ---
 

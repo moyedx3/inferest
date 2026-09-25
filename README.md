@@ -62,7 +62,7 @@ The demos run against a Tenderly Virtual TestNet or a local anvil fork of the ta
 | [`docs/03-architecture.md`](docs/03-architecture.md) | Five engine modules, plug-in yield sources, credit rails |
 | [`docs/04-unit-economics.md`](docs/04-unit-economics.md) | Principal needed per budget, where our revenue comes from |
 | [`docs/05-risks.md`](docs/05-risks.md) | Terms of service, custody, contracts, rates, rail dependence, tax |
-| [`docs/06-workflow.md`](docs/06-workflow.md) | **Draft.** Who sends which transaction: per-customer YDS vaults, the Splitter, remaining choices with recommendations |
+| [`docs/06-workflow.md`](docs/06-workflow.md) | **The mechanism as built.** Who sends which transaction: per-customer vaults, the Splitter, the keeper, paid tools, settlement, known gaps |
 | [`sources/`](sources/) | The original Korean notes this repo is built from. Read-only reference |
 
 ---
@@ -133,9 +133,9 @@ Settled 2026-09-24. Where they depart from the source notes in [`sources/`](sour
 | 4 | Fee | **10% of leftover yield** (yield minus what credits cost). Leftover goes back to the customer | Rate is a placeholder |
 | 5 | Keys | **OpenRouter Management API keys**, not our own proxy | Same features for the hackathon (per-key limits, per-key usage), far less to build. A proxy comes with the move to contracted providers, when `base_url` changes anyway |
 | 6 | Customers | **Two ICPs**: crypto treasuries, agent wallet teams | Vault note 51's third segment (financial agent platforms) dropped |
-| 7 | Custody | **One Octant YDS vault per customer; shares stay in the customer's wallet; profit is minted to our Splitter, which spends only `usage + fee`.** Fallback: our own Settler holds shares | Decided 2026-09-25. Deployability checked on every target chain. See [`docs/06-workflow.md`](docs/06-workflow.md) |
+| 7 | Custody | **One Octant YDS vault per customer; shares stay in the customer's wallet; profit is minted to our Splitter, which spends only `usage + fee`.** | Decided 2026-09-25. Deployability checked on every target chain. See [`docs/06-workflow.md`](docs/06-workflow.md) |
 | 8 | Settlement period | **Monthly.** In the demo, settlement is triggered by hand | Easy to change: the kernel has no notion of period length |
-| 9 | Leftover yield | **Redeposited into the customer's vault** as new principal | Matches `settle` in the kernel |
+| 9 | Leftover yield | **Returned to the customer as vault shares**, which is new principal | Matches `settle` in the kernel; the Splitter transfers the shares rather than redeeming and redepositing |
 | 10 | Key budgets | **Admin-set weights per key, default equal** | |
 | 11 | Demos | **Two separate demos**: treasury (ICP1) and agent (ICP2) | |
 | 12 | Paid tools | **Orthogonal, through an Inferest MCP server**, paid per call in USDC from the same yield | See `docs/06` decision 9 |
