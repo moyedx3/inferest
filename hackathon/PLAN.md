@@ -11,7 +11,7 @@
 | Chain and vault | Any EVM chain with an audited ERC-4626 USDC vault, set in config. Morpho where deployed (read with `@morpho-org/blue-sdk-viem`), plain ERC-4626 calls otherwise |
 | Ledger and worker | Node cron worker reads vault share value, computes per-user accrued yield, syncs key limits, and settles each period. Math lives in [`../engine/ledger.ts`](../engine/ledger.ts) |
 | Keys | OpenRouter Management API keys under our account (decided: no proxy). The worker sets each key's limit and reads each key's usage |
-| Custody | Customer wallet holds the vault shares and approves them to the settler; settlement redeems only `usage + fee`. Monthly; by hand in the demo |
+| Custody | One Octant YDS vault per customer, shares in the customer's wallet, yield minted to our Splitter. `report()` and settlement by hand in the demo |
 | Frontend | One dashboard for the finance lead: deposit button, accrued yield, list of issued keys |
 | ICP2 | OpenClaw takes an OpenRouter key with one onboard command ([OpenRouter guide](https://openrouter.ai/docs/guides/guides/openclaw-integration)). Plug our key in as is; wrap it as a provider plugin if time allows |
 
@@ -22,7 +22,9 @@
 - [ ] Fund OpenRouter float, issue a Management key
 - [ ] Fork the target chain with Anvil, fund test wallet with USDC
 - [ ] Chain config: RPC, USDC, vault address per chain
-- [ ] Settler contract: holds share approval, redeems `usage + fee`, deployable to any EVM chain
+- [ ] Deploy Octant's `TokenizedStrategy` implementation and a YDS strategy over the target chain's USDC source
+- [ ] Splitter contract: donation address for every customer vault; `settle(vault, usage)` pays usage and fee, redeposits the rest
+- [ ] Factory: deploys a customer vault with donation = Splitter, management = customer
 - [ ] Deposit and withdraw scripts (ERC-4626 `deposit`, `convertToAssets`)
 - [ ] Ledger plus limit-sync worker (wrap `engine/ledger.ts`)
 - [ ] Settlement script: read key usage, redeem `usage + fee` from the customer's shares

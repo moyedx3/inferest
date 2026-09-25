@@ -49,7 +49,7 @@ npm test    # node --test, no dependencies (Node 22.6+ for native TypeScript)
 | [`docs/03-architecture.md`](docs/03-architecture.md) | Five engine modules, plug-in yield sources, credit rails |
 | [`docs/04-unit-economics.md`](docs/04-unit-economics.md) | Principal needed per budget, where our revenue comes from |
 | [`docs/05-risks.md`](docs/05-risks.md) | Terms of service, custody, contracts, rates, rail dependence, tax |
-| [`docs/06-workflow.md`](docs/06-workflow.md) | **Draft.** Who sends which transaction, the Settler contract, six open choices with recommendations |
+| [`docs/06-workflow.md`](docs/06-workflow.md) | **Draft.** Who sends which transaction: per-customer YDS vaults, the Splitter, remaining choices with recommendations |
 | [`sources/`](sources/) | The original Korean notes this repo is built from. Read-only reference |
 
 ---
@@ -115,20 +115,20 @@ Settled 2026-09-24. Where they depart from the source notes in [`sources/`](sour
 | # | Decision | Chosen | Note |
 |---|---|---|---|
 | 1 | What funds spend | **Yield only** | No option to draw from principal. Vault note 51 proposed spending from the balance; rejected |
-| 2 | Supply | **Hackathon:** our OpenRouter account, resold through per-key limits, the way Orbio does it. **Real product:** contract providers to run open-weight models, the way Touchmark does it | |
+| 2 | Supply | **Hackathon:** our OpenRouter account, resold through per-key limits, the way Orbio does it. **Real product: both** OpenRouter under an enterprise contract (breadth, closed models, invoiced after usage) **and** contracted open-weight providers the way Touchmark does it (margin) | Enterprise terms permit serving end customers |
 | 3 | ICP1 pain | **Opex is fiat, treasury is on-chain.** Off-ramp then top up becomes one stop, and idle yield pays for it | |
 | 4 | Fee | **10% of leftover yield** (yield minus what credits cost). Leftover goes back to the customer | Rate is a placeholder |
 | 5 | Keys | **OpenRouter Management API keys**, not our own proxy | Same features for the hackathon (per-key limits, per-key usage), far less to build. A proxy comes with the move to contracted providers, when `base_url` changes anyway |
 | 6 | Customers | **Two ICPs**: crypto treasuries, agent wallet teams | Vault note 51's third segment (financial agent platforms) dropped |
-| 7 | Custody | **Customer holds the vault shares and approves them to our settler; each period we redeem only `usage + fee`** | **Under review:** the workflow draft recommends the Settler contract hold shares instead. See [`docs/06-workflow.md`](docs/06-workflow.md#1-the-customer-revokes-access-before-settlement) |
+| 7 | Custody | **One Octant YDS vault per customer; shares stay in the customer's wallet; profit is minted to our Splitter, which spends only `usage + fee`.** Fallback: our own Settler holds shares | Decided 2026-09-25. Deployability checked on every target chain. See [`docs/06-workflow.md`](docs/06-workflow.md) |
 | 8 | Settlement period | **Monthly.** In the demo, settlement is triggered by hand | Easy to change: the kernel has no notion of period length |
+| 9 | Leftover yield | **Redeposited into the customer's vault** as new principal | Matches `settle` in the kernel |
 
 ## Open
 
 | | Status |
 |---|---|
-| Does the custody mechanism (#7) hold up once written as a contract | revisit during contract design |
-| **What happens to spend already made when the vault loses value** | after the workflow is final. The kernel floors yield at zero and stops new spend, nothing more |
+| Key weights, agent key in the demo, float funding | recommendations in [`docs/06-workflow.md`](docs/06-workflow.md), not yet picked |
 
 ---
 
@@ -139,7 +139,7 @@ Settled 2026-09-24. Where they depart from the source notes in [`sources/`](sour
 | 1 | Treasuries will turn this on | **zero conversations** |
 | 2 | Yield covers a meaningful share of spend | only at treasury scale: $56K principal per $200/month developer |
 | 3 | A rail will let us resell credit | **OpenRouter's standard terms forbid it**; enterprise terms allow it |
-| 4 | A CFO will approve vault shares to our settler | the approval can redeem principal too unless a contract caps it. Not built |
+| 4 | A CFO will deposit into a per-customer YDS vault we deploy | structure checked, not built |
 | 5 | Fee on leftover yield is enough revenue | heavy users pay nothing. See `docs/04` |
 
 > **A working demo proves none of the five.** It is worth building anyway. The two should not be confused.

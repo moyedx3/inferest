@@ -6,13 +6,13 @@ _Source: [`../sources/yield-to-inference-2026-09-24.md`](../sources/yield-to-inf
 
 ## Five modules
 
-Yield adapter, ledger, settler, credit router, key manager. **The yield side and the credit side connect only through the ledger**, so each rail can be swapped independently.
+Yield adapter, ledger, Splitter, credit router, key manager. **The yield side and the credit side connect only through the ledger**, so each rail can be swapped independently.
 
 ```mermaid
 flowchart LR
   A[Treasury or agent wallet] --> B[Yield adapter<br/>ERC-4626 vault]
   B --> C[Ledger<br/>principal vs accrued yield]
-  C --> D[Settler<br/>redeems usage + fee each period]
+  C --> D[Splitter<br/>receives yield, pays usage + fee monthly]
   C --> E[Credit router]
   D --> E
   E --> F[OpenRouter float]
@@ -27,7 +27,7 @@ Arrows carry information as well as money. **The core loop: raise each key's lim
 
 1. **Yield adapter.** The user deposits USDC or ETH into a standard ERC-4626 vault. The standard makes Morpho, Aave and Yearn interchangeable behind one interface.
 2. **Ledger.** Records each user's principal and vault shares. Accrued yield is `convertToAssets(shares) − principal`.
-3. **Settler** (was harvester). Yield is not redeemed per request. The ledger opens credit against accrued yield first, and redemption settles in a batch each period. It redeems only `usage + fee`; the rest of the leftover yield stays in the vault and becomes principal. See `settle` in the kernel.
+3. **Splitter** (was harvester). Yield is not redeemed per request. The ledger opens credit against accrued yield first, and redemption settles in a batch each period. It redeems only `usage + fee`; the rest of the leftover yield stays in the vault and becomes principal. See `settle` in the kernel.
 4. **Credit router.** Decides which inference rail receives the usage USDC. For the hackathon, one OpenRouter float is enough.
 5. **Key manager.** Issues a key per developer or agent and syncs the ledger's yield balance to each key's spend limit.
 
@@ -37,16 +37,9 @@ Arrows carry information as well as money. **The core loop: raise each key's lim
 
 ---
 
-## Custody: take only what was used
+## Custody
 
-**Tentative, 2026-09-24.**
-
-1. The customer deposits into the vault from their own wallet or Safe. **The shares stay there.**
-2. The customer approves those shares to our settler.
-3. Each period the settler calls `vault.redeem(shares, receiver, owner = customer)` for exactly `usage + fee`. Usage goes to the rail float, the fee to us.
-4. Nothing else moves. Returning leftover yield means not taking it.
-
-**The gap:** a plain share approval lets the settler redeem principal too, so the customer is trusting us. Closing it takes a settler contract that records principal at deposit and refuses to redeem more than `convertToAssets(shares) − principal`, or a Safe module with the same cap. Octant YDS does the cap at the vault level. For the hackathon a plain approval is enough; for a CFO it is not.
+**Decided 2026-09-25:** one Octant YDS vault per customer, shares in the customer's wallet, yield minted to our Splitter. Full mechanism, guarantees and fallback in [`06-workflow.md`](06-workflow.md).
 
 ---
 
