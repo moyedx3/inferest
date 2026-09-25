@@ -35,7 +35,7 @@ switch (cmd) {
   case "serve": {
     const app = createApp({
       store, or, chain, gateway, params: cfg.params, adminToken: cfg.adminToken, keeper, secrets: box, proxy,
-      publicConfig: { chainId: cfg.chainId, factory: cfg.factory, splitter: cfg.splitter, usdc: cfg.usdc, target: cfg.target },
+      publicConfig: { chainId: cfg.chainId, factory: cfg.factory, splitter: cfg.splitter, usdc: cfg.usdc, target: cfg.target, publicUrl: cfg.publicUrl },
     });
     app.listen(cfg.port, () => console.log(`Inferest on http://localhost:${cfg.port} (chat at /v1/chat/completions, MCP at /mcp)`));
     setInterval(() => void tick(keeper).catch((e) => keeper.log(`tick failed: ${e.message}`)), 60_000);

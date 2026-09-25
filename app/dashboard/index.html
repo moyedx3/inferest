@@ -10,6 +10,11 @@
     table { width: 100%; border-collapse: collapse; } td, th { text-align: left; padding: 4px 6px; border-bottom: 1px solid #eee; }
     button { padding: 6px 12px; margin: 4px 4px 4px 0; cursor: pointer; } input { padding: 5px; }
     pre { background: #f6f6f6; padding: 8px; overflow-x: auto; }
+    tr.revoked td { color: #999; text-decoration: line-through; }
+    #panel { display: none; border: 2px solid #111; }
+    #panel.open { display: block; }
+    .tabs button.on { font-weight: bold; }
+    #secret { font-family: ui-monospace, monospace; word-break: break-all; background: #fff7d6; padding: 8px; }
   </style>
 </head>
 <body>
@@ -32,7 +37,18 @@
     <input id="token" type="password" placeholder="admin token" />
     <button id="sync">Sync limits</button><button id="report">Report yield</button>
     <div><input id="keyname" placeholder="key name" value="dev-1" /> weight <input id="weight" type="number" value="1" style="width:60px" />
-      <button id="addkey">Create key</button></div>
+      <button id="addkey">Create key</button> <a href="/setup" class="muted">setup page for developers</a></div>
+  </div>
+
+  <div id="panel" class="card">
+    <h3 id="paneltitle">Your new key</h3>
+    <p>Copy it now. It is shown once and stored only as a hash.</p>
+    <div id="secret"></div>
+    <button id="copysecret">Copy key</button>
+    <p class="muted">Base URL <code id="baseurl"></code>, path <code>/v1</code>. Model ids are OpenRouter's. A 402 means the key's yield budget is used up.</p>
+    <div class="tabs" id="tabs"></div>
+    <pre id="snippet"></pre>
+    <button id="copysnippet">Copy snippet</button> <button id="closepanel">Close</button>
   </div>
 
   <div id="vaults"></div>
