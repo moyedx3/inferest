@@ -20,6 +20,9 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   if (Number(dep.chainId) !== Number(chain.chainId)) {
     throw new Error(`chain id mismatch: deployments ${dep.chainId} vs chain config ${chain.chainId}`);
   }
+  if (String(dep.target).toLowerCase() !== String(chain.target).toLowerCase()) {
+    throw new Error(`target mismatch: deployments ${dep.target} vs chain config ${chain.target}`);
+  }
   const railFee = Number(env.RAIL_FEE ?? "0");
   if (!(railFee >= 0 && railFee < 1)) throw new Error("RAIL_FEE must be in [0, 1)");
   return {
