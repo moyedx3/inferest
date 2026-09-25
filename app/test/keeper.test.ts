@@ -15,14 +15,21 @@ function setup(opts: { yieldMicro?: bigint; lossPending?: boolean; usage?: Recor
   store.addKey({ hash: "h1", vault: V, name: "a", weight: 1, secretSha256: "s1" });
   store.addKey({ hash: "h2", vault: V, name: "b", weight: 1, secretSha256: "s2" });
   const usage = opts.usage ?? { h1: [0], h2: [0] };
-  const ctl = { status: opts.status ?? ("success" as TxStatus) };
+  const ctl = { status: opts.status ?? ("success" as TxStatus), known: true, prepared: 0 };
   const chain: Chain = {
     yieldOf: async () => opts.yieldMicro ?? 2_000_000_000n,
     lossPending: async () => opts.lossPending ?? false,
     report: async (v) => { events.push(`report:${v}`); return "0xr"; },
     settle: async (v, u) => chain.sendSettle(v, u),
-    sendSettle: async (v, u) => { events.push(`settle:${u}`); return "0xs"; },
+    // each prepared transaction gets its own hash: "0xs", then "0xs2", "0xs3", ...; send() records the broadcast
+    prepareSettle: async (v, u) => {
+      ctl.prepared++;
+      const hash = ctl.prepared === 1 ? "0xs" : `0xs${ctl.prepared}`;
+      return { hash, send: async () => { events.push(`settle:${u}`); } };
+    },
+    sendSettle: async (v, u) => { const p = await chain.prepareSettle(v, u); await p.send(); return p.hash; },
     settleStatus: async () => ctl.status,
+    transactionKnown: async () => ctl.known,
     customerOf: async () => "0x00000000000000000000000000000000000000cc",
   };
   const or: OpenRouter = {
@@ -121,8 +128,8 @@ test("a vault already settling is not settled twice", async () => {
   const { d, events } = setup();
   let release!: () => void;
   const gate = new Promise<void>((r) => { release = r; });
-  const orig = d.chain.sendSettle;
-  d.chain.sendSettle = async (v, u) => { await gate; return orig(v, u); };
+  const orig = d.chain.prepareSettle;
+  d.chain.prepareSettle = async (v, u) => { await gate; return orig(v, u); };
   const p1 = settleVault(d, V);
   const p2 = settleVault(d, V);
   release();
@@ -147,8 +154,8 @@ test("a sync during settlement does not move the baseline past the settled usage
   const gate = new Promise<void>((r) => { release = r; });
   let entered!: () => void;
   const waiting = new Promise<void>((r) => { entered = r; });
-  const orig = d.chain.sendSettle;
-  d.chain.sendSettle = async (v, u) => { entered(); await gate; return orig(v, u); };
+  const orig = d.chain.prepareSettle;
+  d.chain.prepareSettle = async (v, u) => { entered(); await gate; return orig(v, u); };
   const p = settleVault(d, V);
   await waiting;
   await syncAll(d); // a minute tick or POST /api/admin/sync while chain.settle is in flight
@@ -170,19 +177,22 @@ test("settling an unknown vault does nothing", async () => {
 
 const OCT = Date.UTC(2026, 9, 10, 12, 0);
 const NOV = Date.UTC(2026, 10, 1, 0, 0);
+const MIN = 60_000;
 const settles = (events: string[]) => events.filter((e) => e.startsWith("settle:")).length;
+const lastLimit = (events: string[], hash: string) => events.filter((e) => e.startsWith(`limit:${hash}:`)).at(-1);
 
-test("a settlement is persisted before the receipt is awaited", async () => {
+test("a settlement is persisted before the broadcast", async () => {
   const { d, store } = setup({ usage: { h1: [100], h2: [0] }, status: "pending" });
-  let polls = 0;
-  d.chain.settleStatus = async (tx) => {
-    polls++;
-    assert.equal(store.pendingSettlement(V)!.tx, tx); // the row exists before the first receipt poll
-    return "pending";
+  const orig = d.chain.prepareSettle;
+  let persistedAtSend: string | undefined;
+  d.chain.prepareSettle = async (v, u) => {
+    const p = await orig(v, u);
+    assert.equal(store.pendingSettlement(V), undefined); // nothing persisted until the hash is known
+    return { hash: p.hash, send: async () => { persistedAtSend = store.pendingSettlement(V)?.tx; await p.send(); } };
   };
   const r = await settleVault(d, V, OCT);
+  assert.equal(persistedAtSend, "0xs");
   assert.deepEqual(r, { usage: 100_000_000n, tx: "0xs", pending: true });
-  assert.ok(polls > 1);
   const p = store.pendingSettlement(V)!;
   assert.equal(p.usageMicro, 100_000_000n);
   assert.deepEqual(p.baselines, [{ hash: "h1", baseline: 100 }, { hash: "h2", baseline: 0 }]);
@@ -206,38 +216,40 @@ test("reconciliation applies the bookkeeping once", async () => {
   const { d, store, events, ctl } = setup({ usage: { h1: [100, 100, 150], h2: [0] }, status: "pending" });
   await settleVault(d, V, OCT);
   ctl.status = "success";
-  await tick(d, OCT + 60_000);
+  await tick(d, OCT + MIN);
   assert.equal(store.listSettlements().length, 1);
   assert.equal(store.listSettlements()[0].usageMicro, "100000000");
   assert.equal(store.keyByHash("h1")!.baseline, 100); // the snapshot, not the later 150
   assert.equal(store.vault(V)!.period, 1);
   assert.equal(store.pendingSettlement(V), undefined);
   assert.equal(store.getMeta("settledMonth:" + V), "2026-10");
-  await tick(d, OCT + 120_000);
-  await reconcilePending(d);
+  await tick(d, OCT + 2 * MIN);
+  await reconcilePending(d, OCT + 3 * MIN);
   assert.equal(store.listSettlements().length, 1);
   assert.equal(store.vault(V)!.period, 1);
   assert.equal(settles(events), 1);
 });
 
-test("a reverted settlement clears the pending row and moves nothing", async () => {
-  const { d, store } = setup({ usage: { h1: [100], h2: [0] }, status: "reverted" });
+test("a reverted settlement clears the pending row, moves nothing and reopens the keys", async () => {
+  const { d, store, events } = setup({ usage: { h1: [100], h2: [0] }, status: "reverted" });
   assert.equal(await settleVault(d, V, OCT), null);
   assert.equal(store.pendingSettlement(V), undefined);
   assert.equal(store.listSettlements().length, 0);
   assert.equal(store.keyByHash("h1")!.baseline, 0);
   assert.equal(store.vault(V)!.period, 0);
+  assert.equal(lastLimit(events, "h1"), "limit:h1:1000"); // the freeze at 100 was lifted
 });
 
 test("reconciling a reverted settlement clears the row and moves nothing", async () => {
-  const { d, store, ctl } = setup({ usage: { h1: [100], h2: [0] }, status: "pending" });
+  const { d, store, events, ctl } = setup({ usage: { h1: [100], h2: [0] }, status: "pending" });
   await settleVault(d, V, OCT);
   ctl.status = "reverted";
-  await reconcilePending(d);
+  await reconcilePending(d, OCT + MIN);
   assert.equal(store.pendingSettlement(V), undefined);
   assert.equal(store.listSettlements().length, 0);
   assert.equal(store.keyByHash("h1")!.baseline, 0);
   assert.equal(store.vault(V)!.period, 0);
+  assert.equal(lastLimit(events, "h1"), "limit:h1:1000");
 });
 
 test("a vault with a pending settlement is not synced or settled again", async () => {
@@ -258,19 +270,37 @@ test("a vault with a pending settlement is not synced or settled again", async (
 test("a failed settlement is retried on a later tick within the month", async () => {
   const { d, store, events } = setup();
   await tick(d, OCT);
-  const orig = d.chain.sendSettle;
-  d.chain.sendSettle = async () => { throw new Error("simulation failed"); };
+  const orig = d.chain.prepareSettle;
+  d.chain.prepareSettle = async () => { throw new Error("simulation failed"); };
   await tick(d, NOV);
   assert.equal(settles(events), 0);
   assert.equal(store.pendingSettlement(V), undefined);
   assert.equal(store.getMeta("settledMonth:" + V), "2026-10");
-  d.chain.sendSettle = orig;
-  await tick(d, NOV + 60_000);
+  d.chain.prepareSettle = orig;
+  await tick(d, NOV + 10 * MIN); // once the backoff has passed
   assert.equal(settles(events), 1);
   assert.equal(store.listSettlements().length, 1);
   assert.equal(store.getMeta("settledMonth:" + V), "2026-11");
-  await tick(d, NOV + 120_000);
+  await tick(d, NOV + 20 * MIN);
   assert.equal(settles(events), 1);
+});
+
+test("a failed prepare reopens the keys and backs off before retrying", async () => {
+  const { d, store, events, ctl } = setup({ usage: { h1: [100], h2: [0] } });
+  await tick(d, OCT);
+  const orig = d.chain.prepareSettle;
+  d.chain.prepareSettle = async () => { ctl.prepared++; throw new Error("simulation failed"); };
+  await tick(d, NOV);
+  assert.equal(ctl.prepared, 1);
+  assert.ok(events.includes("limit:h1:100")); // the freeze happened
+  assert.equal(lastLimit(events, "h1"), "limit:h1:1000"); // and was lifted within the same tick
+  assert.equal(store.getMeta("settleRetryAfter:" + V), String(NOV + 10 * MIN));
+  await tick(d, NOV + 5 * MIN);
+  assert.equal(ctl.prepared, 1); // within the backoff: not retried
+  d.chain.prepareSettle = orig;
+  await tick(d, NOV + 10 * MIN);
+  assert.equal(settles(events), 1);
+  assert.equal(store.listSettlements().length, 1);
 });
 
 test("a vault registered mid-month is not settled that month", async () => {
@@ -283,4 +313,100 @@ test("a vault registered mid-month is not settled that month", async () => {
   assert.equal(store.getMeta("settledMonth:" + W), "2026-10");
   await tick(d, NOV);
   assert.equal(settles(events), 2); // both vaults settle in the next month
+});
+
+test("a reconcile in flight holds the vault, so a revert cannot drop a newer settlement", async () => {
+  const { d, store, events, ctl } = setup({ usage: { h1: [100], h2: [0] }, status: "pending" });
+  await settleVault(d, V, OCT); // pending row for 0xs
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  let entered!: () => void;
+  const waiting = new Promise<void>((r) => { entered = r; });
+  let gated = false;
+  d.chain.settleStatus = async (tx) => {
+    if (tx !== "0xs") return ctl.status;
+    if (!gated) { gated = true; entered(); await gate; } // only the reconcile's lookup waits
+    return "reverted";
+  };
+  const reconciling = reconcilePending(d, OCT + MIN);
+  await waiting;
+  // an admin settle while the reconcile waits on the old receipt must not start a new settlement
+  assert.equal(await settleVault(d, V, OCT + MIN), null);
+  assert.equal(settles(events), 1);
+  release();
+  await reconciling;
+  assert.equal(store.pendingSettlement(V), undefined);
+  ctl.status = "success";
+  const r = await settleVault(d, V, OCT + 2 * MIN);
+  assert.deepEqual(r, { usage: 100_000_000n, tx: "0xs2" });
+  await reconcilePending(d, OCT + 3 * MIN);
+  assert.deepEqual(store.listSettlements().map((x) => x.tx), ["0xs2"]);
+  assert.equal(store.vault(V)!.period, 1);
+});
+
+test("a mined settlement whose row vanished is reported pending, not settled", async () => {
+  const { d, store } = setup({ usage: { h1: [100], h2: [0] } });
+  let polls = 0;
+  d.chain.settleStatus = async (tx) => {
+    if (polls++ === 0) {
+      store.clearPendingSettlement(V, tx); // e.g. the admin escape hatch while the receipt was awaited
+      return "pending";
+    }
+    return "success";
+  };
+  const r = await settleVault(d, V, OCT);
+  assert.deepEqual(r, { usage: 100_000_000n, tx: "0xs", pending: true });
+  assert.equal(store.listSettlements().length, 0);
+  assert.equal(store.vault(V)!.period, 0);
+});
+
+test("an ambiguous broadcast stays pending and is not sent twice", async () => {
+  const { d, store, events, ctl } = setup({ usage: { h1: [100], h2: [0] }, status: "pending" });
+  await tick(d, OCT);
+  const orig = d.chain.prepareSettle;
+  d.chain.prepareSettle = async (v, u) => {
+    const p = await orig(v, u);
+    return { hash: p.hash, send: async () => { await p.send(); throw new Error("send timed out"); } };
+  };
+  await tick(d, NOV);
+  assert.equal(settles(events), 1);
+  assert.equal(store.pendingSettlement(V)!.tx, "0xs");
+  assert.equal(store.getMeta("settleRetryAfter:" + V), undefined); // not a prepare failure
+  await tick(d, NOV + MIN);
+  assert.equal(settles(events), 1); // still pending: no second send
+  ctl.status = "success";
+  await tick(d, NOV + 2 * MIN);
+  assert.equal(store.listSettlements().length, 1);
+  assert.equal(store.pendingSettlement(V), undefined);
+  assert.equal(store.getMeta("settledMonth:" + V), "2026-11");
+  await tick(d, NOV + 3 * MIN);
+  assert.equal(settles(events), 1);
+  assert.equal(store.listSettlements().length, 1);
+});
+
+test("a settlement unknown to the node past the age limit is cleared and retried", async () => {
+  const { d, store, events, ctl } = setup({ usage: { h1: [100], h2: [0] }, status: "pending" });
+  let lookups = 0;
+  d.chain.transactionKnown = async () => { lookups++; return ctl.known; };
+  await tick(d, OCT);
+  await tick(d, NOV); // sends 0xs, which never mines
+  ctl.known = false;
+  await tick(d, NOV + 10 * MIN);
+  assert.equal(lookups, 0); // young rows are not looked up
+  assert.equal(store.pendingSettlement(V)!.tx, "0xs");
+  await tick(d, NOV + 31 * MIN);
+  assert.equal(lookups, 1);
+  // cleared, then the month rule settled the vault again in the same tick
+  assert.equal(settles(events), 2);
+  assert.equal(store.pendingSettlement(V)!.tx, "0xs2");
+});
+
+test("a settlement known to the node but unmined stays pending past the age limit", async () => {
+  const { d, store } = setup({ usage: { h1: [100], h2: [0] }, status: "pending" });
+  const logs: string[] = [];
+  d.log = (m) => logs.push(m);
+  await settleVault(d, V, OCT);
+  await tick(d, OCT + 31 * MIN);
+  assert.equal(store.pendingSettlement(V)!.tx, "0xs");
+  assert.ok(logs.some((m) => m.includes("still unmined after 31 min")));
 });

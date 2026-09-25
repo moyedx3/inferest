@@ -128,6 +128,16 @@ async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse): Pro
       const r = await settleVault(d.keeper, vault);
       return send(res, 200, { usageMicro: r ? r.usage.toString() : null, tx: r ? r.tx : null, pending: r?.pending === true });
     }
+    if (url.pathname === "/api/admin/pending/clear") {
+      // manual escape hatch for a settlement the operator has confirmed will never mine
+      const vault = String(body.vault ?? "").toLowerCase();
+      const tx = String(body.tx ?? "");
+      const p = d.store.pendingSettlement(vault);
+      if (!p || p.tx !== tx) return send(res, 404, { error: "no such pending settlement" });
+      d.keeper.log(`admin clearing pending settlement ${tx} for ${vault} (${p.usageMicro} micro-USD)`);
+      d.store.clearPendingSettlement(vault, tx);
+      return send(res, 200, { ok: true });
+    }
     return send(res, 404, { error: "not found" });
   }
 

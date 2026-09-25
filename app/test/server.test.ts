@@ -22,7 +22,8 @@ async function start(customer = "0x00000000000000000000000000000000000000cc") {
     chain: {
       yieldOf: async () => 0n, lossPending: async () => false,
       report: async () => "0x", settle: async () => "0x",
-      sendSettle: async () => "0x", settleStatus: async () => "success" as const,
+      prepareSettle: async () => ({ hash: "0x", send: async () => {} }), sendSettle: async () => "0x",
+      settleStatus: async () => "success" as const, transactionKnown: async () => true,
       customerOf: async (v) => (v === V ? customer : ZERO),
     },
     gateway: { search: async () => [], details: async () => ({}), run: async () => ({}) } as unknown as ToolGateway,
@@ -107,7 +108,7 @@ test("settle rejects an unknown vault with 404", async () => {
 test("500 bodies do not leak URLs", async () => {
   const { base, server, store, d } = await start();
   await post(base, "/api/vaults", { vault: V });
-  d.chain.sendSettle = async () => { throw new Error("boom https://secret-rpc.example/abc?key=1"); };
+  d.chain.prepareSettle = async () => { throw new Error("boom https://secret-rpc.example/abc?key=1"); };
   const r = await post(base, "/api/admin/settle", { vault: V });
   assert.equal(r.status, 500);
   const body: any = await r.json();
@@ -115,7 +116,7 @@ test("500 bodies do not leak URLs", async () => {
   assert.ok(body.error.includes("[url]"));
   assert.equal(store.listSettlements().length, 0);
 
-  d.chain.sendSettle = async () => { throw new Error("boom HTTPS://secret-rpc.example/abc?key=1"); };
+  d.chain.prepareSettle = async () => { throw new Error("boom HTTPS://secret-rpc.example/abc?key=1"); };
   const r2 = await post(base, "/api/admin/settle", { vault: V });
   assert.equal(r2.status, 500);
   const body2: any = await r2.json();
@@ -171,5 +172,21 @@ test("the admin settle route reports whether the settlement is pending", async (
   d.chain.settleStatus = async () => "pending";
   const r2 = await post(base, "/api/admin/settle", { vault: V });
   assert.deepEqual(await r2.json(), { usageMicro: "0", tx: "0x", pending: true });
+  server.close();
+});
+
+test("the admin route clears a specific pending settlement", async () => {
+  const { base, server, store } = await start();
+  await post(base, "/api/vaults", { vault: V });
+  store.setPendingSettlement(V, { usageMicro: 5n, baselines: [], tx: "0xtx" });
+  assert.equal((await post(base, "/api/admin/pending/clear", { vault: V, tx: "0xtx" }, "wrong")).status, 401);
+  const wrongTx = await post(base, "/api/admin/pending/clear", { vault: V, tx: "0xother" });
+  assert.equal(wrongTx.status, 404);
+  assert.deepEqual(await wrongTx.json(), { error: "no such pending settlement" });
+  assert.equal(store.pendingSettlement(V)!.tx, "0xtx");
+  const ok = await post(base, "/api/admin/pending/clear", { vault: V, tx: "0xtx" });
+  assert.equal(ok.status, 200);
+  assert.equal(store.pendingSettlement(V), undefined);
+  assert.equal((await post(base, "/api/admin/pending/clear", { vault: V, tx: "0xtx" })).status, 404);
   server.close();
 });

@@ -37,8 +37,8 @@ export const SCHEMA_VERSION = "2";
 
 /** Brings an older database up to SCHEMA_VERSION. Returns the version it ends at. */
 function migrate(db: DatabaseSync, from: string): string {
+  // version 2 only adds pending_settlements, which SCHEMA has already created: the bump is all that is left
   if (from === "1") {
-    db.exec(PENDING_TABLE);
     db.prepare("UPDATE meta SET v = ? WHERE k = ?").run("2", "schemaVersion");
     return "2";
   }
@@ -51,6 +51,9 @@ SELECT k.hash, k.vault, k.name, k.weight, k.baseline, k.usage_total AS usageTota
 FROM keys k JOIN vaults v ON v.vault = k.vault`;
 
 const lc = (a: string) => a.toLowerCase();
+
+/** The meta key holding the last month a vault was settled for. */
+export const settledMonthKey = (vault: string): string => `settledMonth:${lc(vault)}`;
 
 export function openStore(path: string) {
   const db = new DatabaseSync(path);
@@ -162,15 +165,17 @@ export function openStore(path: string) {
     listPendingSettlements(): PendingSettlement[] {
       return db.prepare("SELECT * FROM pending_settlements ORDER BY created_at, vault").all().map(toPending);
     },
-    clearPendingSettlement(vault: string): void {
-      db.prepare("DELETE FROM pending_settlements WHERE vault = ?").run(lc(vault));
+    /** Clears the pending row only if it is still this tx, so a stale caller cannot drop a newer settlement. */
+    clearPendingSettlement(vault: string, tx: string): boolean {
+      return Number(db.prepare("DELETE FROM pending_settlements WHERE vault = ? AND tx = ?").run(lc(vault), tx).changes) > 0;
     },
     /**
      * Applies a mined settlement's bookkeeping in one transaction: records it, moves the baselines to the
-     * snapshot taken before sending, opens the next period and clears the pending row. Returns false, and
-     * changes nothing, unless a pending row for exactly this vault and tx exists, so it applies at most once.
+     * snapshot taken before sending, opens the next period, clears the pending row and writes the vault's
+     * settled-month marker. Returns false, and changes nothing, unless a pending row for exactly this vault
+     * and tx exists, so it applies at most once.
      */
-    completePendingSettlement(vault: string, tx: string): boolean {
+    completePendingSettlement(vault: string, tx: string, month: string): boolean {
       return inTransaction(() => {
         const r = db.prepare("SELECT * FROM pending_settlements WHERE vault = ? AND tx = ?").get(lc(vault), tx);
         if (!r) return false;
@@ -178,6 +183,8 @@ export function openStore(path: string) {
         insertSettlement(vault, p.usageMicro, p.tx);
         newPeriod(vault, p.baselines);
         db.prepare("DELETE FROM pending_settlements WHERE vault = ?").run(lc(vault));
+        db.prepare("INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v")
+          .run(settledMonthKey(vault), month);
         return true;
       });
     },

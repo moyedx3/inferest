@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { rmSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
 import { openStore } from "../store.ts";
 
 const V = "0xAbC0000000000000000000000000000000000001";
@@ -91,19 +90,32 @@ test("pending settlements round-trip", () => {
   assert.equal(p.tx, "0xtx");
   assert.ok(p.createdAt > 0);
   assert.deepEqual(s.listPendingSettlements(), [p]);
-  s.clearPendingSettlement(V);
+  assert.equal(s.clearPendingSettlement(V, "0xother"), false); // a different tx clears nothing
+  assert.equal(s.pendingSettlement(V)!.tx, "0xtx");
+  assert.equal(s.clearPendingSettlement(V, "0xtx"), true);
   assert.equal(s.pendingSettlement(V), undefined);
   assert.deepEqual(s.listPendingSettlements(), []);
+});
+
+test("clearing a stale tx leaves a newer pending settlement in place", () => {
+  const s = fresh();
+  s.setPendingSettlement(V, { usageMicro: 1n, baselines: [], tx: "0xold" });
+  s.setPendingSettlement(V, { usageMicro: 2n, baselines: [], tx: "0xnew" });
+  s.clearPendingSettlement(V, "0xold");
+  assert.equal(s.pendingSettlement(V)!.tx, "0xnew");
+  assert.equal(s.pendingSettlement(V)!.usageMicro, 2n);
 });
 
 test("completing a pending settlement applies it once, only for its tx", () => {
   const s = fresh();
   s.setUsage("h1", 5);
   s.setPendingSettlement(V, { usageMicro: 3_000_000n, baselines: [{ hash: "h1", baseline: 3 }, { hash: "h2", baseline: 0 }], tx: "0xtx" });
-  assert.equal(s.completePendingSettlement(V, "0xother"), false);
+  assert.equal(s.completePendingSettlement(V, "0xother", "2026-10"), false);
   assert.equal(s.vault(V)!.period, 0);
-  assert.equal(s.completePendingSettlement(V, "0xtx"), true);
-  assert.equal(s.completePendingSettlement(V, "0xtx"), false);
+  assert.equal(s.getMeta("settledMonth:" + V.toLowerCase()), undefined);
+  assert.equal(s.completePendingSettlement(V, "0xtx", "2026-10"), true);
+  assert.equal(s.completePendingSettlement(V, "0xtx", "2026-11"), false);
+  assert.equal(s.getMeta("settledMonth:" + V.toLowerCase()), "2026-10"); // written with the bookkeeping
   assert.equal(s.listSettlements().length, 1);
   assert.equal(s.keyByHash("h1")!.baseline, 3);
   assert.equal(s.vault(V)!.period, 1);
@@ -116,9 +128,6 @@ test("a version 1 database migrates to version 2", () => {
     const s = openStore(path);
     s.setMeta("schemaVersion", "1");
     s.close();
-    const raw = new DatabaseSync(path);
-    raw.exec("DROP TABLE IF EXISTS pending_settlements");
-    raw.close();
     const s2 = openStore(path);
     assert.equal(s2.getMeta("schemaVersion"), "2");
     assert.deepEqual(s2.listPendingSettlements(), []);
