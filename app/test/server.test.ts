@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { AddressInfo } from "node:net";
 import { createApp, sha256, type AppDeps } from "../server.ts";
+import { createProxy } from "../proxy.ts";
 import { openStore } from "../store.ts";
 import { HACKATHON_PARAMS } from "../../engine/ledger.ts";
 import type { ToolGateway } from "../tools.ts";
@@ -33,6 +34,10 @@ async function start(customer = "0x00000000000000000000000000000000000000cc") {
     adminToken: "admin",
     publicConfig: { chainId: 42161 },
     secrets: { encrypt: (p) => `enc:${p}`, decrypt: (e) => e.replace(/^enc:/, "") },
+    proxy: createProxy({
+      store, params: HACKATHON_PARAMS, decrypt: (e) => e.replace(/^enc:/, ""), dashboardUrl: "http://localhost", log: () => {},
+      fetchFn: (async () => { throw new Error("no upstream in this test"); }) as unknown as typeof fetch,
+    }),
     keeper: undefined as unknown as AppDeps["keeper"],
   };
   d.keeper = { chain: d.chain, store, or: d.or, params: d.params, log: () => {}, sleep: async () => {}, decrypt: d.secrets.decrypt };

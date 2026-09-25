@@ -277,6 +277,9 @@ test("toolBudgetFor uses the last synced state and refuses revoked keys and clos
   store.setSettling(V, true);
   assert.equal(toolBudgetFor(store, HACKATHON_PARAMS, "k1"), 0);
   store.setSettling(V, false);
+  store.setPendingSettlement(V, { usageMicro: 1n, baselines: [], tx: "0xtx" });
+  assert.equal(toolBudgetFor(store, HACKATHON_PARAMS, "k1"), 0);
+  store.clearPendingSettlement(V, "0xtx");
   store.revokeKey("k1");
   assert.equal(toolBudgetFor(store, HACKATHON_PARAMS, "k1"), 0);
   assert.equal(toolBudgetFor(store, HACKATHON_PARAMS, "k2"), 1850); // the pool cap: 2,000 credit minus k1's 150 spent

@@ -416,7 +416,7 @@ export function toolBudgetFor(store: Store, params: Params, keyId: string): numb
   const key = store.keyById(keyId);
   if (!key || key.revoked) return 0;
   const v = store.vault(key.vault);
-  if (!v || v.settling) return 0;
+  if (!v || v.settling || store.pendingSettlement(v.vault)) return 0;
   const l = computeLimits(v.yieldUsd, store.keysForVault(key.vault), params, v.frozen).find((x) => x.id === keyId);
   return l ? toolBudgetUsd(l, params) : 0;
 }

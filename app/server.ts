@@ -7,6 +7,7 @@ import type { Chain } from "./chain.ts";
 import type { OpenRouter } from "./openrouter.ts";
 import type { Store } from "./store.ts";
 import type { ToolGateway } from "./tools.ts";
+import type { Proxy } from "./proxy.ts";
 import { buildMcpServer } from "./mcp.ts";
 import { computeLimits } from "./limits.ts";
 import { sha256, newInferestKey, type SecretBox } from "./crypto.ts";
@@ -19,6 +20,7 @@ export type AppDeps = {
   adminToken: string; publicConfig: Record<string, unknown>; keeper: KeeperDeps;
   /** Encrypts each vault's OpenRouter key at rest. */
   secrets: SecretBox;
+  proxy: Proxy;
 };
 
 const DASHBOARD = fileURLToPath(new URL("./dashboard/", import.meta.url));
@@ -87,6 +89,7 @@ async function ensureCompanyKey(d: AppDeps, vault: string): Promise<void> {
 
 async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url ?? "/", "http://localhost");
+  if (await d.proxy.handle(req, res)) return;
 
   if (url.pathname === "/mcp") {
     const key = d.store.keyBySecret(sha256(bearer(req)));
