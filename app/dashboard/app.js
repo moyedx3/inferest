@@ -94,9 +94,16 @@ function showTab(i) {
   $("snippet").textContent = panelList[i].text;
   for (const [j, b] of [...$("tabs").children].entries()) b.classList.toggle("on", j === i);
 }
-$("copysecret").onclick = () => navigator.clipboard.writeText($("secret").textContent);
-$("copysnippet").onclick = () => navigator.clipboard.writeText(panelList[panelIndex].text);
-$("closepanel").onclick = () => { $("panel").classList.remove("open"); $("secret").textContent = ""; };
+$("copysecret").onclick = () => { const s = $("secret").textContent; if (s) navigator.clipboard.writeText(s); };
+$("copysnippet").onclick = () => { if (panelList[panelIndex]) navigator.clipboard.writeText(panelList[panelIndex].text); };
+$("closepanel").onclick = () => {
+  $("panel").classList.remove("open");
+  $("secret").textContent = "";
+  $("snippet").textContent = "";
+  $("tabs").innerHTML = "";
+  panelList = [];
+  panelIndex = 0;
+};
 
 async function render() {
   const s = await api("/api/state");
