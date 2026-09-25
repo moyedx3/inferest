@@ -15,3 +15,7 @@ arbitrum = "${ARBITRUM_RPC_URL}"
 
 [fuzz]
 runs = 256
+
+# Foundry's lint pass does not resolve the lib/octant-v2-core/:src/= context remapping, so linting is skipped on build (still available with `forge lint`).
+[lint]
+lint_on_build = false
