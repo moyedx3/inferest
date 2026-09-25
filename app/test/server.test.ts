@@ -21,7 +21,7 @@ async function start(customer = "0x00000000000000000000000000000000000000cc") {
     },
     chain: {
       yieldOf: async () => 0n, lossPending: async () => false,
-      report: async () => "0x", settle: async () => "0x",
+      report: async () => "0x", settle: async () => "0x", totalAssets: async () => 1_000_000_000n,
       prepareSettle: async () => ({ hash: "0x", send: async () => {} }), sendSettle: async () => "0x",
       settleStatus: async () => "success" as const, transactionKnown: async () => true,
       customerOf: async (v) => (v === V ? customer : ZERO),

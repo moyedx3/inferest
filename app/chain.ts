@@ -15,6 +15,8 @@ export interface Chain {
   /** True when the yield source is worth less than the vault last reported: limits must freeze. */
   lossPending(vault: string): Promise<boolean>;
   report(vault: string): Promise<string>;
+  /** The strategy's totalAssets(), in base units of the underlying asset. */
+  totalAssets(vault: string): Promise<bigint>;
   /** Sends settle and waits for the receipt: sendSettle followed by a wait. Throws if it reverts. */
   settle(vault: string, usageMicro: bigint): Promise<string>;
   /** Simulates, prepares and signs settle without broadcasting; send() broadcasts the signed transaction. */
@@ -97,6 +99,8 @@ export function makeChain(cfg: Config): Chain {
       return live + idle < stored;
     },
     report: (vault) => write(vault as Hex, strategyAbi, "report", []),
+    totalAssets: (vault) =>
+      pub.readContract({ address: vault as Hex, abi: strategyAbi, functionName: "totalAssets" }),
     settle: (vault, usageMicro) => write(cfg.splitter, splitterAbi, "settle", [vault, usageMicro]),
     prepareSettle,
     async sendSettle(vault, usageMicro) {

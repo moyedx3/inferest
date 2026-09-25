@@ -159,7 +159,6 @@ test("a price above the cap is not recorded as a paid call", async () => {
   const g = toolGateway({
     orthogonalKey: "orth",
     fetchFn: (async () => new Response("{}")) as unknown as typeof fetch,
-    // mirrors x402PayingFetch: the amount is reported only when within the cap, then x402-fetch throws unsigned
     makePayingFetch: (max, onAmount) => (async () => {
       if (price <= max) onAmount(price);
       throw new Error("Payment amount exceeds maximum allowed");
