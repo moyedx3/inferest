@@ -95,6 +95,40 @@ test("tick reports once a day and settles on a new month, not on first run", asy
   assert.equal(store.getMeta("lastSettleMonth"), "2026-11");
 });
 
+test("overlapping ticks do not run twice", async () => {
+  const { d, events } = setup();
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  const orig = d.chain.report;
+  d.chain.report = async (v) => { await gate; return orig(v); };
+  const day1 = Date.UTC(2026, 9, 1, 0, 0);
+  const p1 = tick(d, day1);
+  const p2 = tick(d, day1 + 1000); // second tick while the first is still in flight
+  release();
+  await Promise.all([p1, p2]);
+  assert.equal(events.filter((e) => e.startsWith("report:")).length, 1);
+  const syncedBefore = events.filter((e) => e === "get:h1:0").length;
+  await tick(d, day1 + 86_400_000 + 60_000); // a third tick, after both earlier ones settled
+  const syncedAfter = events.filter((e) => e === "get:h1:0").length;
+  assert.equal(events.filter((e) => e.startsWith("report:")).length, 2);
+  assert.equal(syncedAfter, syncedBefore + 1);
+});
+
+test("a vault already settling is not settled twice", async () => {
+  const { d, events } = setup();
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  const orig = d.chain.settle;
+  d.chain.settle = async (v, u) => { await gate; return orig(v, u); };
+  const p1 = settleVault(d, V);
+  const p2 = settleVault(d, V);
+  release();
+  const [r1, r2] = await Promise.all([p1, p2]);
+  assert.equal(events.filter((e) => e.startsWith("settle:")).length, 1);
+  assert.ok(r1 !== null);
+  assert.equal(r2, null);
+});
+
 test("toolBudgetFor uses the last synced state", async () => {
   const { d, store } = setup({ usage: { h1: [100], h2: [0] } });
   await syncVault(d, V);
