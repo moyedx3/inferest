@@ -18,6 +18,8 @@ async function start(customer = "0x00000000000000000000000000000000000000cc") {
       createKey: async (name) => { created.push(name); return { key: "sk-or-v1-secret", hash: "h1" }; },
       getKey: async (h) => ({ hash: h, usage: 0, limit: 0, disabled: false }),
       setLimit: async () => {},
+      deleteKey: async () => {},
+      getGeneration: async () => undefined,
     },
     chain: {
       yieldOf: async () => 0n, lossPending: async () => false,

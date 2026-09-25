@@ -42,6 +42,8 @@ function setup(opts: { yieldMicro?: bigint; lossPending?: boolean; usage?: Recor
       return { hash: h, usage: u, limit: null, disabled: false };
     },
     setLimit: async (h, l) => { events.push(`limit:${h}:${l}`); },
+    deleteKey: async () => {},
+    getGeneration: async () => undefined,
   };
   const d: KeeperDeps = { chain, store, or, params: HACKATHON_PARAMS, log: () => {}, sleep: async () => {} };
   return { d, store, events, ctl };
