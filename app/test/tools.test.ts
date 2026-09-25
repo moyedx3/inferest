@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { toolGateway, BudgetExhausted, type PayingFetchFactory } from "../tools.ts";
+import { toolGateway, BudgetExhausted, ToolCallFailed, type PayingFetchFactory } from "../tools.ts";
 
 const searchBody = {
   success: true,
@@ -85,4 +85,92 @@ test("rejects paths that could escape the API", async () => {
   const { g } = gateway(1);
   await assert.rejects(g.run("h1", { api: "olostep", path: "/../admin" }), /invalid/);
   await assert.rejects(g.run("h1", { api: "olo/step", path: "/x" }), /invalid/);
+});
+
+function failingGateway(fail: () => Promise<Response>) {
+  const recorded: unknown[][] = [];
+  const g = toolGateway({
+    orthogonalKey: "orth",
+    fetchFn: (async () => new Response("{}")) as unknown as typeof fetch,
+    makePayingFetch: (_max, onAmount) => (async () => { onAmount(5_000n); return fail(); }) as unknown as typeof fetch,
+    budgetUsd: () => 1,
+    record: (...a) => recorded.push(a),
+  });
+  return { g, recorded };
+}
+
+test("records a paid call that fails after payment", async () => {
+  const { g, recorded } = failingGateway(async () => new Response("upstream down", { status: 500 }));
+  await assert.rejects(g.run("h1", { api: "olostep", path: "/v1/scrapes" }), (err: unknown) => {
+    assert.ok(err instanceof ToolCallFailed);
+    assert.equal(err.charged, 0.005);
+    assert.match(err.message, /500 upstream down/);
+    assert.match(err.message, /check usage before retrying/);
+    return true;
+  });
+  assert.deepEqual(recorded, [["h1", "olostep", "/v1/scrapes", 0.005]]);
+});
+
+test("records a paid call whose request throws after the amount was chosen", async () => {
+  const { g, recorded } = failingGateway(async () => { throw new Error("socket hang up"); });
+  await assert.rejects(g.run("h1", { api: "olostep", path: "/v1/scrapes" }), (err: unknown) => {
+    assert.ok(err instanceof ToolCallFailed);
+    assert.match(err.message, /socket hang up/);
+    assert.match(err.message, /0\.005/);
+    assert.match(err.message, /check usage/);
+    return true;
+  });
+  assert.deepEqual(recorded, [["h1", "olostep", "/v1/scrapes", 0.005]]);
+});
+
+test("parallel runs on one key share the budget", async () => {
+  const charge = 5_000n;
+  const paid: { max: bigint }[] = [];
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  const g = toolGateway({
+    orthogonalKey: "orth",
+    fetchFn: (async () => new Response("{}")) as unknown as typeof fetch,
+    makePayingFetch: (max, onAmount) => (async () => {
+      paid.push({ max });
+      onAmount(charge);
+      await gate;
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }) as unknown as typeof fetch,
+    budgetUsd: () => 0.01,
+    record: () => {},
+  });
+  const call = { api: "olostep", path: "/v1/scrapes" };
+  const r1 = g.run("h1", call);
+  await new Promise((r) => setImmediate(r)); // run 1 has chosen its amount
+  const r2 = g.run("h1", call);
+  assert.equal(paid[1].max, 5_000n);
+  await assert.rejects(g.run("h1", call), BudgetExhausted);
+  assert.equal(paid.length, 2);
+  release();
+  await Promise.all([r1, r2]);
+  await g.run("h1", call);
+  assert.equal(paid[2].max, 10_000n);
+});
+
+test("a price above the cap is not recorded as a paid call", async () => {
+  const recorded: unknown[][] = [];
+  const price = 5_000n;
+  const g = toolGateway({
+    orthogonalKey: "orth",
+    fetchFn: (async () => new Response("{}")) as unknown as typeof fetch,
+    // mirrors x402PayingFetch: the amount is reported only when within the cap, then x402-fetch throws unsigned
+    makePayingFetch: (max, onAmount) => (async () => {
+      if (price <= max) onAmount(price);
+      throw new Error("Payment amount exceeds maximum allowed");
+    }) as unknown as typeof fetch,
+    budgetUsd: () => 0.001,
+    record: (...a) => recorded.push(a),
+  });
+  await assert.rejects(g.run("h1", { api: "olostep", path: "/v1/scrapes" }), (err: unknown) => {
+    assert.ok(err instanceof Error && !(err instanceof ToolCallFailed));
+    assert.match(err.message, /exceeds maximum/);
+    return true;
+  });
+  assert.deepEqual(recorded, []);
 });

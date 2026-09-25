@@ -17,6 +17,9 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   };
   const chain = JSON.parse(readFileSync(env.CHAIN_CONFIG ?? "config/arbitrum-one.json", "utf8"));
   const dep = JSON.parse(readFileSync(need("DEPLOYMENTS"), "utf8"));
+  if (Number(dep.chainId) !== Number(chain.chainId)) {
+    throw new Error(`chain id mismatch: deployments ${dep.chainId} vs chain config ${chain.chainId}`);
+  }
   const railFee = Number(env.RAIL_FEE ?? "0");
   if (!(railFee >= 0 && railFee < 1)) throw new Error("RAIL_FEE must be in [0, 1)");
   return {

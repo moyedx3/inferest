@@ -45,3 +45,45 @@ test("the rail fee scales credit and settlement usage", () => {
 test("settlement usage in USDC base units", () => {
   assert.equal(usageMicro([key("a", 1, 510, 10, 0.25), key("b", 1, 0)], H), 500_250_000n);
 });
+
+test("reweighting after spend never opens more than the yield", () => {
+  const out = computeLimits(100, [key("a", 0, 50, 0), key("b", 1, 0, 0)], H, false);
+  assert.ok(Math.abs(out[1].remaining - 50) < 1e-9);
+  const total = out.reduce((s, l) => s + l.spent + l.remaining, 0);
+  assert.ok(total <= 100 + 1e-9);
+});
+
+test("open credit never exceeds the pool, and scaling is a no-op without overspend", () => {
+  let seed = 12345;
+  const rand = () => {
+    seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+    return seed / 2_147_483_648;
+  };
+  let noOverspendCases = 0;
+  for (const params of [HACKATHON_PARAMS, DEFAULT_PARAMS]) {
+    for (let i = 0; i < 200; i++) {
+      const yieldUsd = rand() * 1_000;
+      const n = 1 + Math.floor(rand() * 4);
+      const keys: KeyInput[] = [];
+      for (let j = 0; j < n; j++) {
+        const usageTotal = rand() * 2 * yieldUsd;
+        const baseline = usageTotal * rand();
+        const toolSpent = i % 2 === 0 ? rand() * yieldUsd : rand() * yieldUsd * 0.01;
+        // odd cases keep spend small so some cases have no key over its share
+        keys.push(key(`k${j}`, rand() * 3, usageTotal, i % 2 === 0 ? baseline : usageTotal * (1 - rand() * 0.01), toolSpent));
+      }
+      const out = computeLimits(yieldUsd, keys, params, false);
+      const credit = Math.max(0, yieldUsd) * (1 - params.railFee);
+      const spent = out.reduce((s, l) => s + l.spent, 0);
+      const open = out.reduce((s, l) => s + l.remaining, 0);
+      // spend already past the pool cannot be undone, so the bound is on what is still open
+      assert.ok(open <= Math.max(0, credit - spent) + 1e-6, `case ${i}: open ${open}, spent ${spent}, credit ${credit}`);
+      if (spent <= credit) assert.ok(spent + open <= credit + 1e-6, `case ${i}: ${spent + open} > ${credit}`);
+      if (out.every((l) => l.spent <= l.budget)) {
+        noOverspendCases++;
+        for (const l of out) assert.ok(Math.abs(l.remaining - (l.budget - l.spent)) < 1e-9, `case ${i}: scaled without overspend`);
+      }
+    }
+  }
+  assert.ok(noOverspendCases > 0);
+});

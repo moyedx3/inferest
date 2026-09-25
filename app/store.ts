@@ -81,13 +81,24 @@ export function openStore(path: string) {
       return r ? toKey(r) : undefined;
     },
     recordToolCall(keyHash: string, api: string, path: string, priceUsd: number): void {
-      db.prepare(`INSERT INTO tool_calls (key_hash, api, path, price, period, at)
+      const r = db.prepare(`INSERT INTO tool_calls (key_hash, api, path, price, period, at)
         SELECT ?, ?, ?, ?, v.period, ? FROM keys k JOIN vaults v ON v.vault = k.vault WHERE k.hash = ?`)
         .run(keyHash, api, path, priceUsd, Date.now(), keyHash);
+      if (Number(r.changes) === 0) throw new Error(`unknown key ${keyHash}`);
     },
-    startNewPeriod(vault: string): void {
-      db.prepare("UPDATE keys SET baseline = usage_total WHERE vault = ?").run(lc(vault));
-      db.prepare("UPDATE vaults SET period = period + 1 WHERE vault = ?").run(lc(vault));
+    /** Opens the next period. Listed keys take the given baseline; the rest take their current usage. */
+    startNewPeriod(vault: string, baselines?: { hash: string; baseline: number }[]): void {
+      db.exec("BEGIN");
+      try {
+        db.prepare("UPDATE keys SET baseline = usage_total WHERE vault = ?").run(lc(vault));
+        const set = db.prepare("UPDATE keys SET baseline = ? WHERE hash = ? AND vault = ?");
+        for (const b of baselines ?? []) set.run(b.baseline, b.hash, lc(vault));
+        db.prepare("UPDATE vaults SET period = period + 1 WHERE vault = ?").run(lc(vault));
+        db.exec("COMMIT");
+      } catch (e) {
+        db.exec("ROLLBACK");
+        throw e;
+      }
     },
     recordSettlement(vault: string, usageMicro: bigint, tx: string): void {
       db.prepare("INSERT INTO settlements (vault, usage_micro, tx, at) VALUES (?, ?, ?, ?)").run(lc(vault), usageMicro.toString(), tx, Date.now());

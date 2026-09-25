@@ -59,6 +59,7 @@ contract Splitter is ReentrancyGuard {
 
     /// @param usage What the period's model and tool spend cost, in the vault's asset units.
     ///        Capped at the yield: anything above it is emitted as `shortfall` and never taken.
+    /// @dev Reverts while the target vault cannot cover `paid` (Octant's withdraw is called with zero max loss); the keeper retries later.
     function settle(address vault, uint256 usage)
         external
         nonReentrant

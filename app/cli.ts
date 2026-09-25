@@ -33,7 +33,14 @@ switch (cmd) {
   }
   case "sync": await syncAll(keeper); break;
   case "report": await reportAll(keeper); break;
-  case "settle": console.log(await settleVault(keeper, String(arg))); break;
+  case "settle":
+    if (!store.vault(String(arg))) {
+      console.log("unknown vault");
+      process.exitCode = 1;
+      break;
+    }
+    console.log(await settleVault(keeper, String(arg)));
+    break;
   default:
     console.log("usage: node app/cli.ts serve | sync | report | settle <vault>");
     process.exitCode = 1;

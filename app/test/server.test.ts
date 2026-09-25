@@ -93,3 +93,12 @@ test("serves the dashboard", async () => {
   assert.match(await r.text(), /Inferest/);
   server.close();
 });
+
+test("settle rejects an unknown vault with 404", async () => {
+  const { base, server, store } = await start();
+  const r = await post(base, "/api/admin/settle", { vault: "0x00000000000000000000000000000000000000bb" });
+  assert.equal(r.status, 404);
+  assert.deepEqual(await r.json(), { error: "unknown vault" });
+  assert.equal(store.listSettlements().length, 0);
+  server.close();
+});
