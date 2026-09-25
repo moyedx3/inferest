@@ -15,7 +15,15 @@ export type Params = {
   railFee: number; // cost of turning USDC into credits on the rail, e.g. 0.05 for OpenRouter crypto top-up
 };
 
+// Real product, rail fee passed through to the customer.
 export const DEFAULT_PARAMS: Params = { ourFee: 0.10, railFee: 0.05 };
+
+// Hackathon build: we absorb the rail fee, so one USDC of yield buys one dollar of credit.
+// The fee becomes our operating cost; see operatorNet.
+export const HACKATHON_PARAMS: Params = { ourFee: 0.10, railFee: 0 };
+
+// What buying credit actually costs us on the rail, whatever we charge the customer.
+export const RAIL_COST = 0.05; // OpenRouter crypto purchase fee
 
 export type Position = {
   principal: number; // USD basis that is never spent; grows when leftover yield is returned
@@ -29,7 +37,7 @@ export function open(principal: number, pricePerShare: number): Position {
 }
 
 // convertToAssets(shares) - principal. Floors at zero: a vault loss never creates negative yield to spend.
-// What happens to spend already made when the vault loses is open (README, open decisions).
+// On-chain, the YDS vault burns unsettled yield first on a loss (docs/06-workflow.md, vault loss).
 export function accruedYield(p: Position, pricePerShare: number): number {
   return Math.max(0, p.shares * pricePerShare - p.principal);
 }
@@ -76,6 +84,13 @@ export function settle(p: Position, pricePerShare: number, params: Params = DEFA
     position: { principal: p.principal + returned, shares: p.shares - pulledShares, spent: 0 },
     yield: y, usage, leftover, fee, returned, pull, pulledShares,
   };
+}
+
+// Our result for one settlement: the fee we earned minus the part of the rail fee we did not pass through.
+// With HACKATHON_PARAMS this is fee − 5% of usage, so it turns negative once usage passes 2/3 of yield.
+export function operatorNet(s: Settlement, params: Params = DEFAULT_PARAMS, railCost: number = RAIL_COST): number {
+  const absorbed = Math.max(0, railCost - params.railFee);
+  return s.fee - s.usage * (1 - params.railFee) * absorbed;
 }
 
 // Principal a monthly credit budget needs if yield alone has to cover all of it.

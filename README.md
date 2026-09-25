@@ -126,12 +126,14 @@ Settled 2026-09-24. Where they depart from the source notes in [`sources/`](sour
 | 10 | Key budgets | **Admin-set weights per key, default equal** | |
 | 11 | Demos | **Two separate demos**: treasury (ICP1) and agent (ICP2) | |
 | 12 | Paid tools | **Orthogonal, through an Inferest MCP server**, paid per call in USDC from the same yield | See `docs/06` decision 9 |
+| 13 | `report()` cadence | **Daily** | |
+| 14 | Rail fee (hackathon) | **We absorb it.** Customer gets $1 of credit per $1 of yield; the ~5% is our cost | `HACKATHON_PARAMS` in the kernel |
 
 ## Open
 
 | | Status |
 |---|---|
-| `report()` cadence, rail fee in the hackathon build | recommendations in [`docs/06-workflow.md`](docs/06-workflow.md), not yet picked |
+| Rail fee in the real product: pass through, absorb, or enterprise invoice | absorbed in the hackathon build; absorbing loses money past 2/3 of yield used |
 
 ---
 

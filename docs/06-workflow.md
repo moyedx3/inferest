@@ -165,7 +165,7 @@ Standard ERC-4626, any time, no window. The 24h request window exists only under
 
 ### 3. Splitting yield across keys. **Decided: admin-set weights, default equal**
 
-With $2,114 of credit and three keys, each gets about $705. One key's unused share does not flow to the others until the admin changes weights. Rejected: a shared pool (between syncs every key can spend the whole pool, so overshoot up to N times) and fixed dollar amounts (the admin has to guess the yield).
+With $2,225 of credit and three keys, each gets about $742. One key's unused share does not flow to the others until the admin changes weights. Rejected: a shared pool (between syncs every key can spend the whole pool, so overshoot up to N times) and fixed dollar amounts (the admin has to guess the yield).
 
 ### 4. Cap us on-chain. **Resolved by D**
 
@@ -234,7 +234,7 @@ Standard ERC-4626, any time, no window. The 24h request window exists only under
 
 ### 3. Splitting yield across keys. **Decided: admin-set weights, default equal**
 
-With $2,114 of credit and three keys, each gets about $705. One key's unused share does not flow to the others until the admin changes weights. Rejected: a shared pool (between syncs every key can spend the whole pool, so overshoot up to N times) and fixed dollar amounts (the admin has to guess the yield).
+With $2,225 of credit and three keys, each gets about $742. One key's unused share does not flow to the others until the admin changes weights. Rejected: a shared pool (between syncs every key can spend the whole pool, so overshoot up to N times) and fixed dollar amounts (the admin has to guess the yield).
 
 ### 4. Cap us on-chain. **Resolved by D**
 
@@ -256,15 +256,11 @@ YDS burns the Splitter's shares first, and limits only ever open up to the Split
 
 The Splitter deposits `leftover − fee` back into the customer's vault with the customer as receiver, so it becomes principal and compounds.
 
-### 8. How often the keeper calls `report()`
+### 8. How often the keeper calls `report()`. **Decided: daily**
 
 `report()` is the vault's bookkeeping call. It measures what the vault's position in the yield source is worth now, compares that with the last report, and mints the difference to the Splitter as new shares (or burns Splitter shares on a loss). Until it is called, interest accrues inside the yield source but nobody can spend it, because it has not been booked.
 
-| Option | Cost |
-|---|---|
-| **A. Daily (Recommended)** | Limits step up once a day. One transaction per customer per day, cents on an L2 |
-| B. Hourly | Smoother limits, 24 times the gas |
-| C. Only at settlement | Cheapest, but keys sit at zero all month. Not viable |
+Daily means limits step up once a day, at one transaction per customer per day. Rejected: hourly (24 times the gas for smoother limits) and only at settlement (keys at zero all month).
 
 In the demos the keeper calls it by hand right after the time warp.
 
@@ -278,29 +274,33 @@ Agents and developers using Inferest also get paid tools (web search, scraping, 
 
 **Why Orthogonal over AgentCash:** Orthogonal is one server-side API (`search`, `details`, `run`) with a curated catalog, a price on every response, and x402 payment from a wallet we control. [AgentCash](https://agentcash.dev/docs/) has a bigger open catalog (3,200+ APIs), but it is built as a client-side CLI and MCP with a local wallet per user, and schemas vary by merchant. That fits one agent paying for itself, not a service paying on behalf of many customers. AgentCash stays a candidate for a later "bring your own agent wallet" mode.
 
-### 10. Rail fee in the hackathon build
+### 10. Rail fee. **Decided: we absorb it in the hackathon build**
 
-OpenRouter charges 5% on crypto purchases and 5.5% on card purchases, so buying credit with USD after an off-ramp costs more, not less. The only route that may avoid it is the enterprise invoice (fee set in the order form).
+**The customer never sees the rail fee. It is our operating cost, handled entirely off-chain.**
 
-| Option | Effect |
+| Layer | What happens |
 |---|---|
-| **A. Set `railFee = 0` for the hackathon; we absorb the fee on our small float (Recommended)** | A $50 float costs us $2.50. Demo numbers get simpler: credit equals yield |
-| B. Keep `railFee = 0.05` | Realistic, but every demo number carries the 0.95 factor |
+| Worker (limits) | `pool = yieldInSplitter − spentThisPeriod`. One USDC of yield opens one dollar of credit |
+| Splitter (on-chain) | Unchanged. `settle(vault, usage)` with `usage` = credits spent, 1:1 in USDC. The contract has no notion of a rail fee |
+| Our treasury (off-chain) | `usage` arrives at the float address. Buying that much OpenRouter credit costs about 5% more; the difference comes out of the fee address |
+| Kernel | `HACKATHON_PARAMS = { ourFee: 0.10, railFee: 0 }`; `operatorNet(settlement)` = fee − 5% of usage |
+
+**The cost of absorbing it:** our result per settlement is `10% × leftover − 5% × usage`, which is **negative once a customer uses more than two thirds of its yield** (pinned in `ledger.test.ts`). Fine for a hackathon float. For the real product it is a choice between passing the fee through (`DEFAULT_PARAMS`, `railFee = 0.05`), absorbing it as acquisition cost, or removing it with the enterprise invoice. Tools bought through Orthogonal carry no rail fee either way.
 
 ---
 
 ## Demo scripts
 
-_Numbers below assume `railFee = 0.05`; they change if decision 10 goes to A._
+_Numbers use `HACKATHON_PARAMS` (rail fee absorbed) and are pinned in `engine/ledger.test.ts`._
 
 ### Treasury (ICP1)
 
 1. Finance lead deposits 100,000 USDC into their vault. Shares appear in their wallet.
 2. Admin creates three developer keys at equal weight.
-3. Warp six months, call `report()`: **$2,225** yield lands in the Splitter; **$2,114** of credit opens, about **$705** per key.
+3. Warp six months, call `report()`: **$2,225** yield lands in the Splitter and **$2,225** of credit opens, about **$742** per key.
 4. Developers call real models from their IDEs; say **$500** spent.
-5. Settle: **$526** to the float, **$170** fee, **$1,529** redeposited. Principal is now **$101,529**, still in their wallet.
-6. Withdraw **$101,529** straight from the wallet. No request, no wait.
+5. Settle: **$500** to the float, **$173** fee (10% of the $1,725 left over), **$1,553** redeposited. Principal is now **$101,553**, still in their wallet.
+6. Withdraw **$101,553** straight from the wallet. No request, no wait.
 
 ### Agent (ICP2)
 

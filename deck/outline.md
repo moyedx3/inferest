@@ -16,7 +16,7 @@ _Content spec for design. Every number traces to [`../docs/`](../docs/) or [`../
 | 4 | Proof | Venice proved people will lock principal to receive inference daily | VVV ~$1.5B market cap; 1 DIEM = $1/day | `docs/02` |
 | 5 | Gap | Everyone funds it with their own token. Nobody uses neutral yield | landscape table, one column highlighted | `docs/02` |
 | 6 | Product | Deposit once; the interest becomes API keys, and what you don't use comes back | the loop diagram | README |
-| 7 | Demo | live | $100,000 deposited, 6 months, $2,225 yield, $2,114 of credit across 3 keys; $500 used, $1,529 returned, principal $101,529 | `hackathon/PLAN.md` |
+| 7 | Demo | live | Treasury: $100,000 deposited, 6 months, $2,225 of credit across 3 keys; $500 used, $1,553 returned, principal $101,553. Agent: pays its own models and tools from its own yield | `hackathon/PLAN.md` |
 | 8 | Economics | A deposit of about 23x the annual AI budget covers it entirely | unit economics table | `docs/04` |
 | 9 | Target | Principal never leaves the customer's wallet | Octant YDS target architecture | `docs/03` |
 | 10 | Next | Five treasury interviews, one rail contract, one non-custodial pilot | | `hackathon/PLAN.md` |

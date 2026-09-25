@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   open, accruedYield, creditLimit, remaining, spend, settle,
-  requiredPrincipal, priceAfter, DEFAULT_PARAMS,
+  requiredPrincipal, priceAfter, DEFAULT_PARAMS, HACKATHON_PARAMS, operatorNet,
 } from "./ledger.ts";
 
 const close = (a: number, b: number, tol = 1e-6) => assert.ok(Math.abs(a - b) <= tol, `${a} != ${b}`);
@@ -88,4 +88,36 @@ test("vault loss floors accrued yield at zero instead of going negative", () => 
 test("params are swappable per rail", () => {
   const noRailFee = { ...DEFAULT_PARAMS, railFee: 0 }; // e.g. an on-chain rail with no top-up fee
   close(requiredPrincipal(10, 0.045, noRailFee), 10 * 12 / 0.045, 1e-6);
+});
+
+test("hackathon demo: rail fee absorbed, credit equals yield", () => {
+  // docs/06-workflow.md demo scripts quote these
+  const H = HACKATHON_PARAMS;
+  const p = open(100_000, 1);
+  const price = priceAfter(1, 0.045, 0.5);
+  close(creditLimit(p, price, H), 2_225.2, 0.1);
+  close(creditLimit(p, price, H) / 3, 741.8, 0.1);
+  const s = settle(spend(p, 500, price, H), price, H);
+  close(s.usage, 500);
+  close(s.leftover, 1_725.2, 0.1);
+  close(s.fee, 172.5, 0.1);
+  close(s.returned, 1_552.7, 0.1);
+  close(s.position.principal, 101_552.7, 0.1);
+  close(operatorNet(s, H), 172.5 - 25, 0.1); // we pay ~$25 of rail fee on $500 of credit
+});
+
+test("absorbing the rail fee loses money past two thirds of yield used", () => {
+  const H = HACKATHON_PARAMS;
+  const p = open(100_000, 1);
+  const y = 1_000;
+  const net = (used: number) => operatorNet(settle(spend(p, used, 1.01, H), 1.01, H), H);
+  close(net(y * 2 / 3), 0, 1e-6);
+  assert.ok(net(y * 0.5) > 0);
+  assert.ok(net(y) < 0);
+});
+
+test("passing the rail fee through costs us nothing", () => {
+  const p = open(100_000, 1);
+  const s = settle(spend(p, 500, 1.01), 1.01);
+  close(operatorNet(s), s.fee);
 });

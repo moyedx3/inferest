@@ -35,14 +35,9 @@
 
 ---
 
-## Demo script (3 minutes)
+## Demo scripts
 
-1. The finance lead deposits 100,000 USDC with one button. The vault shares land in their own wallet.
-2. Fast-forward six months. **$2,225** of yield accrues, and **$2,114** of credit opens across three developer keys (about $705 each) automatically.
-3. A developer IDE and an OpenClaw agent each call a real model on their own key. Say the keys spend **$500** this period.
-4. Settle. **$526** goes to the rail for that usage, **$170** to us (10% of the $1,699 left over), and **$1,529** stays in the customer's vault. Principal is now **$101,529**. Nothing else left their wallet.
-
-> **Where the numbers come from.** 4.5% is an APY, so six months is `1.045^0.5 − 1` = 2.225%, not 4.5% / 2. Credit = yield × 0.95 after the 5% rail fee. Usage = $500 / 0.95. All pinned in `engine/ledger.test.ts`. **On the fork, the vault's live APY sets the real figure**, so the dashboard must display what the ledger reads, not these constants. If the live APY is far from 4.5%, update this script and the deck before the demo.
+Two separate demos, treasury and agent. Scripts and numbers live in [`../docs/06-workflow.md`](../docs/06-workflow.md#demo-scripts) so there is one copy. **On the fork, the vault's live APY sets the real figures**, so the dashboard must display what the ledger reads, not these constants.
 
 ---
 
