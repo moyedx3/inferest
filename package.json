@@ -12,9 +12,10 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.1",
+    "@x402/core": "^2.27.0",
+    "@x402/evm": "^2.27.0",
+    "@x402/fetch": "^2.27.0",
     "viem": "^2.56.9",
-    "x402": "^1.2.0",
-    "x402-fetch": "^1.2.0",
     "zod": "^3.25.76"
   },
   "devDependencies": {

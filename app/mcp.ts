@@ -47,7 +47,9 @@ export function buildMcpServer(gateway: ToolGateway, keyHash: string): McpServer
       try {
         return text(await gateway.run(keyHash, args));
       } catch (e) {
-        return { isError: true, content: [{ type: "text" as const, text: (e as Error).message }] };
+        const message = (e as Error).message;
+        console.error(`run_tool ${keyHash}: ${message}`);
+        return { isError: true, content: [{ type: "text" as const, text: message }] };
       }
     },
   );

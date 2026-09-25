@@ -174,3 +174,25 @@ test("a price above the cap is not recorded as a paid call", async () => {
   });
   assert.deepEqual(recorded, []);
 });
+
+test("a paid replay answered with 402 was rejected, so it is not recorded", async () => {
+  const recorded: unknown[][] = [];
+  const header = Buffer.from(JSON.stringify({ x402Version: 2, error: "invalid payment" })).toString("base64");
+  const g = toolGateway({
+    orthogonalKey: "orth",
+    fetchFn: (async () => new Response("{}")) as unknown as typeof fetch,
+    makePayingFetch: (_max, onAmount) => (async () => {
+      onAmount(5_000n);
+      return new Response("{}", { status: 402, headers: { "payment-required": header } });
+    }) as unknown as typeof fetch,
+    budgetUsd: () => 1,
+    record: (...a) => recorded.push(a),
+  });
+  await assert.rejects(g.run("h1", { api: "olostep", path: "/v1/scrapes" }), (err: unknown) => {
+    assert.ok(err instanceof Error && !(err instanceof ToolCallFailed));
+    assert.match(err.message, /invalid payment/);
+    assert.match(err.message, /nothing charged/);
+    return true;
+  });
+  assert.deepEqual(recorded, []);
+});
