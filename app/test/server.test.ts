@@ -294,3 +294,26 @@ test("clearing a pending settlement is refused while the vault is settling", asy
   assert.equal(store.pendingSettlement(V)!.tx, "0xtx");
   server.close();
 });
+
+test("serves the setup page with the base URL filled in", async () => {
+  const { base, server, d } = await start();
+  d.publicConfig.publicUrl = "https://inferest.example";
+  const r = await fetch(base + "/setup");
+  assert.equal(r.status, 200);
+  assert.match(r.headers.get("content-type") ?? "", /text\/html/);
+  const html = await r.text();
+  assert.match(html, /snippets\.js/);
+  assert.match(html, /sk-inf-/);
+  const state: any = await (await fetch(base + "/api/state")).json();
+  assert.equal(state.config.publicUrl, "https://inferest.example");
+  server.close();
+});
+
+test("the dashboard scripts are served as JavaScript", async () => {
+  const { base, server } = await start();
+  const r = await fetch(base + "/snippets.js");
+  assert.equal(r.status, 200);
+  assert.match(r.headers.get("content-type") ?? "", /javascript/);
+  assert.match(await r.text(), /export function snippets/);
+  server.close();
+});

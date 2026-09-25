@@ -69,7 +69,7 @@ function state(d: AppDeps) {
 }
 
 async function serveStatic(res: ServerResponse, pathname: string): Promise<void> {
-  const file = pathname === "/" ? "index.html" : pathname.slice(1);
+  const file = pathname === "/" ? "index.html" : pathname === "/setup" ? "setup.html" : pathname.slice(1);
   if (!/^[a-z0-9.-]+$/i.test(file)) return send(res, 404, { error: "not found" });
   try {
     const body = await readFile(DASHBOARD + file);

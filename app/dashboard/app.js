@@ -1,4 +1,5 @@
 import { createWalletClient, createPublicClient, custom, parseAbi, parseEventLogs, parseUnits } from "https://esm.sh/viem@2.56.9";
+import { snippets } from "/snippets.js";
 
 const factoryAbi = parseAbi([
   "function createVault(address target, string name, string symbol) returns (address)",
@@ -64,9 +65,38 @@ $("report").onclick = async () => { await api("/api/admin/report", {}); await ap
 $("addkey").onclick = async () => {
   const vault = myVault ?? (await api("/api/state")).vaults[0]?.vault;
   const r = await api("/api/keys", { vault, name: $("keyname").value, weight: Number($("weight").value) });
-  alert(`Copy this key now, it is shown once:\n\n${r.key}`);
+  showKey(`New key: ${$("keyname").value}`, r.key);
   await render();
 };
+
+let panelList = [];
+let panelIndex = 0;
+/** Opens the setup panel with a secret that is shown once. */
+function showKey(title, secret) {
+  const base = cfg.publicUrl ?? location.origin;
+  panelList = snippets(base, secret);
+  $("paneltitle").textContent = title;
+  $("secret").textContent = secret;
+  $("baseurl").textContent = base;
+  $("tabs").innerHTML = "";
+  for (const [i, s] of panelList.entries()) {
+    const b = document.createElement("button");
+    b.textContent = s.name;
+    b.onclick = () => showTab(i);
+    $("tabs").appendChild(b);
+  }
+  showTab(0);
+  $("panel").classList.add("open");
+  $("panel").scrollIntoView({ behavior: "smooth" });
+}
+function showTab(i) {
+  panelIndex = i;
+  $("snippet").textContent = panelList[i].text;
+  for (const [j, b] of [...$("tabs").children].entries()) b.classList.toggle("on", j === i);
+}
+$("copysecret").onclick = () => navigator.clipboard.writeText($("secret").textContent);
+$("copysnippet").onclick = () => navigator.clipboard.writeText(panelList[panelIndex].text);
+$("closepanel").onclick = () => { $("panel").classList.remove("open"); $("secret").textContent = ""; };
 
 async function render() {
   const s = await api("/api/state");
@@ -74,20 +104,36 @@ async function render() {
   $("vaults").innerHTML = s.vaults.map((v) => `
     <div class="card">
       <h3>${esc(v.label)} <span class="muted">${esc(v.vault)}</span></h3>
-      <p>Yield in Splitter: <b>$${v.yieldUsd.toFixed(2)}</b> ${v.frozen ? "<b>(frozen: loss pending)</b>" : ""} &middot; period ${v.period}</p>
-      <table><tr><th>Key</th><th>Weight</th><th>Budget</th><th>Spent</th><th>Tools</th><th>Left</th></tr>
-      ${v.keys.map((k) => `<tr><td>${esc(k.name)}</td><td>${k.weight}</td><td>$${k.budget.toFixed(2)}</td>
-        <td>$${k.spent.toFixed(4)}</td><td>$${k.toolSpent.toFixed(4)}</td><td>$${k.remaining.toFixed(2)}</td></tr>`).join("")}
+      <p>Yield in Splitter: <b>$${v.yieldUsd.toFixed(2)}</b>
+        ${v.frozen ? "<b>(frozen: loss pending)</b>" : ""} ${v.settling ? "<b>(settling)</b>" : ""}
+        &middot; period ${v.period}
+        &middot; provider backstop: limit $${v.orLimit.toFixed(2)}, used $${v.orUsage.toFixed(2)}${v.hasOpenRouterKey ? "" : " (no provider key yet)"}</p>
+      <table><tr><th>Key</th><th>Weight</th><th>Budget</th><th>Models</th><th>Tools</th><th>Left</th><th></th></tr>
+      ${v.keys.map((k) => `<tr class="${k.revoked ? "revoked" : ""}"><td>${esc(k.name)}${k.revoked ? " (revoked)" : ""}</td><td>${k.weight}</td>
+        <td>$${k.budget.toFixed(2)}</td><td>$${k.modelSpent.toFixed(4)}</td><td>$${k.toolSpent.toFixed(4)}</td><td>$${k.remaining.toFixed(2)}</td>
+        <td>${k.revoked ? "" : `<button class="rotate" data-id="${esc(k.id)}" data-name="${esc(k.name)}">Rotate</button>
+          <button class="revoke" data-id="${esc(k.id)}" data-name="${esc(k.name)}">Revoke</button>`}</td></tr>`).join("")}
       </table>
       <button class="settle" data-vault="${esc(v.vault)}">Settle now</button>
     </div>`).join("");
 }
 $("vaults").addEventListener("click", async (e) => {
-  const b = e.target.closest("button.settle");
+  const b = e.target.closest("button");
   if (!b) return;
   try {
-    const r = await api("/api/admin/settle", { vault: b.dataset.vault });
-    log(`settle: ${JSON.stringify(r)}`);
+    if (b.classList.contains("settle")) {
+      const r = await api("/api/admin/settle", { vault: b.dataset.vault });
+      log(`settle: ${JSON.stringify(r)}`);
+    } else if (b.classList.contains("revoke")) {
+      if (!confirm(`Revoke key ${b.dataset.name}? Its next request gets 401.`)) return;
+      await api(`/api/keys/${b.dataset.id}/revoke`, {});
+      log(`revoked ${b.dataset.name}`);
+    } else if (b.classList.contains("rotate")) {
+      const r = await api(`/api/keys/${b.dataset.id}/rotate`, {});
+      showKey(`Rotated key: ${b.dataset.name}`, r.key);
+    } else {
+      return;
+    }
     await render();
   } catch (err) {
     log(String(err));
