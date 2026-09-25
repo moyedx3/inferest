@@ -119,8 +119,10 @@ Settlement is the only time yield leaves the Splitter. The keeper:
 
 1. Pins every key's limit to its current usage, so nothing new can land.
 2. Re-reads usage from OpenRouter, so requests that were in flight during the freeze are counted.
-3. Calls `Splitter.settle(vault, usage)` with the period's usage in USDC base units.
-4. Records the settlement, starts a new period with the settled usage as each key's baseline, and re-syncs limits.
+3. Signs the `Splitter.settle(vault, usage)` transaction locally and writes a pending settlement record (vault, usage, each key's usage snapshot, transaction hash) before broadcasting. The record is insert-only, so two processes cannot both broadcast for one vault.
+4. Broadcasts, then polls for the receipt. On success it records the settlement, starts the new period with the snapshot as each key's baseline, marks the month, and re-syncs limits, all in one database transaction. On a revert it drops the record and reopens the keys.
+5. If the receipt does not arrive, the record stays, the vault's keys stay frozen, and every tick reconciles it until it mines. A transaction the node no longer knows after 30 minutes is dropped so the vault can retry. An operator can clear a stuck record through the admin API.
+6. Each vault carries the month it last settled. A vault whose settlement failed is retried on later ticks in the same month, with a ten-minute backoff after a failed attempt.
 
 On-chain:
 
@@ -135,7 +137,7 @@ transfer the remaining shares, worth leftover − fee, to the customer
 
 The leftover shares land in the customer's wallet, where they are principal. This is the kernel's `settle`: principal grows by `leftover − fee`. Because limits never open beyond `y`, `usage ≤ y` always holds and nothing is ever owed; if usage were ever reported above `y`, the contract pays `y` and emits the shortfall.
 
-In the demos settlement is triggered by hand. In production the keeper settles on the first tick of a new month.
+In the demos settlement is triggered by hand. In production the keeper settles each vault on the first tick of a new month and keeps retrying within the month until it succeeds.
 
 ### 6. Withdraw
 
@@ -168,6 +170,7 @@ On a loss, `report()` **burns the Splitter's shares of that vault first**. So un
 | A limit never opens ahead of yield in the Splitter, including after reweighting | `computeLimits` in `app/limits.ts` |
 | Keys freeze at usage while a loss is unreported, and that vault is not settled | `syncVault`, `settleVault` |
 | Settlement freezes, re-reads, then settles, so nothing spent after the read goes unbilled | `settleVault` |
+| A settlement is broadcast once and its bookkeeping applied exactly once, even across a crash, an RPC failure, or a second process | pending settlement record written before broadcast, reconciled by transaction hash, `app/keeper.ts` and `app/store.ts` |
 | A vault the server does not track is never settled | `settleVault`, `POST /api/admin/settle` |
 | Overlapping ticks and duplicate settlements of one vault are skipped | in-flight guards in `app/keeper.ts` |
 | Tool payments are capped at the key's budget before signing, never retried, and rejected payments are not charged | `toolGateway`, `x402PayingFetch` in `app/tools.ts` |
@@ -244,7 +247,6 @@ _Numbers use `HACKATHON_PARAMS` at 4.5% APY and are pinned in `engine/ledger.tes
 
 ## Known gaps
 
-- **Settlement bookkeeping is not persisted across a failed receipt wait.** If the RPC fails while the keeper waits for the settle receipt, or the process dies before bookkeeping, the next month bills twice, bounded by the yield reported since. Failed settlements are not retried within the month. The fix is a persisted per-vault settlement record reconciled by transaction hash, to land before the keeper runs unattended.
 - **One OpenRouter account.** Every customer's keys live under our account. Per-company isolation would mean one OpenRouter account per company, each with its own float.
 - **Company admins use our admin token.** Self-service needs wallet login: the factory records the vault's owner, so a signed message from that wallet can authorize key creation for that vault.
 - **Orthogonal descriptions.** Coinbase's facilitator rejects a payment whose echoed resource description is longer than about 255 characters; our client caps it before signing. Any other client hits the same on long-description listings.
