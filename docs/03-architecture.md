@@ -33,13 +33,13 @@ Arrows carry information as well as money. **The core loop: raise each key's lim
 
 **Decided: keys are OpenRouter Management API keys, not our own proxy.** For the hackathon they do everything a proxy would: per-key limits, per-key usage, 400+ models. A proxy is less than a day of work, but it adds metering, streaming and failure handling that OpenRouter already does. Build it when supply moves to contracted providers and `base_url` changes anyway.
 
-**Settled:** the limit only ever opens up to earned yield, and spend never draws from principal. `creditLimit` in the kernel implements it. **Open:** if the vault loses value after credits were spent but before settlement, who covers the difference. The kernel floors yield at zero and stops new spend; the rest waits until the workflow is final.
+**Settled:** the limit only ever opens up to earned yield, and spend never draws from principal. `creditLimit` in the kernel and `computeLimits` in the app implement it. A loss after credits were spent is absorbed by unsettled yield first (the vault burns the Splitter's shares before touching principal), and the keeper freezes every key while a loss is unreported; see [`06-workflow.md`](06-workflow.md).
 
 ---
 
 ## Custody
 
-**Decided 2026-09-25:** one Octant YDS vault per customer, shares in the customer's wallet, yield minted to our Splitter. Full mechanism, guarantees and fallback in [`06-workflow.md`](06-workflow.md).
+**Decided 2026-09-25:** one Octant YDS vault per customer, shares in the customer's wallet, yield minted to our Splitter. Full mechanism and guarantees in [`06-workflow.md`](06-workflow.md).
 
 ---
 
@@ -52,7 +52,7 @@ One fits the structure closely. **Octant v2's Yield Donating Strategy (YDS)** is
 - Depositors withdraw principal any time through standard ERC-4626 calls, with no involvement from the donation address
 - **One donation address per vault.** Per-customer attribution means one vault per customer
 
-Point the donation address at a small contract of ours and "only the interest becomes AI credit" is enforced at the vault level, with principal shares sitting in the customer's own wallet. [`06-workflow.md`](06-workflow.md) option 1D works this through.
+Point the donation address at a small contract of ours and "only the interest becomes AI credit" is enforced at the vault level, with principal shares sitting in the customer's own wallet. This is what is built; [`06-workflow.md`](06-workflow.md) describes it.
 
 | Module | Form | Can yield be split off? | Hackathon fit | Notes |
 |---|---|---|---|---|
@@ -63,10 +63,8 @@ Point the donation address at a small contract of ours and "only the interest be
 | [Aave Earn Vaults](https://aave.com/docs/developers/aave-vaults) | Deploy ERC-4626 vaults | Yes, via manager fee | Medium | Vault manager takes a fee from yield |
 | [CDP USDC Rewards](https://docs.cdp.coinbase.com/embedded-wallets/usdc-rewards) | Hold USDC in a wallet, earn rewards | No, paid weekly to the developer's Coinbase account | Low | Zero integration, but US residents and entities only |
 
-**Recommended combination.**
-- **Hackathon:** Morpho vault directly plus an off-chain ledger. Fastest to run.
-- **Pitch:** show Octant YDS as the target architecture, to prove "principal never leaves the customer's wallet."
-- **Commercial, ICP1:** a partner vault with institutional compliance already in place, like Kiln, persuades treasuries faster.
+**Built:** Octant YDS per customer over Fluid USDC on Arbitrum One, deployed by our factory, so "principal never leaves the customer's wallet" holds in the demo and not only in the pitch. The yield source is one config value; any audited ERC-4626 USDC vault works.
+**Commercial, ICP1:** a partner vault with institutional compliance already in place, like Kiln, may persuade treasuries faster, as the yield source behind the same vault.
 
 ETH and SOL staking yield plugs into the same structure. Yield.xyz covers staking through one API, so it is the expansion path when a treasury's asset is not USDC.
 
