@@ -145,8 +145,13 @@ We prefund OpenRouter and get paid at month end. Under yesterday's design (share
 | **A. Settler holds the shares (Recommended)** | Deposit goes through the Settler; shares leave only via settle (yield) or withdraw (after freeze and settlement) | **Reverses decision #7**: shares are no longer in the customer's own wallet. Replaced by "held by an immutable contract that can only return principal to you." Also solves decisions 2 and 4 |
 | B. Keep approval, watch it | Worker watches allowance and balance; on revoke, freezes keys at once; settle daily instead of monthly to shrink exposure | Exposure is still up to a day of usage; daily settlement costs gas; the "principal never moves" claim rests on our off-chain behavior |
 | C. Prepay each month | Customer pays expected usage up front | Breaks "pay with yield" |
+| **D. One Octant YDS vault per customer, donation address = our Splitter (new candidate)** | Customer deposits into their own YDS and **keeps the shares in their own wallet**. Our keeper calls `report()` daily; profit is minted as shares to the Splitter, which lets us redeem only `usage + fee` and lets the customer claim the rest. Limits open only up to yield already in the Splitter | Depends on Octant's contracts deploying on the target chain. One vault per customer. Limits step up once per `report()`, not continuously. Leftover comes back as a claimable balance, not as compounding principal, unless the Splitter redeposits it |
 
-**Why A:** it is the only option where every promise in the pitch is enforced by code, and Octant YDS, the target architecture in `03-architecture.md`, is the same shape. Our remaining exposure is about one minute of spend.
+**Why D, falling back to A:** D keeps yesterday's custody decision intact (principal shares never leave the customer's wallet) and still closes the revoke hole, because yield is out of the customer's position once reported and we only ever spend what is already in the Splitter. Our credit exposure goes to zero, withdrawal needs no window (decision 2 disappears), and YDS burns donation shares first on a loss, which is decision 6's buffer for free. The core vault path is audited code, not ours.
+
+**A is the fallback** if YDS cannot be deployed on a target chain in time: one contract of our own, same guarantees except that shares sit in the Settler rather than the customer's wallet, and about one minute of spend is exposed.
+
+**Check before choosing D:** whether Octant v2's strategy implementation can be deployed on the target chains, and how long `report()` costs in gas at daily cadence.
 
 ### 2. Principal withdrawal
 

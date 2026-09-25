@@ -52,11 +52,18 @@ Arrows carry information as well as money. **The core loop: raise each key's lim
 
 ## Plug-in yield modules
 
-One fits the structure almost exactly. **Octant v2's Yield Donating Strategy (YDS)** is an ERC-4626 vault that keeps principal with the user and automatically routes all yield on-chain to a designated address. Point that address at our credit router and "only the interest becomes AI credit" is done at the contract level.
+One fits the structure closely. **Octant v2's Yield Donating Strategy (YDS)** is a single-strategy ERC-4626 vault that deploys one asset into an external yield source and routes **all realized profit** to one configured donation address ([Octant docs](https://docs.octant.app/docs/developers/yield_donating_strategy/)). How it works ([introduction](https://docs.octant.app/docs/developers/yield_donating_strategy/introduction-to-yds/)):
+
+- Depositors get principal-tracking shares: **profit never raises their price per share**
+- A keeper calls `report()`. On profit, new shares are **minted to the donation address**. On loss, donation shares are **burned first**, and only a loss larger than that buffer lowers depositors' price per share
+- Depositors withdraw principal any time through standard ERC-4626 calls, with no involvement from the donation address
+- **One donation address per vault.** Per-customer attribution means one vault per customer
+
+Point the donation address at a small contract of ours and "only the interest becomes AI credit" is enforced at the vault level, with principal shares sitting in the customer's own wallet. [`06-workflow.md`](06-workflow.md) option 1D works this through.
 
 | Module | Form | Can yield be split off? | Hackathon fit | Notes |
 |---|---|---|---|---|
-| [Octant v2 YDS](https://docs.v2.octant.build/docs/yield_donating_strategy/) | ERC-4626 vault framework | Yes, all yield to a designated address | High | Gitcoin runs its matching pool on YDS over Morpho Steakhouse USDC ([Gitcoin](https://gitcoin.co/case-studies/from-one-off-rounds-to-ongoing-impact-gitcoin-s-new-sustainable-funding-model)). Spearbit audit |
+| [Octant v2 YDS](https://docs.octant.app/docs/developers/yield_donating_strategy/) | ERC-4626 vault framework, deployed per strategy | Yes, profit minted as shares to one donation address at `report()` | High, if its contracts deploy on the target chain | Gitcoin runs its matching pool on YDS over Morpho Steakhouse USDC ([Gitcoin](https://gitcoin.co/case-studies/from-one-off-rounds-to-ongoing-impact-gitcoin-s-new-sustainable-funding-model)). Spearbit audit |
 | [Morpho Vaults + SDK](https://docs.morpho.org/developers/earn/get-started/) | Direct vault integration, TS SDK, reference app | Computed in our own ledger | Fastest | Base OnchainKit has an Earn component that attaches in a few lines ([Morpho](https://morpho.org/blog/onchainkit-earn-integrate-morpho-vaults-in-minutes/)) |
 | [Kiln DeFi](https://docs.api.kiln.fi/docs/kiln-defi-quick-start) | White-label ERC-4626 vaults, API, widget | Yes, partner fee applied to yield on-chain | Medium, needs partner onboarding | Engine behind Safe wallet's Earn. Good fit if ICP1 treasuries use Safe ([Kiln](https://www.kiln.fi/post/safe-wallet-x-kiln-defi-one-click-stablecoin-yield-for-multisig-treasuries)) |
 | [Yield.xyz](https://docs.turnkey.com/cookbook/yieldxyz) (formerly StakeKit) | Single API that builds transactions to sign | Computed in our own ledger | Medium, needs API key | Staking, lending and vaults on 75+ networks. Publishes an OpenClaw skill ([GitHub](https://github.com/stakekit/)) |
@@ -86,10 +93,22 @@ Key issuance is solved by OpenRouter. **The one blocked segment is putting USDC 
 
 **Decided supply path.** Hackathon: our OpenRouter account, resold through per-key limits, the way Orbio does it. Real product: contract providers to run open-weight models for us, the way Touchmark does it.
 
-**Hackathon: OpenRouter float.** Pre-fund our account, raise key limits by accrued yield, and top up manually each period with the usage USDC. Fees run about 5% for crypto and 5.5% for card ([RouterPlex](https://routerplex.com/blog/openrouter-top-up-fees)).
+**Hackathon: OpenRouter float.** Pre-fund our account, raise key limits by accrued yield, and top up once a month with the usage USDC.
 
-**Automation path 1: crypto card.** Load the usage USDC onto a crypto card and attach it to OpenRouter Auto Top-Up. The human step disappears. Crypto developers already use this workaround ([SolCard](https://www.solcard.cc/blog/pay-openrouter-with-crypto)).
+### Funding the float: getting USDC into OpenRouter
 
-**Automation path 2: on-chain rails.** Venice DIEM and Orbio CREDIT top up on-chain, so the loop closes in contracts. The cost is narrower model coverage and liquidity than OpenRouter. For ICP2 agents, an x402 gateway is also a natural fit.
+OpenRouter charges **5.5% ($0.80 minimum) on card purchases and 5% on crypto**, passes provider prices through with no markup, may expire credits a year after purchase, and refunds only within 24 hours ([OpenRouter FAQ](https://openrouter.ai/docs/faq)).
+
+| # | Path | Cost on $1 of credit | Automated | Effort | Fit |
+|---|---|---|---|---|---|
+| 1 | **USDC through the web checkout, once a month** | 5% | No: one person, one checkout, monthly | None | **Hackathon.** Monthly settlement means one top-up a month |
+| 2 | **Enterprise contract, pay the invoice by wire** after off-ramping USDC | fee set in the order form; off-ramp about 0 to 1% | Mostly: off-ramp and wire can be scripted | Sales process, minimum spend | **Real product.** Invoiced after usage, so no prefunded float, and the enterprise terms permit serving end customers |
+| 3 | USDC-loaded card saved for Auto Top-Up | 5.5% plus card load fees | Yes | Card issuer onboarding for a business | Bridge between 1 and 2 if manual top-ups hurt |
+| 4 | Switch rail: Venice x402 top-up, Orbio `buyAndActivate`, x402 gateway | Venice at list; Orbio at a discount; x402 per request | Yes, on-chain | Different catalog; x402 needs our proxy | See below |
+| 5 | Script the web checkout with a headless browser | 5% | Yes | Fragile | **No.** Breaks on any UI change and invites an account ban |
+
+BYOK does not solve funding but cuts cost: our own provider keys run through OpenRouter with no fee up to $25,000 of list-price usage a month ($200,000 on enterprise), 5% above that. It only helps once we pay providers directly, which is the contracted-supply stage anyway.
+
+**Switching rail changes what we are.** With Venice we issue Venice keys (it has per-key epoch limits and accepts USDC via `POST /x402/top-up`), so no proxy, but the catalog is Venice's, mostly open-weight. With Orbio we would resell a reseller of OpenRouter. With an x402 gateway there are no keys to issue: either we run a proxy that pays per request from our wallet (reversing decision 5), or, for ICP2, **we skip keys and send the yield straight to the agent's own x402 wallet**, which is the cleanest agent story of all.
 
 **Make the credit router rail-agnostic** and the demo can show "the same yield can go to OpenRouter, Venice or x402." That becomes the product's moat.

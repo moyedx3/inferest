@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "docs/02-landscape.md",
+                "file": "docs/03-architecture.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "02-landscape"
+              "title": "03-architecture"
             }
           }
         ]
@@ -100,7 +100,7 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "docs/02-landscape.md",
+                "file": "docs/03-architecture.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -119,7 +119,7 @@
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "docs/02-landscape.md",
+                "file": "docs/03-architecture.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               },
@@ -162,7 +162,7 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "docs/02-landscape.md",
+                "file": "docs/03-architecture.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
@@ -191,6 +191,9 @@
   },
   "active": "a9dbe05c3a39ddc7",
   "lastOpenFiles": [
+    "docs/04-unit-economics.md",
+    "docs/03-architecture.md",
+    "docs/02-landscape.md",
     "docs/01-problem-and-icp.md",
     "docs/06-workflow.md",
     "deck/outline.md"
