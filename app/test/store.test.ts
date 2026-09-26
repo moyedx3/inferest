@@ -35,7 +35,8 @@ function writeOldDb(path: string, version: "1" | "2") {
   `);
   if (version === "2") {
     db.exec(`CREATE TABLE pending_settlements (vault TEXT PRIMARY KEY, usage_micro TEXT NOT NULL, baselines TEXT NOT NULL,
-      tx TEXT NOT NULL, created_at INTEGER NOT NULL);`);
+      tx TEXT NOT NULL, created_at INTEGER NOT NULL);
+      INSERT INTO pending_settlements VALUES ('0xaa', '9', '[]', '0xpending2', 1);`);
   }
   db.close();
 }
@@ -349,8 +350,15 @@ for (const version of ["1", "2"] as const) {
     const path = join(tmpdir(), `inferest-test-migrate${version}-${process.pid}-${Date.now()}.db`);
     try {
       writeOldDb(path, version);
-      const s = openStore(path);
+      const lines: string[] = [];
+      const s = openStore(path, { log: (m) => lines.push(m) });
       assert.equal(s.getMeta("schemaVersion"), "4");
+      assert.ok(lines.includes("migration: 1 keys and 0 tool call rows from version 2 dropped"), lines.join("\n"));
+      if (version === "2") {
+        assert.ok(lines.some((m) => m.includes("pending settlement 0xpending2 for 0xaa")), lines.join("\n"));
+      } else {
+        assert.equal(lines.length, 1);
+      }
       const v = s.vault("0xaa")!;
       assert.equal(v.period, 3);
       assert.equal(v.yieldUsd, 12.5);
@@ -377,6 +385,13 @@ test("an unsupported schema version is refused", () => {
     s.setMeta("schemaVersion", "99");
     s.close();
     assert.throws(() => openStore(path), /unsupported schema version 99/);
+    // the refused open released its handle: the file can be corrected and opened again
+    const db = new DatabaseSync(path);
+    db.exec("UPDATE meta SET v = '4' WHERE k = 'schemaVersion'");
+    db.close();
+    const s2 = openStore(path);
+    assert.equal(s2.getMeta("schemaVersion"), "4");
+    s2.close();
   } finally {
     rmSync(path, { force: true });
   }

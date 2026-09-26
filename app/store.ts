@@ -65,15 +65,26 @@ CREATE TABLE IF NOT EXISTS pending_settlements (
 export const SCHEMA_VERSION = "4";
 
 /** Brings an older database up to SCHEMA_VERSION. Returns the version it ends at. Runs as one transaction, so a crash midway leaves the file at its starting version instead of half migrated. */
-function migrate(db: DatabaseSync, from: string): string {
+function migrate(db: DatabaseSync, from: string, log: (msg: string) => void): string {
+  if (from === SCHEMA_VERSION) return from;
   db.exec("BEGIN");
   try {
     let at = from;
-    if (at === "1") at = "2"; // version 2 only added pending_settlements, which SCHEMA has already created
+    // version 2 only added pending_settlements; a version 1 file has none, and the SCHEMA run inside the 2 -> 3
+    // step below creates it
+    if (at === "1") at = "2";
     if (at === "2") {
       // Version 3 files keys under our own ids and meters spend in our own rows. The old keys, tool_calls and
       // pending_settlements rows were keyed by OpenRouter hashes that mean nothing now; they came from demos and
       // are dropped. Vault rows and the settlement history survive, with the new vault columns added.
+      const exists = (table: string) => db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table) !== undefined;
+      const count = (table: string) => (exists(table) ? Number((db.prepare(`SELECT COUNT(*) AS c FROM ${table}`).get() as { c: number }).c) : 0);
+      if (exists("pending_settlements")) {
+        for (const r of db.prepare("SELECT vault, tx FROM pending_settlements ORDER BY created_at, vault").all() as { vault: string; tx: string }[]) {
+          log(`migration: dropping the version 2 pending settlement ${r.tx} for ${r.vault}; it cannot be reconciled by this version`);
+        }
+      }
+      log(`migration: ${count("keys")} keys and ${count("tool_calls")} tool call rows from version 2 dropped`);
       db.exec("DROP TABLE IF EXISTS keys; DROP TABLE IF EXISTS tool_calls; DROP TABLE IF EXISTS pending_settlements;");
       const cols = ["settling INTEGER NOT NULL DEFAULT 0", "or_key_hash TEXT", "or_key_secret TEXT",
         "or_limit REAL NOT NULL DEFAULT 0", "or_usage REAL NOT NULL DEFAULT 0"];
@@ -114,7 +125,7 @@ export const settledMonthKey = (vault: string): string => `settledMonth:${lc(vau
 /** The meta key holding when the keeper last synced a vault. */
 const syncedAtKey = (vault: string): string => `syncedAt:${lc(vault)}`;
 
-export function openStore(path: string) {
+export function openStore(path: string, opts: { log?: (msg: string) => void } = {}) {
   const db = new DatabaseSync(path);
   // Bootstrap only `meta` first: an old (pre-3) database already has `keys` and `tool_calls` under their old
   // column names, and SCHEMA now indexes those tables by their new columns. Running the full SCHEMA before
@@ -125,7 +136,8 @@ export function openStore(path: string) {
   const versionRow = db.prepare("SELECT v FROM meta WHERE k = ?").get("schemaVersion") as { v: string } | undefined;
   if (!versionRow) {
     db.prepare("INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").run("schemaVersion", SCHEMA_VERSION);
-  } else if (migrate(db, String(versionRow.v)) !== SCHEMA_VERSION) {
+  } else if (migrate(db, String(versionRow.v), opts.log ?? (() => {})) !== SCHEMA_VERSION) {
+    db.close();
     throw new Error(`unsupported schema version ${versionRow.v}, expected ${SCHEMA_VERSION}`);
   }
   // Safe now: a fresh database has no conflicting tables, and a migrated one has already been brought current.

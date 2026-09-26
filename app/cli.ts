@@ -9,7 +9,7 @@ import { createApp } from "./server.ts";
 import { createProxy } from "./proxy.ts";
 
 const cfg = loadConfig();
-const store = openStore(cfg.dbPath);
+const store = openStore(cfg.dbPath, { log: (m) => console.log(new Date().toISOString(), m) });
 const chain = makeChain(cfg);
 const or = openRouter(cfg.openRouterKey);
 const box = secretBox(cfg.keyEncryptionKey);
