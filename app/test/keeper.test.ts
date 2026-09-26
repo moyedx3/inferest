@@ -348,6 +348,7 @@ test("toolBudgetFor uses the last synced state and refuses revoked keys and clos
   await syncVault(d, V);
   store.recordToolCall("k1", "a", "/b", 50);
   assert.equal(toolBudgetFor(store, HACKATHON_PARAMS, "k1"), 850);
+  assert.equal(toolBudgetFor(store, HACKATHON_PARAMS, "k1", 10 * 60_000, Date.now() + 11 * 60_000), 0); // a stale budget
   assert.equal(toolBudgetFor(store, HACKATHON_PARAMS, "nope"), 0);
   store.setSettling(V, true);
   assert.equal(toolBudgetFor(store, HACKATHON_PARAMS, "k1"), 0);

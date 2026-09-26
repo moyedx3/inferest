@@ -2,7 +2,7 @@ import type { Params } from "../engine/ledger.ts";
 import type { Chain, TxStatus } from "./chain.ts";
 import type { OpenRouter } from "./openrouter.ts";
 import { settledMonthKey, type Store, type PendingSettlement, type SpendSnapshot, type KeyRow } from "./store.ts";
-import { computeLimits, companyLimit, toolBudgetUsd, usageMicro, type KeyLimit } from "./limits.ts";
+import { computeLimits, companyLimit, toolBudgetUsd, usageMicro, DEFAULT_STALE_BUDGET_MS, type KeyLimit } from "./limits.ts";
 
 export type KeeperDeps = {
   chain: Chain; store: Store; or: OpenRouter; params: Params; log: (msg: string) => void;
@@ -467,12 +467,18 @@ export async function tick(d: KeeperDeps, now: number = Date.now()): Promise<voi
   }
 }
 
-/** USDC a key may still spend on tools from the last synced state. Zero for a revoked key or a closed vault. */
-export function toolBudgetFor(store: Store, params: Params, keyId: string): number {
+/**
+ * USDC a key may still spend on tools from the last synced state. Zero for a revoked key, a closed vault, or a
+ * vault last synced more than staleBudgetMs ago (never synced counts as stale), as the proxy refuses it too.
+ */
+export function toolBudgetFor(
+  store: Store, params: Params, keyId: string, staleBudgetMs: number = DEFAULT_STALE_BUDGET_MS, now: number = Date.now(),
+): number {
   const key = store.keyById(keyId);
   if (!key || key.revoked) return 0;
   const v = store.vault(key.vault);
   if (!v || v.settling || store.pendingSettlement(v.vault)) return 0;
+  if (now - store.syncedAt(v.vault) > staleBudgetMs) return 0;
   const l = computeLimits(v.yieldUsd, store.keysForVault(key.vault), params, v.frozen).find((x) => x.id === keyId);
   return l ? toolBudgetUsd(l, params) : 0;
 }
