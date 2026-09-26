@@ -140,6 +140,34 @@ test("a provider failure during registration leaves no half-registered vault", a
   }
 });
 
+test("a key change reopens the vault's backstop before the response, and a failed resync still answers", async () => {
+  const { base, server, d } = await start();
+  try {
+    await post(base, "/api/vaults", { vault: V, label: "Treasury" });
+    d.chain.yieldOf = async () => 100_000_000n; // $100 of yield to hand out
+    const limits: number[] = [];
+    d.or.setLimit = async (_h, limit) => { limits.push(limit); };
+    const r = await post(base, "/api/keys", { vault: V, name: "dev-1", weight: 1 });
+    assert.equal(r.status, 201);
+    assert.ok(limits.length >= 1 && limits.at(-1)! > 0, `backstop opened at once, got ${JSON.stringify(limits)}`);
+    const { id } = await r.json() as { id: string };
+    const before = limits.length;
+    assert.equal((await post(base, `/api/keys/${id}/weight`, { weight: 2 })).status, 200);
+    assert.equal(limits.length, before + 1);
+    assert.equal((await post(base, `/api/keys/${id}/revoke`, {})).status, 200);
+    assert.equal(limits.length, before + 2);
+    assert.equal(limits.at(-1), 0); // the only key is revoked: nothing open, the backstop closes at usage
+    const logs: string[] = [];
+    d.keeper.log = (m) => logs.push(m);
+    d.or.setLimit = async () => { throw new Error("openrouter down"); };
+    const r2 = await post(base, "/api/keys", { vault: V, name: "dev-2", weight: 1 });
+    assert.equal(r2.status, 201);
+    assert.ok(logs.some((l) => l.startsWith(`sync ${V} after key creation failed: openrouter down`)), logs.join("\n"));
+  } finally {
+    server.close();
+  }
+});
+
 test("creating a key returns an sk-inf secret once and stores only its hash", async () => {
   const { base, server, store, created } = await start();
   await post(base, "/api/vaults", { vault: V, label: "Treasury" });

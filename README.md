@@ -55,7 +55,7 @@ node --env-file=.env demo/treasury.ts     # or demo/agent.ts
 
 `forge test` prints diagnostics from an upstream Foundry lint bug before its results; read the `Suite result` lines.
 
-The demos run against a Tenderly Virtual TestNet or a local anvil fork of the target chain; the demo helpers support both. A virtual testnet must keep chain id 42161: the deploy script names its file after `block.chainid`, and that name has to match `config/arbitrum-one.json`.
+The demos run against a Tenderly Virtual TestNet or a local anvil fork of the target chain; the demo helpers support both. A virtual testnet must keep chain id 42161: the deploy script names its file after `block.chainid`, and that name has to match `config/arbitrum-one.json`. A fork over Arbitrum's public RPC can only fetch state for about thirty minutes after its fork block; the first settlement to touch a storage slot nobody has read yet then fails with `missing trie node`. Start the fork right before the run and run `demo/treasury.ts` once so anvil caches the slots a settlement needs, or fork from an archive RPC.
 
 ### Background
 
