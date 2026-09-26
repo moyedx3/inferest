@@ -4,7 +4,7 @@ _The dashboard and the developer setup page become one page, the Treasury page, 
 
 ## Goal
 
-The demo works but looks like a debug console. A judge or a treasury lead should read three things at a glance: the principal does not move, the yield is what pays, and each key's spend comes out of that yield. No behaviour changes: every button in `docs/07-walkthrough.md` still exists and does the same thing.
+The demo works but looks like a debug console. A judge or a treasury lead should read three things at a glance: the principal does not move, the yield is what pays, and each key's spend comes out of that yield. No behaviour changes: every button in `docs/07-walkthrough.md` still exists and does the same thing, with one addition the signed-in design needs: with a vault, Deposit approves and deposits into that vault instead of creating another.
 
 ## One page, three states
 
