@@ -27,6 +27,8 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&
 const show = (id, on) => { $(id).hidden = !on; };
 const short = (a) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : "");
 const usd = (n, digits = 2) => `$${Number(n).toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
+/** Spend figures: four decimals below a cent, so a single model call is visible in the row it moved. */
+const spent = (n) => usd(n, n > 0 && n < 0.01 ? 4 : 2);
 const sum = (xs, f) => xs.reduce((s, x) => s + f(x), 0);
 
 let cfg, dyn = null, session = null, myVault;
@@ -289,7 +291,7 @@ $("sync").onclick = async () => {
     await api("/api/admin/sync", scope());
     await render();
     const v = currentVault();
-    activity({ icon: "⇄", title: "Limits synced", detail: v ? `backstop ${usd(v.orLimit)}, used ${usd(v.orUsage)}` : "" });
+    activity({ icon: "⇄", title: "Limits synced", detail: v ? `backstop ${usd(v.orLimit)}, used ${spent(v.orUsage)}` : "" });
   } catch (e) { fail("Sync failed")(e); }
 };
 $("report").onclick = async () => {
@@ -307,7 +309,7 @@ $("settle").onclick = async () => {
   try {
     const r = await api("/api/admin/settle", { vault: v.vault });
     if (r.usageMicro === null) activity({ icon: "✓", title: "Nothing to settle", detail: `period ${v.period} had no settlement to send` });
-    else activity({ icon: "✓", title: r.pending ? "Settlement sent" : `Settled period ${v.period}`, detail: `usage ${usd(Number(r.usageMicro) / 1e6)} to float${r.pending ? ", waiting for its receipt" : ""}`, tx: r.tx ?? "" });
+    else activity({ icon: "✓", title: r.pending ? "Settlement sent" : `Settled period ${v.period}`, detail: `usage ${spent(Number(r.usageMicro) / 1e6)} to float${r.pending ? ", waiting for its receipt" : ""}`, tx: r.tx ?? "" });
     await render();
   } catch (e) { fail("Settle failed")(e); }
 };
@@ -422,18 +424,18 @@ function renderTreasury() {
   $("vaultname").textContent = `${v.label} vault`;
   $("vaultlink").textContent = `${short(v.vault)} ↗`;
   if (cfg.explorer) $("vaultlink").href = `${cfg.explorer}/address/${v.vault}`; else $("vaultlink").removeAttribute("href");
-  $("usedamt").textContent = usd(used);
+  $("usedamt").textContent = spent(used);
   $("openamt").textContent = usd(open);
   const share = v.credit > 0 ? used / v.credit : 0;
   $("barused").hidden = used <= 0;
   $("barused").style.flex = `0 0 ${Math.min(100, Math.max(12, share * 100))}%`;
   $("principalbar").hidden = principal === null;
   $("principal").textContent = principal !== null ? usd(principal) : "";
-  $("models").textContent = usd(sum(keys, (k) => k.modelSpent));
+  $("models").textContent = spent(sum(keys, (k) => k.modelSpent));
   const live = keys.filter((k) => !k.revoked).length;
   $("modelsnote").textContent = `through the proxy, ${live} key${live === 1 ? "" : "s"}`;
-  $("tools").textContent = usd(sum(keys, (k) => k.toolSpent));
-  $("backstop").textContent = v.hasOpenRouterKey ? `${usd(v.orUsage)} / ${usd(v.orLimit)}` : "none";
+  $("tools").textContent = spent(sum(keys, (k) => k.toolSpent));
+  $("backstop").textContent = v.hasOpenRouterKey ? `${spent(v.orUsage)} / ${usd(v.orLimit)}` : "none";
   $("backstopnote").textContent = v.hasOpenRouterKey ? "OpenRouter key, synced" : "no provider key yet";
   $("sharescell").hidden = w?.shares == null;
   if (w?.shares != null) {
@@ -441,7 +443,7 @@ function renderTreasury() {
     $("sharesnote").textContent = `in ${short(session?.address)}`;
   }
   $("pvperiod").textContent = `period ${v.period} → ${v.period + 1}`;
-  $("pvusage").textContent = usd(v.preview.usage);
+  $("pvusage").textContent = spent(v.preview.usage);
   $("pvfee").textContent = usd(v.preview.fee);
   $("pvreturned").textContent = usd(v.preview.returned);
 }
@@ -466,7 +468,7 @@ function renderKeys() {
         <small>${k.revoked ? "Revoked" : `Created ${esc(created)}`}</small></div></div></td>
       <td class="amt faint">×${esc(k.weight)}</td>
       <td class="amt">${usd(k.budget)}</td>
-      <td class="spend"><div class="nums"><span class="amt">${usd(k.spent)}</span><small>${k.revoked ? "" : `models ${usd(k.modelSpent)} · tools ${usd(k.toolSpent)}`}</small></div><div class="spendbar">${bar}</div></td>
+      <td class="spend"><div class="nums"><span class="amt">${spent(k.spent)}</span><small>${k.revoked ? "" : `models ${spent(k.modelSpent)} · tools ${spent(k.toolSpent)}`}</small></div><div class="spendbar">${bar}</div></td>
       <td class="amt"><b style="font-weight:500">${k.revoked ? "—" : usd(k.remaining)}</b></td>
       <td class="actions">${k.revoked ? "" : `<button class="btn btn-small rotate" data-id="${esc(k.id)}" data-name="${esc(k.name)}">Rotate</button><button class="btn btn-small btn-danger revoke" data-id="${esc(k.id)}" data-name="${esc(k.name)}">Revoke</button>`}</td>
     </tr>`;
@@ -496,7 +498,7 @@ function renderActivity() {
   const v = currentVault();
   const seen = new Set(events.map((e) => e.tx).filter(Boolean));
   const settled = (lastState?.settlements ?? []).filter((s) => s.vault === v?.vault && !seen.has(s.tx))
-    .map((s) => ({ at: s.at, icon: "✓", title: "Settled", detail: `usage ${usd(Number(s.usageMicro) / 1e6)} to float`, tx: s.tx }));
+    .map((s) => ({ at: s.at, icon: "✓", title: "Settled", detail: `usage ${spent(Number(s.usageMicro) / 1e6)} to float`, tx: s.tx }));
   const rows = [...events, ...settled].sort((a, b) => b.at - a.at);
   const when = (at) => {
     const d = new Date(at);
