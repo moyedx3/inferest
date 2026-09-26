@@ -331,9 +331,9 @@ $("addkey").onclick = async () => {
     const name = $("keyname").value;
     const r = await api("/api/keys", { vault, name, weight: Number($("weight").value) });
     newKeyId = r.id;
-    await render(); // the new row must be in state before the banner takes its baseline
-    showKey(`New key: ${name}`, r.key, r.id);
+    showKey(`New key: ${name}`, r.key, r.id); // before the state read: a failed read must not lose the one-time secret
     activity({ icon: "+", title: "Key created", detail: `${name}, weight ${$("weight").value}` });
+    await render();
   } catch (e) { fail("Key not created")(e); }
 };
 
@@ -342,14 +342,21 @@ let panelIndex = 0;
 /** The key the open banner shows, what it had spent when shown, and the timer that watches for its first call. */
 let panelKey = null;
 let watchTimer = null;
+let watching = false;
 const WATCH_MS = 4000;
+/** One tick of the wait for the shown key's first call; a slow read is never stacked on by the next tick. */
+function watchTick() {
+  if (watching) return;
+  watching = true;
+  render().catch(() => {}).finally(() => { watching = false; });
+}
 /** Opens the banner with a secret that is shown once; the snippets use it until the banner is closed. */
 function showKey(title, secret, keyId) {
   panelSecret = secret;
   const k = currentVault()?.keys.find((x) => x.id === keyId);
   panelKey = keyId ? { id: keyId, base: k?.spent ?? 0, metered: false } : null;
   clearInterval(watchTimer);
-  if (panelKey) watchTimer = setInterval(() => { render().catch(() => {}); }, WATCH_MS);
+  if (panelKey) watchTimer = setInterval(watchTick, WATCH_MS);
   renderResult();
   $("paneltitle").textContent = title;
   $("secret").textContent = secret;
@@ -394,11 +401,11 @@ function renderResult() {
   show("result", Boolean(k));
   if (!k) return;
   const cost = k.spent - panelKey.base;
-  if (cost > 0 && !panelKey.metered) { panelKey.metered = true; clearInterval(watchTimer); }
+  if (cost > 0 && !panelKey.metered) { panelKey.metered = true; panelKey.cost = cost; clearInterval(watchTimer); }
   $("resultstatus").textContent = panelKey.metered ? "200" : "···";
   $("resultstatus").className = `status${panelKey.metered ? "" : " wait"}`;
   $("resulttext").textContent = panelKey.metered ? `First call metered against ${k.name}` : `Run the snippet. This line updates when ${k.name}'s first call is metered.`;
-  $("resultcost").textContent = panelKey.metered ? `cost ${spent(cost)} · left ${usd(k.remaining)}` : "";
+  $("resultcost").textContent = panelKey.metered ? `cost ${spent(panelKey.cost)} · left ${usd(k.remaining)}` : "";
 }
 
 function renderNotes() {
