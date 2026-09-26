@@ -105,6 +105,17 @@ test("pending model calls count as zero until resolved, and resolve once", () =>
   assert.equal(s.modelCall("g2")!.costUsd, 0.1);
 });
 
+test("pending model calls are counted per vault", () => {
+  const s = fresh();
+  assert.equal(s.pendingModelCalls(V), 0);
+  s.recordPendingModelCall({ keyId: "k1", model: "m", generationId: "g1" });
+  assert.equal(s.pendingModelCalls(V), 1);
+  s.recordModelCall({ keyId: "k2", model: "m", costUsd: 0.2, generationId: "g2" });
+  assert.equal(s.pendingModelCalls(V), 1);
+  assert.equal(s.resolveModelCall("g1", 0.1), true);
+  assert.equal(s.pendingModelCalls(V), 0);
+});
+
 test("a pending call resolved after its period settled is billed in the current period", () => {
   const s = fresh();
   s.recordPendingModelCall({ keyId: "k1", model: "m", generationId: "g1" });

@@ -82,6 +82,42 @@ test("sync pins the company key at its usage plus open credit and stores yield",
   assert.equal(v.orUsage, 100);
 });
 
+test("the backstop is held flat while a model call is pending", async () => {
+  const { d, store, events, logs } = setup({ orUsage: [0, 10, 10, 10] });
+  await syncVault(d, V);
+  assert.equal(lastLimit(events), `limit:${OR}:2000`);
+  assert.equal(store.vault(V)!.orLimit, 2000);
+
+  store.recordPendingModelCall({ keyId: "k1", model: "m", generationId: "gen-p" });
+  await syncVault(d, V);
+  assert.equal(lastLimit(events), `limit:${OR}:2000`); // usage moved to 10, but the limit stays held
+  assert.equal(store.vault(V)!.orUsage, 10);
+  assert.ok(logs.some((m) => m.includes("1 pending model call(s), backstop held at 2000")));
+
+  const beforeResolve = logs.length;
+  store.resolveModelCall("gen-p", 10);
+  await syncVault(d, V);
+  assert.equal(lastLimit(events), `limit:${OR}:2000`); // 10 used + 1990 open
+  assert.ok(!logs.slice(beforeResolve).some((m) => m.includes("held")));
+
+  d.chain.yieldOf = async () => 3_000_000_000n;
+  store.recordPendingModelCall({ keyId: "k1", model: "m", generationId: "gen-p2" });
+  await syncVault(d, V);
+  assert.equal(lastLimit(events), `limit:${OR}:2000`); // a raise waits for the resolution
+
+  store.resolveModelCall("gen-p2", 0);
+  await syncVault(d, V);
+  assert.equal(lastLimit(events), `limit:${OR}:3000`); // 10 used + 2990 open
+});
+
+test("a vault with no stored limit is not held", async () => {
+  const { d, store, events, logs } = setup({ orUsage: [0] });
+  store.recordPendingModelCall({ keyId: "k1", model: "m", generationId: "gen-p" });
+  await syncVault(d, V);
+  assert.equal(lastLimit(events), `limit:${OR}:2000`);
+  assert.ok(!logs.some((m) => m.includes("held")));
+});
+
 test("a vault without an OpenRouter key on file syncs its yield and pins nothing", async () => {
   const { d, store, events, logs } = setup({ noOrKey: true });
   await syncVault(d, V);
@@ -92,6 +128,7 @@ test("a vault without an OpenRouter key on file syncs its yield and pins nothing
 
 test("freezes the company key at its usage when a loss is pending", async () => {
   const { d, store, events } = setup({ lossPending: true, orUsage: [47.5] });
+  store.recordPendingModelCall({ keyId: "k1", model: "m", generationId: "gen-p" }); // the hold never raises a freeze
   await syncVault(d, V);
   assert.ok(events.includes(`limit:${OR}:47.5`));
   assert.equal(store.vault(V)!.frozen, true);

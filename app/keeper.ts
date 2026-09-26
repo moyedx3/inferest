@@ -66,7 +66,13 @@ async function syncCompanyKey(d: KeeperDeps, vault: string, limits: KeyLimit[]):
     return;
   }
   const live = await d.or.getKey(orKey.hash);
-  const limit = companyLimit(live.usage, limits);
+  const candidate = companyLimit(live.usage, limits);
+  const pending = d.store.pendingModelCalls(vault);
+  const stored = d.store.vault(vault)?.orLimit ?? 0;
+  // A pending call is in OpenRouter's usage but not in our spend, so raising the limit by the open credit would
+  // double its headroom. Hold the limit where it is until the keeper has resolved the call's cost.
+  const limit = pending > 0 && stored > 0 ? Math.min(candidate, stored) : candidate;
+  if (limit !== candidate) d.log(`sync ${vault}: ${pending} pending model call(s), backstop held at ${limit}`);
   await d.or.setLimit(orKey.hash, limit);
   d.store.setVaultState(vault, { orLimit: limit, orUsage: live.usage });
 }
