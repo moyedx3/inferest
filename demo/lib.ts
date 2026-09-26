@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
-import { createPublicClient, createWalletClient, defineChain, encodeAbiParameters, http, keccak256, pad, parseAbi, parseEventLogs, toHex, type Hex } from "viem";
+import { createPublicClient, createWalletClient, defineChain, http, parseAbi, parseEventLogs, toHex, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
+import { createFaucet } from "../app/faucet.ts";
 
 export const env = (k: string): string => {
   const v = process.env[k];
@@ -23,26 +24,9 @@ async function rpc(method: string, params: unknown[]): Promise<unknown> {
 }
 export const warp = async (seconds: number) => { await rpc("evm_increaseTime", [toHex(seconds)]); await rpc("evm_mine", []); };
 
-/** Try each cheat method in turn (Tenderly first, then anvil), moving on when the RPC does not know the method
- * or takes it under another parameter shape (anvil aliases tenderly_setBalance and answers -32602). */
-async function cheat(calls: [string, unknown[]][]): Promise<unknown> {
-  for (const [i, [method, params]] of calls.entries()) {
-    try {
-      return await rpc(method, params);
-    } catch (e: any) {
-      const unknown = e.code === -32601 || e.code === -32602 || /not found|not supported|does not exist|no slot found/i.test(e.message);
-      if (!unknown || i === calls.length - 1) throw e;
-    }
-  }
-}
-export const fundEth = (to: string, wei: bigint) => cheat([["tenderly_setBalance", [[to], toHex(wei)]], ["anvil_setBalance", [to, toHex(wei)]]]);
-export const fundUsdc = (to: string, micro: bigint) => cheat([
-  ["tenderly_setErc20Balance", [chainCfg.usdc, to, toHex(micro)]],
-  ["anvil_dealERC20", [chainCfg.usdc, to, toHex(micro)]],
-  ["anvil_setERC20Balance", [chainCfg.usdc, to, toHex(micro)]],
-  // Native USDC (FiatToken v2.2) defeats anvil's slot search: balances live in the mapping at slot 9.
-  ["anvil_setStorageAt", [chainCfg.usdc, keccak256(encodeAbiParameters([{ type: "address" }, { type: "uint256" }], [to as Hex, 9n])), pad(toHex(micro))]],
-]);
+const faucet = createFaucet({ rpcUrl: RPC, usdc: chainCfg.usdc });
+/** Gas plus 100,000 USDC from the fork's cheat methods, the same code the dashboard's faucet route runs. */
+export const fundDemoWallet = async (to: string) => { await faucet.fund(to); };
 
 export async function api(path: string, body?: unknown): Promise<any> {
   const headers = { "Content-Type": "application/json", "x-admin-token": env("ADMIN_TOKEN") };
@@ -76,8 +60,7 @@ export async function customerWithVault(privateKey: Hex, depositMicro: bigint, l
     const hash = await wallet.writeContract({ address, abi, functionName, args } as any);
     return pub.waitForTransactionReceipt({ hash });
   };
-  await fundEth(account.address, 10n ** 18n);
-  await fundUsdc(account.address, depositMicro);
+  await fundDemoWallet(account.address);
   const receipt = await send(dep.factory, factoryAbi, "createVault", [dep.target, `Inferest ${label}`, "infVAULT"]);
   const vault = (parseEventLogs({ abi: factoryAbi, logs: receipt.logs })[0] as any).args.vault as Hex;
   await send(vault, vaultAbi, "acceptManagement", []);

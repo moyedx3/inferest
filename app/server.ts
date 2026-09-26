@@ -9,6 +9,7 @@ import type { Store, VaultRow } from "./store.ts";
 import type { ToolGateway } from "./tools.ts";
 import type { Proxy } from "./proxy.ts";
 import type { Auth, Session } from "./auth.ts";
+import type { Faucet } from "./faucet.ts";
 import { buildMcpServer } from "./mcp.ts";
 import { computeLimits } from "./limits.ts";
 import { sha256, newInferestKey, type SecretBox } from "./crypto.ts";
@@ -24,6 +25,8 @@ export type AppDeps = {
   proxy: Proxy;
   /** Verifies finance-lead logins; unset means the operator token is the only credential. */
   auth?: Auth;
+  /** Funds a signed-in wallet on a demo chain; unset on real chains. */
+  faucet?: Faucet;
   /** Logs an uncaught error from a route (default console.error). */
   logError?: (msg: string) => void;
 };
@@ -199,6 +202,15 @@ async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse): Pro
       const { secret } = newInferestKey();
       d.store.rotateKey(id, sha256(secret));
       return send(res, 200, { key: secret, id });
+    }
+    if (url.pathname === "/api/demo/fund") {
+      if (!d.faucet) return send(res, 404, { error: "not found" });
+      const address = String(body.address ?? "").toLowerCase();
+      if (!/^0x[0-9a-f]{40}$/.test(address)) return send(res, 400, { error: "address must be 0x plus 40 hex characters" });
+      if (caller.kind === "session" && !caller.session.wallets.includes(address)) return send(res, 403, { error: "not your wallet" });
+      const funded = await d.faucet.fund(address);
+      d.keeper.log(`faucet funded ${address}`);
+      return send(res, 200, { ok: true, native: funded.native.toString(), usdc: funded.usdc.toString() });
     }
     if (url.pathname === "/api/admin/sync" || url.pathname === "/api/admin/report") {
       const report = url.pathname.endsWith("/report");
