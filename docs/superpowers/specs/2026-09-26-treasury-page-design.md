@@ -1,6 +1,6 @@
 # Treasury page design
 
-_The dashboard and the developer setup page become one page, the Treasury page, restyled after sfcompute.com, natural.com and ramp.com. The mockups are in `pencil-new.pen`: "Treasury — signed out", "Treasury — signed in, no vault yet", "Treasury — signed in"._
+_The dashboard and the developer setup page become one page, the Treasury page, restyled after sfcompute.com, natural.com and ramp.com. The mockups are [`design/treasury-signed-out.png`](../../../design/treasury-signed-out.png), [`design/treasury-no-vault.png`](../../../design/treasury-no-vault.png) and [`design/treasury-signed-in.png`](../../../design/treasury-signed-in.png), exported from the pen.dev file in `design/` (version A; a quieter sfcompute and Natural version B was drawn and not chosen)._
 
 ## Goal
 
