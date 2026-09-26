@@ -623,6 +623,29 @@ test("a failed prepare reopens the vault and backs off before retrying", async (
   assert.equal(store.listSettlements().length, 1);
 });
 
+test("other vaults are re-synced between settlements on a month roll", async () => {
+  const { d, store, events } = setup();
+  const W = "0x00000000000000000000000000000000000000bb";
+  store.addVault(W, "0x00000000000000000000000000000000000000cc", "U");
+  store.setVaultOpenRouterKey(W, "orhash2", "enc:sk-or-v1-other");
+  const limitsFor = (h: string) => events.filter((e) => e.startsWith(`limit:${h}:`)).length;
+  await tick(d, OCT); // both vaults marked for October
+  const atPrepare: { vault: string; firstLimits: number; secondSyncedAt: number }[] = [];
+  const prepare = d.chain.prepareSettle;
+  d.chain.prepareSettle = async (v, u) => {
+    atPrepare.push({ vault: v, firstLimits: limitsFor(OR), secondSyncedAt: store.syncedAt(W) });
+    // age the second vault's last sync, so only a sync after the first settlement can refresh it: its own
+    // settlement's freeze pins the backstop but is not a sync
+    if (atPrepare.length === 1) store.setSyncedAt(W, 1);
+    return prepare(v, u);
+  };
+  await tick(d, NOV);
+  assert.deepEqual(atPrepare.map((p) => p.vault), [V, W]);
+  assert.ok(atPrepare[1].firstLimits > atPrepare[0].firstLimits); // the first vault was synced again after its settlement
+  assert.ok(atPrepare[1].secondSyncedAt > 1, "the second vault was re-synced before its own settlement began");
+  assert.equal(store.listSettlements().length, 2);
+});
+
 test("a vault registered mid-month is not settled that month", async () => {
   const { d, store, events } = setup();
   const W = "0x00000000000000000000000000000000000000bb";

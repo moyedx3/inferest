@@ -460,6 +460,9 @@ export async function tick(d: KeeperDeps, now: number = Date.now()): Promise<voi
       } catch (e) {
         d.log(`settle ${v.vault} failed: ${(e as Error).message}`);
       }
+      // a settlement can wait minutes for its receipt while later ticks are skipped: refresh the other vaults
+      // now, so their last sync does not go stale behind a queue of settlements (a settling vault is skipped)
+      await syncAll(d);
     }
     d.store.setMeta("lastSettleMonth", month);
   } finally {
