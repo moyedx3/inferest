@@ -45,11 +45,13 @@ cp .env.example .env                      # then fill it in
 # TARGET_VAULT (and optionally FEE_BPS) in the shell first; this writes contracts/deployments/<chainId>.json,
 # which DEPLOYMENTS in .env points at
 (cd contracts && forge script script/Deploy.s.sol --rpc-url $RPC_URL --private-key $DEPLOYER_PRIVATE_KEY --broadcast --slow)
-node --env-file=.env app/cli.ts serve     # dashboard, API, chat at /v1, MCP at /mcp
+npm run serve                             # builds the dashboard bundle, then dashboard, API, chat at /v1, MCP at /mcp
 node --env-file=.env demo/treasury.ts     # or demo/agent.ts
 ```
 
 **Use a key.** Point any OpenAI-compatible client at `http://localhost:8787/v1` with an Inferest key as the API key (model ids are OpenRouter's); `http://localhost:8787/setup` has copyable snippets. The same key authenticates to the MCP tools server at `/mcp`. Set `KEY_ENCRYPTION_KEY` (`openssl rand -hex 32`) before the first start.
+
+**Sign in.** With `DYNAMIC_ENVIRONMENT_ID` set (a free environment at app.dynamic.xyz with email login and EVM embedded wallets enabled, and the dashboard's origin allowed), a finance lead signs in on the dashboard with an email code or by connecting the treasury wallet, and manages the vault that wallet created. Without it, the operator token is the only credential. `PUBLIC_RPC_URL` is the browser-facing RPC the dashboard's wallet uses; `DEMO_FAUCET=1` adds a "Get demo funds" button on a forked chain. The judge path is in [`docs/07-walkthrough.md`](docs/07-walkthrough.md).
 
 `forge test` prints diagnostics from an upstream Foundry lint bug before its results; read the `Suite result` lines.
 
@@ -65,6 +67,7 @@ The demos run against a Tenderly Virtual TestNet or a local anvil fork of the ta
 | [`docs/04-unit-economics.md`](docs/04-unit-economics.md) | Principal needed per budget, where our revenue comes from |
 | [`docs/05-risks.md`](docs/05-risks.md) | Terms of service, custody, contracts, rates, rail dependence, tax |
 | [`docs/06-workflow.md`](docs/06-workflow.md) | **The mechanism as built.** Who sends which transaction: per-customer vaults, the Splitter, the keeper, paid tools, settlement, known gaps |
+| [`docs/07-walkthrough.md`](docs/07-walkthrough.md) | The dashboard path a judge or a customer follows |
 | [`sources/`](sources/) | The original Korean notes this repo is built from. Read-only reference |
 
 ---
@@ -143,6 +146,7 @@ Settled 2026-09-24. Where they depart from the source notes in [`sources/`](sour
 | 12 | Paid tools | **Orthogonal, through an Inferest MCP server**, paid per call in USDC from the same yield | See `docs/06` decision 9 |
 | 13 | `report()` cadence | **Daily** | |
 | 14 | Rail fee (hackathon) | **We absorb it.** Customer gets $1 of credit per $1 of yield; the ~5% is our cost | `HACKATHON_PARAMS` in the kernel |
+| 15 | Admin identity | **Dynamic login; a vault's admin is the login whose verified wallet created it** | Decided 2026-09-26. Email code with an embedded wallet, or the treasury wallet through Dynamic's connectors; the operator token stays for us. See [`docs/superpowers/specs/2026-09-26-wallet-login-design.md`](docs/superpowers/specs/2026-09-26-wallet-login-design.md) |
 
 ## Open
 

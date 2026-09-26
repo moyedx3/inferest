@@ -23,7 +23,7 @@ This is the chain-agnostic mechanism: who sends which transaction, when, and wha
 
 | Actor | What it is | Can do |
 |---|---|---|
-| **Customer** | Treasury wallet or Safe (ICP1), or an agent's wallet (ICP2) | Deposit, withdraw, create keys, set key weights. Holds the vault's **management** role |
+| **Customer** | Treasury wallet or Safe (ICP1), or an agent's wallet (ICP2) | Deposit, withdraw, create keys, set key weights. Holds the vault's **management** role, signs in on the dashboard through Dynamic (email code or the treasury wallet) and manages the vault their wallet created |
 | **Key holders** | Developers or agents | Call models with their Inferest key through our proxy, call paid tools with the same key over our MCP server. Nothing on-chain |
 | **Customer vault** | Octant `ERC4626Strategy` over an allowlisted yield source, one per customer | Earns yield, mints profit to the Splitter on `report()`, burns Splitter shares first on a loss |
 | **Factory** | Our contract, one per chain, owned by us | Deploys customer vaults, keeps the allowlist of yield sources, records which customer owns which vault |
@@ -76,7 +76,7 @@ sequenceDiagram
 
 ### 1. Onboard
 
-Our factory deploys an Octant `ERC4626Strategy` for the customer over an allowlisted yield source, with `donationAddress = Splitter`, `keeper = our worker`, and the customer as pending management. The customer accepts management, approves USDC and calls `deposit`. Shares land in their wallet. The customer then registers the vault with our server, which checks with the factory that the vault is one of ours before it will issue keys for it.
+Our factory deploys an Octant `ERC4626Strategy` for the customer over an allowlisted yield source, with `donationAddress = Splitter`, `keeper = our worker`, and the customer as pending management. The customer accepts management, approves USDC and calls `deposit`. Shares land in their wallet. The customer then registers the vault with our server, which checks with the factory that the vault is one of ours before it will issue keys for it. The customer registers the vault from a dashboard session whose wallet created it, or we register it with the operator token; either way the vault's admin is the wallet that created it.
 
 **Why the customer holds management:** the only lever over yield is the donation address, and changing it takes a two-step process with a **14-day cooldown** during which depositors can exit. If the customer points it elsewhere, they have simply left Inferest; we lose nothing, because we only ever spend yield already in the Splitter. Emergency functions move funds from the yield source back into the vault, never out.
 
@@ -84,7 +84,7 @@ Our factory deploys an Octant `ERC4626Strategy` for the customer over an allowli
 
 ### 2. Keys
 
-In the dashboard the admin creates keys and sets a weight per key (default 1). A key is an Inferest secret (`sk-inf-...`) shown once and stored as a hash; the admin can rotate it (new secret, same budget and history) or revoke it (next request gets 401). Developers use it as the API key of any OpenAI-compatible client with the base URL set to the Inferest server, and as the bearer for the MCP tools server.
+In the dashboard the vault's admin (the login whose verified wallet created the vault, or the operator) creates keys and sets a weight per key (default 1). A key is an Inferest secret (`sk-inf-...`) shown once and stored as a hash; the admin can rotate it (new secret, same budget and history) or revoke it (next request gets 401). Developers use it as the API key of any OpenAI-compatible client with the base URL set to the Inferest server, and as the bearer for the MCP tools server.
 
 Behind every vault sits one OpenRouter key, minted when the vault is registered and stored encrypted. The proxy forwards each call with that key; the keeper holds its limit at the vault's open credit as a backstop, so a proxy bug cannot spend past yield.
 
@@ -182,7 +182,7 @@ On a loss, `report()` **burns the Splitter's shares of that vault first**. So un
 | A vault the server does not track is never settled | `settleVault`, `POST /api/admin/settle` |
 | Overlapping ticks and duplicate settlements of one vault are skipped | in-flight guards in `app/keeper.ts` |
 | Tool payments are capped at the key's budget before signing, never retried, and rejected payments are not charged | `toolGateway`, `x402PayingFetch` in `app/tools.ts` |
-| Every mutating API route needs the admin token; the MCP endpoint needs a known key | `app/server.ts` |
+| Every mutating API route needs a session that owns the vault or the operator token; state is scoped to the caller | `resolveCaller`, `vaultFor` in `app/server.ts`; `app/auth.ts` |
 
 ### Contract interfaces
 
@@ -227,6 +227,7 @@ The full decision table is in the [README](../README.md#decisions). What this wo
 6. **Rail fee:** absorbed in this build (`HACKATHON_PARAMS`, `railFee = 0`). One USDC of yield opens one dollar of credit; buying that credit costs us about 5% more, paid from the fee address. Our result per settlement is `10% × leftover − 5% × usage`, negative once a customer uses more than two thirds of its yield (pinned in `ledger.test.ts`). For the real product: pass the fee through (`DEFAULT_PARAMS`), absorb it as acquisition cost, or remove it with an enterprise invoice. Tools carry no rail fee either way.
 7. **Float top-up:** manual for now. OpenRouter is prefunded by us, settlement sends usage in USDC to our float wallet, and someone buys credit through OpenRouter's checkout; OpenRouter has no crypto purchase API. In production a programmable card funded from the float wallet pays that checkout, or an enterprise invoice removes the float.
 8. **Keys:** Inferest keys on our own proxy, in front of one OpenRouter Management API key per vault. LLM calls pass through us for the budget check and the metering; the provider key's limit is the backstop.
+9. **Admin identity:** Dynamic login, verified server-side against the environment's JWKS; ownership is the vault's on-chain creator. Multiple admins and Safe treasuries are later.
 
 ---
 
@@ -256,7 +257,7 @@ _Numbers use `HACKATHON_PARAMS` at 4.5% APY and are pinned in `engine/ledger.tes
 ## Known gaps
 
 - **One OpenRouter account.** Every vault's key lives under our account. Per-company isolation would mean one OpenRouter account per company, each with its own float.
-- **Company admins use our admin token.** Self-service needs wallet login: the factory records the vault's owner, so a signed message from that wallet can authorize key creation for that vault.
+- **One admin per vault.** The vault's admin is the login whose verified wallet created it; a company that wants several finance leads, or a Safe multisig as its treasury, needs named co-admins and an EIP-1271 signature path. Both are next.
 - **Orthogonal descriptions.** Coinbase's facilitator rejects a payment whose echoed resource description is longer than about 255 characters; our client caps it before signing. Any other client hits the same on long-description listings.
 - **A daily report on an emptied vault fails Octant's health check.** Harmless, logged, and skipped until the vault is funded again.
 
