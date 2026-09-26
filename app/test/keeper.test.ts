@@ -116,6 +116,19 @@ test("the backstop is held flat while a model call is pending", async () => {
   assert.equal(lastLimit(events), `limit:${OR}:3000`); // 10 used + 2990 open
 });
 
+test("a held backstop is pinned at usage when usage overshot the stored limit", async () => {
+  const { d, store, events, logs } = setup({ orUsage: [0, 2500, 2500] });
+  await syncVault(d, V);
+  assert.equal(lastLimit(events), `limit:${OR}:2000`);
+  store.recordPendingModelCall({ keyId: "k1", model: "m", generationId: "gen-p" });
+  await syncVault(d, V);
+  assert.equal(lastLimit(events), `limit:${OR}:2500`); // at usage, never below it
+  assert.ok(logs.some((m) => m.includes("1 pending model call(s), backstop held at 2500")), logs.join("\n"));
+  store.resolveModelCall("gen-p", 500);
+  await syncVault(d, V);
+  assert.equal(lastLimit(events), `limit:${OR}:4000`); // 2,500 used + 1,500 open
+});
+
 test("a vault with no stored limit is not held", async () => {
   const { d, store, events, logs } = setup({ orUsage: [0] });
   store.recordPendingModelCall({ keyId: "k1", model: "m", generationId: "gen-p" });
