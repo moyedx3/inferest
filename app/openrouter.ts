@@ -45,7 +45,9 @@ export function openRouter(managementKey: string, fetchFn: typeof fetch = fetch,
       if (res.status === 404) return undefined;
       if (!res.ok) throw new Error(`OpenRouter GET /generation failed: ${res.status} ${await res.text()}`);
       const d = (await res.json()).data ?? {};
-      return { id: String(d.id ?? id), model: String(d.model ?? ""), totalCost: Number(d.total_cost ?? 0) };
+      // no numeric cost yet: not ready, so the keeper keeps looking rather than recording $0 for good
+      if (typeof d.total_cost !== "number") return undefined;
+      return { id: String(d.id ?? id), model: String(d.model ?? ""), totalCost: d.total_cost };
     },
   };
 }

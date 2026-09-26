@@ -64,3 +64,8 @@ test("getGeneration throws on other failures", async () => {
   const fn = (async () => new Response("down", { status: 500 })) as unknown as typeof fetch;
   await assert.rejects(openRouter("m", fn).getGeneration("gen-x", "k"), /500/);
 });
+
+test("getGeneration treats a missing cost as not ready", async () => {
+  const f = fakeFetch([{ data: { id: "gen-1", model: "m" } }]);
+  assert.equal(await openRouter("m", f.fn).getGeneration("gen-1", "k"), undefined);
+});
