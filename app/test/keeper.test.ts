@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { openStore } from "../store.ts";
 import {
-  syncVault, syncAll, settleVault, reportAll, tick, toolBudgetFor, reconcilePending, resolvePendingModelCalls, checkDrift,
+  syncVault, syncAll, settleVault, reportAll, reportVault, tick, toolBudgetFor, reconcilePending, resolvePendingModelCalls, checkDrift,
   readSpendSnapshot, SNAPSHOT_ATTEMPTS, type KeeperDeps,
 } from "../keeper.ts";
 import type { Chain, TxStatus } from "../chain.ts";
@@ -803,4 +803,15 @@ test("a second settle that loses the persist race does not broadcast", async () 
   assert.equal(store.vault(V)!.period, 1);
   assert.equal(store.vault(V)!.settling, false);
   assert.equal(store.pendingSettlement(V), undefined);
+});
+
+test("reportVault reports one vault and skips an empty one", async () => {
+  const empty = "0x00000000000000000000000000000000000000bb";
+  const { d, store, events } = setup();
+  store.addVault(empty, "0x1", "U");
+  d.chain.totalAssets = async (v) => (v === empty ? 1_000n : 1_000_000_000n);
+  await reportVault(d, V);
+  await reportVault(d, empty);
+  assert.deepEqual(events.filter((e) => e.startsWith("report:")), [`report:${V}`]);
+  assert.equal(store.getMeta("lastReport"), undefined); // only reportAll stamps the day
 });
