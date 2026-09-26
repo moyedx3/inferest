@@ -202,8 +202,13 @@ export async function resolvePendingModelCalls(d: KeeperDeps, now: number = Date
       d.log(`model call ${row.generationId} lookup failed: ${(e as Error).message}`);
     }
     const age = now - row.at;
-    if (age >= DAY_MS) {
+    const days = Math.floor(age / DAY_MS);
+    // logged once per day of age, not every tick; the meta key is left behind when the row resolves
+    const alarmKey = `pendingAlarm:${row.generationId}`;
+    const logged = d.store.getMeta(alarmKey);
+    if (days >= 1 && (logged === undefined || days > Number(logged))) {
       d.log(`model call ${row.generationId} on key ${row.keyId} unresolved for ${Math.round(age / 3_600_000)} h: operator attention needed`);
+      d.store.setMeta(alarmKey, String(days));
     }
   }
 }

@@ -258,10 +258,16 @@ test("a pending model call unresolved for a day is logged, not dropped", async (
   await resolvePendingModelCalls(d, OCT);
   assert.equal(store.listPendingModelCalls().length, 1);
   assert.ok(logs.some((m) => m.includes("gen-old") && m.includes("lookup failed")));
-  assert.ok(logs.some((m) => m.includes("gen-old") && m.includes("unresolved for 48 h")));
+  const unresolved = () => logs.filter((m) => m.includes("gen-old") && m.includes("unresolved for"));
+  assert.equal(unresolved().length, 1);
+  assert.ok(unresolved()[0].includes("unresolved for 48 h"));
   d.or.getGeneration = async () => undefined;
   await resolvePendingModelCalls(d, OCT + MIN);
   assert.equal(store.listPendingModelCalls().length, 1);
+  assert.equal(unresolved().length, 1); // once a day, not every tick
+  await resolvePendingModelCalls(d, OCT + 86_400_000);
+  assert.equal(unresolved().length, 2);
+  assert.ok(unresolved()[1].includes("unresolved for 72 h"));
 });
 
 test("a vault whose OpenRouter key cannot be decrypted does not stop the keeper", async () => {
