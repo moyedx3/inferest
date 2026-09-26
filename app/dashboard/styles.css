@@ -245,8 +245,9 @@ details.operator[open] { display: flex; gap: 8px; align-items: center; }
 .result .status.wait { background: var(--tag); color: var(--ink-3); }
 
 /* nav, doors */
+.topbar .left { display: flex; align-items: center; }
 .nav { display: flex; gap: 18px; margin-left: 28px; }
-.nav a { color: var(--grey); text-decoration: none; font-size: 14px; }
+.nav a { color: var(--ink-2); text-decoration: none; font-size: 14px; }
 .nav a[aria-current] { color: var(--ink); }
 .doors { padding: 40px 0 64px; }
 .doors .wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
