@@ -554,12 +554,13 @@ test("a deposit above the wallet, a sell above the position, a fourth trade, a z
       { side: "buy", asset: "ARB", sizeUsdc: 10, price: 1, reasoning: "r" },
       { side: "buy", asset: "ARB", sizeUsdc: 10, price: 1, reasoning: "r" },
       { side: "buy", asset: "ARB", sizeUsdc: 10, price: 1, reasoning: "r" },
+      { side: "buy", asset: "ARB", sizeUsdc: 10, price: 1, reasoning: "r" },
     ],
   });
   const { accepted, refused } = applyFence(d, ctx);
   assert.equal(accepted.split.action, "hold");
   assert.equal(accepted.source.action, "stay");
-  assert.equal(accepted.trades.length, 2);
+  assert.equal(accepted.trades.length, 3); // the three legal ARB buys; the fourth is over the per-run count
   assert.equal(refused.filter((r) => r.what.startsWith("trade")).length, 3);
 });
 ```
