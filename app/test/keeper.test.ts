@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { openStore } from "../store.ts";
 import {
   syncVault, syncAll, settleVault, reportAll, tick, toolBudgetFor, reconcilePending, resolvePendingModelCalls, checkDrift,
-  readSpendSnapshot, type KeeperDeps,
+  readSpendSnapshot, SNAPSHOT_ATTEMPTS, type KeeperDeps,
 } from "../keeper.ts";
 import type { Chain, TxStatus } from "../chain.ts";
 import type { OpenRouter } from "../openrouter.ts";
@@ -380,13 +380,13 @@ test("the spend snapshot is re-read when a row lands during the read", () => {
     if (calls === 1) spend("k1", 2); // another process metering mid-read
     return orig(vault);
   };
-  const { keys, ids } = readSpendSnapshot(store, V, () => {});
+  const { keys, ids } = readSpendSnapshot(store, V);
   assert.equal(ids.model, 2);
   assert.equal(keys.find((k) => k.id === "k1")!.modelSpent, 3);
   assert.equal(calls, 2);
 });
 
-test("a spend snapshot that never stabilizes uses the last read and says so", () => {
+test("a spend snapshot that never stabilizes throws so the settlement is retried", async () => {
   const { store, spend } = setup();
   const orig = store.keysForVault;
   let calls = 0;
@@ -395,22 +395,40 @@ test("a spend snapshot that never stabilizes uses the last read and says so", ()
     spend("k1", 1); // another row lands every time, so the markers never stabilize
     return orig(vault);
   };
-  const logs: string[] = [];
-  const { keys, ids } = readSpendSnapshot(store, V, (m) => logs.push(m));
-  assert.ok(logs.some((m) => m.includes("rows kept landing during the spend read")));
-  assert.equal(keys[0].modelSpent, calls);
-  assert.ok(ids.model >= calls);
+  assert.throws(() => readSpendSnapshot(store, V), /did not stabilize/);
+  assert.equal(calls, SNAPSHOT_ATTEMPTS);
+
+  const { d, store: store2, spend: spend2, events } = setup({ orUsage: [100] });
+  const orig2 = store2.keysForVault;
+  store2.keysForVault = (vault: string) => {
+    spend2("k1", 1); // another row lands every time, so the markers never stabilize
+    return orig2(vault);
+  };
+  await tick(d, OCT); // registered mid-month: not settled yet, just marks the month
+  await tick(d, NOV); // attempts to settle, the snapshot never stabilizes, the settlement is retried later
+  assert.equal(settles(events), 0);
+  assert.equal(store2.pendingSettlement(V), undefined);
+  assert.equal(store2.vault(V)!.settling, false);
+  assert.equal(store2.getMeta("settleRetryAfter:" + V), String(NOV + 10 * MIN));
 });
 
 test("a row inserted between the spend read and the markers is billed next month, not stranded", async () => {
   const { d, store, spend } = setup({ orUsage: [100] });
   spend("k1", 100);
-  const orig = store.lastCallIds;
-  let calls = 0;
+  let afterFirstKeysForVault = false;
+  let inserted = false;
+  const origKeys = store.keysForVault;
+  store.keysForVault = (vault: string) => {
+    afterFirstKeysForVault = true;
+    return origKeys(vault);
+  };
+  const origIds = store.lastCallIds;
   store.lastCallIds = () => {
-    calls++;
-    if (calls === 2) spend("k1", 7); // lands between the spend read and this (post-read) marker read
-    return orig();
+    if (afterFirstKeysForVault && !inserted) {
+      inserted = true;
+      spend("k1", 7); // lands between the spend read and its following marker read
+    }
+    return origIds();
   };
   const r = await settleVault(d, V, OCT);
   assert.equal(r!.usage, 107_000_000n);
