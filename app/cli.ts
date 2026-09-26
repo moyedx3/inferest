@@ -42,7 +42,7 @@ switch (cmd) {
       store, or, chain, gateway, params: cfg.params, adminToken: cfg.adminToken, keeper, secrets: box, proxy, auth,
       faucet: cfg.demoFaucet ? createFaucet({ rpcUrl: cfg.rpcUrl, usdc: cfg.usdc }) : undefined,
       publicConfig: {
-        chainId: cfg.chainId, factory: cfg.factory, splitter: cfg.splitter, usdc: cfg.usdc, target: cfg.target, publicUrl: cfg.publicUrl,
+        chainId: cfg.chainId, factory: cfg.factory, splitter: cfg.splitter, usdc: cfg.usdc, target: cfg.target, targets: cfg.targets, publicUrl: cfg.publicUrl,
         dynamicEnvironmentId: cfg.dynamicEnvironmentId ?? null, publicRpcUrl: cfg.publicRpcUrl ?? null, chainName: cfg.chainName,
         nativeCurrency: cfg.nativeCurrency, explorer: cfg.explorer ?? null, demoFaucet: cfg.demoFaucet,
       },

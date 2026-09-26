@@ -28,6 +28,8 @@ export interface Chain {
   /** Whether the node knows the transaction at all (mined or in its mempool). */
   transactionKnown(tx: string): Promise<boolean>;
   customerOf(vault: string): Promise<string>;
+  /** The ERC-4626 yield source the vault's strategy wraps. */
+  targetOf(vault: string): Promise<string>;
 }
 
 const splitterAbi = parseAbi([
@@ -128,5 +130,8 @@ export function makeChain(cfg: Config): Chain {
     },
     customerOf: (vault) =>
       pub.readContract({ address: cfg.factory, abi: factoryAbi, functionName: "customerOf", args: [vault as Hex] }),
+    async targetOf(vault) {
+      return (await pub.readContract({ address: vault as Hex, abi: strategyAbi, functionName: "targetVault" })).toLowerCase();
+    },
   };
 }

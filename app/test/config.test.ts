@@ -67,3 +67,24 @@ test("login, public rpc and faucet come from the environment", () => {
   assert.equal(cfg.demoFaucet, true);
   assert.equal(loadConfig({ ...envFor(42161, 42161), DEMO_FAUCET: "true" }).demoFaucet, false);
 });
+
+test("targets default to the single target and its name", () => {
+  const env = envFor(42161, 42161);
+  const cfg = loadConfig(env);
+  assert.deepEqual(cfg.targets, [{ address: "0x02", name: "yield source" }]);
+});
+
+test("targets come from the chain config and must all be in the deployment's list", () => {
+  const dir = mkdtempSync(join(tmpdir(), "inferest-config-"));
+  const chainPath = join(dir, "chain.json");
+  const depPath = join(dir, "deployments.json");
+  writeFileSync(chainPath, JSON.stringify({
+    chainId: 1, usdc: "0x01", target: "0x02", targetName: "A",
+    targets: [{ address: "0x02", name: "A" }, { address: "0x06", name: "B" }],
+  }));
+  writeFileSync(depPath, JSON.stringify({ chainId: 1, target: "0x02", targets: ["0x02", "0x06"], factory: "0x03", splitter: "0x04" }));
+  const env = { ...envFor(1, 1), CHAIN_CONFIG: chainPath, DEPLOYMENTS: depPath };
+  assert.deepEqual(loadConfig(env).targets.map((t) => t.address), ["0x02", "0x06"]);
+  writeFileSync(depPath, JSON.stringify({ chainId: 1, target: "0x02", targets: ["0x02"], factory: "0x03", splitter: "0x04" }));
+  assert.throws(() => loadConfig(env), /target 0x06 is not allowlisted in the deployment/);
+});
