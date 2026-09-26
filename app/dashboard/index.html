@@ -14,6 +14,7 @@
     #panel { display: none; border: 2px solid #111; }
     #panel.open { display: block; }
     .tabs button.on { font-weight: bold; }
+    details summary { cursor: pointer; }
     #secret { font-family: ui-monospace, monospace; word-break: break-all; background: #fff7d6; padding: 8px; }
   </style>
 </head>
@@ -21,23 +22,38 @@
   <h1>Inferest</h1>
   <p class="muted">Your interest, now inference.</p>
 
-  <div class="card">
-    <h3>Wallet</h3>
-    <button id="connect">Connect wallet</button> <span id="account" class="muted"></span>
+  <div class="card" id="signin">
+    <h3>Sign in</h3>
+    <div id="loggedout">
+      <div><input id="email" type="email" placeholder="finance lead's email" /> <button id="sendcode">Send code</button></div>
+      <div id="codebox" style="display:none"><input id="code" placeholder="6-digit code" /> <button id="verify">Verify</button></div>
+      <p class="muted">or</p>
+      <button id="connectwallet">Connect treasury wallet</button>
+      <div id="providers"></div>
+    </div>
+    <div id="loggedin" style="display:none">
+      <p>Signed in as <b id="who"></b> &middot; wallet <code id="address"></code> <button id="signout">Sign out</button></p>
+      <button id="linkwallet">Connect treasury wallet</button> <div id="linkproviders"></div>
+      <p id="nologin" class="muted"></p>
+    </div>
+    <p id="operatorhint" class="muted" style="display:none">Login is off on this server (no Dynamic environment). Use the operator token below.</p>
+  </div>
+
+  <div class="card" id="depositcard" style="display:none">
+    <h3>Treasury</h3>
+    <button id="fund" style="display:none">Get demo funds</button>
     <div>
       <input id="amount" type="number" value="100000" /> USDC
       <button id="open">Create vault and deposit</button>
       <button id="withdraw">Withdraw everything</button>
     </div>
-    <pre id="log"></pre>
   </div>
 
   <div class="card">
-    <h3>Admin</h3>
-    <input id="token" type="password" placeholder="admin token" />
-    <button id="sync">Sync limits</button><button id="report">Report yield</button>
+    <h3>Keys</h3>
     <div><input id="keyname" placeholder="key name" value="dev-1" /> weight <input id="weight" type="number" value="1" style="width:60px" />
       <button id="addkey">Create key</button> <a href="/setup" class="muted">setup page for developers</a></div>
+    <button id="sync">Sync limits</button><button id="report">Report yield</button>
   </div>
 
   <div id="panel" class="card">
@@ -51,6 +67,12 @@
     <button id="copysnippet">Copy snippet</button> <button id="closepanel">Close</button>
   </div>
 
+  <details class="card" id="operator">
+    <summary>Operator</summary>
+    <input id="token" type="password" placeholder="admin token" /> <span class="muted">used by the keeper's owner and the scripted demos</span>
+  </details>
+
+  <pre id="log"></pre>
   <div id="vaults"></div>
   <script type="module" src="/app.js"></script>
 </body>

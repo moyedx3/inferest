@@ -1,4 +1,4 @@
-import { createWalletClient, createPublicClient, custom, parseAbi, parseEventLogs, parseUnits } from "https://esm.sh/viem@2.56.9";
+import { parseAbi, parseEventLogs, parseUnits } from "https://esm.sh/viem@2.56.9";
 import { snippets } from "/snippets.js";
 
 const factoryAbi = parseAbi([
@@ -16,56 +16,160 @@ const erc20Abi = parseAbi(["function approve(address spender, uint256 amount) re
 const $ = (id) => document.getElementById(id);
 const log = (m) => { $("log").textContent += m + "\n"; };
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-let wallet, pub, account, cfg, myVault;
+const show = (id, on) => { $(id).style.display = on ? "" : "none"; };
+let cfg, dyn = null, session = null, myVault;
 
+/** Every API call carries the session's bearer, or the operator token when one is typed in. */
+function headers() {
+  const h = { "Content-Type": "application/json" };
+  if (session) h.Authorization = `Bearer ${session.token}`;
+  const token = $("token").value;
+  if (token) h["x-admin-token"] = token;
+  return h;
+}
 async function api(path, body) {
-  const headers = { "Content-Type": "application/json", "x-admin-token": $("token").value };
-  const r = await fetch(path, body === undefined ? { headers } : { method: "POST", headers, body: JSON.stringify(body) });
+  const r = await fetch(path, body === undefined ? { headers: headers() } : { method: "POST", headers: headers(), body: JSON.stringify(body) });
   const j = await r.json();
   if (!r.ok) throw new Error(j.error ?? r.status);
   return j;
 }
 
-async function tx(address, abi, functionName, args) {
-  const hash = await wallet.writeContract({ address, abi, functionName, args, account, chain: null });
+async function loadConfig() {
+  cfg = (await api("/api/state")).config;
+}
+
+/** Loads the Dynamic bundle when the server has a login environment; says so when the bundle was not built. */
+async function loadDynamic() {
+  if (!cfg.dynamicEnvironmentId) { loginOff(null); return; }
+  try {
+    dyn = await import("/dynamic.bundle.js");
+  } catch {
+    loginOff("dashboard bundle missing: run npm run build:dashboard");
+    return;
+  }
+  try {
+    session = await dyn.initDynamic(cfg);
+  } catch (e) {
+    const msg = `login unavailable: ${e.message ?? e}`;
+    $("nologin").textContent = msg;
+    loginOff(msg);
+    return;
+  }
+  renderSession();
+}
+
+/** No login on this page: hide the sign-in controls, say why, and open the operator section. */
+function loginOff(msg) {
+  dyn = null;
+  session = null;
+  if (msg) $("operatorhint").textContent = msg;
+  show("operatorhint", true);
+  show("loggedout", false);
+  show("loggedin", false);
+  $("operator").open = true;
+}
+
+function renderSession() {
+  const on = session !== null;
+  show("loggedout", !on);
+  show("loggedin", on);
+  show("depositcard", on && Boolean(cfg.publicRpcUrl));
+  show("fund", on && cfg.demoFaucet);
+  if (on) {
+    $("who").textContent = session.email ?? session.address ?? "";
+    $("address").textContent = session.address ?? "(no wallet yet)";
+  }
+}
+
+$("sendcode").onclick = async () => {
+  try { await dyn.sendEmailCode($("email").value.trim()); show("codebox", true); } catch (e) { alert(String(e.message ?? e)); }
+};
+$("verify").onclick = async () => {
+  try { session = await dyn.verifyEmailCode($("code").value.trim()); myVault = undefined; renderSession(); await render(); } catch (e) { alert(String(e.message ?? e)); }
+};
+/** Lists the browser's wallets as buttons in `container`; one connects (signed out) or links (signed in). */
+function renderProviders(container) {
+  container.innerHTML = "";
+  for (const p of dyn.listWalletProviders()) {
+    const b = document.createElement("button");
+    b.textContent = p.name;
+    b.onclick = async () => {
+      try {
+        await dyn.connectWallet(p.key);
+        session = dyn.currentSession();
+        myVault = undefined;
+        renderSession();
+        await render();
+      } catch (e) { alert(String(e.message ?? e)); }
+    };
+    container.appendChild(b);
+  }
+  if (!container.children.length) container.textContent = "no wallet found in this browser";
+}
+$("connectwallet").onclick = () => renderProviders($("providers"));
+$("linkwallet").onclick = () => renderProviders($("linkproviders"));
+$("signout").onclick = async () => {
+  try { await dyn.signOut(); } catch (e) { log(String(e.message ?? e)); }
+  session = null; myVault = undefined; renderSession();
+  try { await render(); } catch (e) { log(String(e.message ?? e)); }
+};
+
+$("fund").onclick = async () => {
+  try {
+    const r = await api("/api/demo/fund", { address: session.address });
+    log(`funded ${session.address}: ${r.usdc / 1e6} USDC and gas`);
+  } catch (e) { log(String(e)); }
+};
+
+async function tx(wallet, pub, address, abi, functionName, args) {
+  const hash = await wallet.writeContract({ address, abi, functionName, args });
   await pub.waitForTransactionReceipt({ hash });
   log(`${functionName}: ${hash}`);
   return hash;
 }
 
-$("connect").onclick = async () => {
-  [account] = await window.ethereum.request({ method: "eth_requestAccounts" });
-  wallet = createWalletClient({ transport: custom(window.ethereum) });
-  pub = createPublicClient({ transport: custom(window.ethereum) });
-  $("account").textContent = account;
-};
-
 $("open").onclick = async () => {
-  const amount = parseUnits($("amount").value, 6);
-  const hash = await wallet.writeContract({ address: cfg.factory, abi: factoryAbi, functionName: "createVault",
-    args: [cfg.target, "Inferest Vault", "infVAULT"], account, chain: null });
-  const receipt = await pub.waitForTransactionReceipt({ hash });
-  myVault = parseEventLogs({ abi: factoryAbi, logs: receipt.logs })[0].args.vault;
-  log(`vault: ${myVault}`);
-  await tx(myVault, vaultAbi, "acceptManagement", []);
-  await tx(cfg.usdc, erc20Abi, "approve", [myVault, amount]);
-  await tx(myVault, vaultAbi, "deposit", [amount, account]);
-  await api("/api/vaults", { vault: myVault, label: "Treasury" });
-  await render();
+  $("open").disabled = true;
+  try {
+    const wallet = await dyn.walletClient();
+    const pub = dyn.publicClient();
+    const amount = parseUnits($("amount").value, 6);
+    const hash = await wallet.writeContract({ address: cfg.factory, abi: factoryAbi, functionName: "createVault", args: [cfg.target, "Inferest Vault", "infVAULT"] });
+    const receipt = await pub.waitForTransactionReceipt({ hash });
+    myVault = parseEventLogs({ abi: factoryAbi, logs: receipt.logs })[0].args.vault;
+    log(`vault: ${myVault}`);
+    await tx(wallet, pub, myVault, vaultAbi, "acceptManagement", []);
+    await tx(wallet, pub, cfg.usdc, erc20Abi, "approve", [myVault, amount]);
+    await tx(wallet, pub, myVault, vaultAbi, "deposit", [amount, session.address]);
+    await api("/api/vaults", { vault: myVault, label: "Treasury" });
+    await render();
+  } catch (e) { log(String(e.message ?? e)); } finally { $("open").disabled = false; }
 };
 
 $("withdraw").onclick = async () => {
-  const shares = await pub.readContract({ address: myVault, abi: vaultAbi, functionName: "balanceOf", args: [account] });
-  await tx(myVault, vaultAbi, "redeem", [shares, account, account]);
+  try {
+    const wallet = await dyn.walletClient();
+    const pub = dyn.publicClient();
+    const vault = myVault ?? (await api("/api/state")).vaults[0]?.vault;
+    const shares = await pub.readContract({ address: vault, abi: vaultAbi, functionName: "balanceOf", args: [session.address] });
+    await tx(wallet, pub, vault, vaultAbi, "redeem", [shares, session.address, session.address]);
+  } catch (e) { log(String(e.message ?? e)); }
 };
 
-$("sync").onclick = async () => { await api("/api/admin/sync", {}); await render(); };
-$("report").onclick = async () => { await api("/api/admin/report", {}); await api("/api/admin/sync", {}); await render(); };
+$("sync").onclick = async () => {
+  try { await api("/api/admin/sync", myVault ? { vault: myVault } : {}); await render(); } catch (e) { log(String(e.message ?? e)); }
+};
+$("report").onclick = async () => {
+  try { await api("/api/admin/report", myVault ? { vault: myVault } : {}); await render(); } catch (e) { log(String(e.message ?? e)); }
+};
 $("addkey").onclick = async () => {
-  const vault = myVault ?? (await api("/api/state")).vaults[0]?.vault;
-  const r = await api("/api/keys", { vault, name: $("keyname").value, weight: Number($("weight").value) });
-  showKey(`New key: ${$("keyname").value}`, r.key);
-  await render();
+  try {
+    const vault = myVault ?? (await api("/api/state")).vaults[0]?.vault;
+    if (!vault) { alert("no vault yet"); return; }
+    const r = await api("/api/keys", { vault, name: $("keyname").value, weight: Number($("weight").value) });
+    showKey(`New key: ${$("keyname").value}`, r.key);
+    await render();
+  } catch (e) { log(String(e.message ?? e)); }
 };
 
 let panelList = [];
@@ -107,6 +211,7 @@ $("closepanel").onclick = () => {
 async function render() {
   const s = await api("/api/state");
   cfg = s.config;
+  if (!myVault && s.vaults.length) myVault = s.vaults[0].vault;
   $("vaults").innerHTML = s.vaults.map((v) => `
     <div class="card">
       <h3>${esc(v.label)} <span class="muted">${esc(v.vault)}</span></h3>
@@ -121,7 +226,12 @@ async function render() {
           <button class="revoke" data-id="${esc(k.id)}" data-name="${esc(k.name)}">Revoke</button>`}</td></tr>`).join("")}
       </table>
       <button class="settle" data-vault="${esc(v.vault)}">Settle now</button>
-    </div>`).join("");
+    </div>`).join("") || `<p class="muted">${emptyText()}</p>`;
+}
+/** What the empty vault list says, by who is looking. */
+function emptyText() {
+  if (session || $("token").value) return "No vault yet.";
+  return cfg.dynamicEnvironmentId ? "Sign in to see your vaults." : "Type the operator token to see vaults.";
 }
 $("vaults").addEventListener("click", async (e) => {
   const b = e.target.closest("button");
@@ -145,6 +255,6 @@ $("vaults").addEventListener("click", async (e) => {
     log(String(err));
   }
 });
-
 $("token").addEventListener("change", () => { render().catch((e) => log(String(e))); });
-render().catch((e) => log(String(e)));
+
+loadConfig().then(loadDynamic).then(render).catch((e) => log(String(e)));
