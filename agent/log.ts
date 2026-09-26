@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS agent_positions (
 /** The runner's own tables, in the same file as the store. Both the runner and the server open this; the server only reads. */
 export function openAgentLog(path: string) {
   const db = new DatabaseSync(path);
-  if (path !== ":memory:") db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
+  if (path !== ":memory:") db.exec("PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL;");
   db.exec(SCHEMA);
   const j = (v: unknown) => JSON.stringify(v ?? null);
   const p = (s: string | null) => (s === null ? null : JSON.parse(s));

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { openStore } from "../store.ts";
 
@@ -429,4 +429,19 @@ test("spendInWindow sums the given keys' model and tool rows inside the window o
   store.recordModelCall({ keyId: "k2", model: "m", costUsd: 9, generationId: "g3" }, 1_500);
   assert.deepEqual(store.spendInWindow(["k1"], 900, 2_000), { modelUsd: 0.5, toolUsd: 0, modelCalls: 1, toolCalls: 0 });
   assert.deepEqual(store.spendInWindow(["k1", "k2"], 0, 10_000), { modelUsd: 9.75, toolUsd: 0.1, modelCalls: 3, toolCalls: 1 });
+});
+
+test("two handles on the same file see each other's writes", () => {
+  const dir = mkdtempSync(join(tmpdir(), "inferest-store-"));
+  const path = join(dir, "store.db");
+  try {
+    const a = openStore(path);
+    const b = openStore(path);
+    b.addVault("0xv", "0xc", "T");
+    assert.equal(a.vault("0xv")?.customer, "0xc");
+    b.close();
+    a.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

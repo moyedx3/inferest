@@ -127,6 +127,8 @@ const syncedAtKey = (vault: string): string => `syncedAt:${lc(vault)}`;
 
 export function openStore(path: string, opts: { log?: (msg: string) => void } = {}) {
   const db = new DatabaseSync(path);
+  // The runner process may hold a write lock on the same file, and the store must wait rather than fail.
+  if (path !== ":memory:") db.exec("PRAGMA busy_timeout = 5000;");
   // Bootstrap only `meta` first: an old (pre-3) database already has `keys` and `tool_calls` under their old
   // column names, and SCHEMA now indexes those tables by their new columns. Running the full SCHEMA before
   // migrate() has a chance to drop and recreate those tables would fail with "no such column". `meta` itself

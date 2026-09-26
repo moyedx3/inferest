@@ -175,7 +175,7 @@ async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse): Pro
 
   if (url.pathname === "/api/agent" && req.method === "GET") {
     const log = d.agentLog;
-    const vault = log?.getMeta("vault");
+    const vault = log?.getMeta("vault")?.toLowerCase();
     const row = vault ? d.store.vault(vault) : undefined;
     if (!log || !vault || !row) return send(res, 404, { error: "no agent yet" });
     const keyIds: string[] = JSON.parse(log.getMeta("keys") ?? "[]");
@@ -186,7 +186,7 @@ async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse): Pro
     }));
     const sources = (d.publicConfig.targets as { address: string; name: string }[] | undefined ?? []).map((t) => {
       const s = log.lastSamples(t.address);
-      return { target: t.address, name: t.name, rate: rateFrom(s), current: t.address.toLowerCase() === (log.getMeta("source") ?? "") };
+      return { target: t.address, name: t.name, rate: rateFrom(s), current: t.address.toLowerCase() === (log.getMeta("source") ?? "").toLowerCase() };
     });
     const book = JSON.parse(log.getMeta("book") ?? "{}");
     return send(res, 200, {
