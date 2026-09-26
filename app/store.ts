@@ -291,6 +291,17 @@ export function openStore(path: string) {
       const r: any = db.prepare("SELECT COALESCE(SUM(cost_usd), 0) AS c FROM model_calls WHERE vault = ? AND status = 'recorded'").get(lc(vault));
       return round6(Number(r.c));
     },
+    /** Every settlement recorded for the vault, in USD: what the chain has billed so far, for the daily check. */
+    settledUsageUsd(vault: string): number {
+      const r: any = db.prepare("SELECT COALESCE(SUM(CAST(usage_micro AS REAL)), 0) AS u FROM settlements WHERE vault = ?").get(lc(vault));
+      return round6(Number(r.u) / 1e6);
+    },
+    /** The vault's tool spend in periods before `period`, the tool part of what its settlements billed. */
+    toolSpendBeforePeriod(vault: string, period: number): number {
+      const r: any = db.prepare(`SELECT COALESCE(SUM(t.price), 0) AS p FROM tool_calls t JOIN keys k ON k.id = t.key_id
+        WHERE k.vault = ? AND t.period < ?`).get(lc(vault), period);
+      return round6(Number(r.p));
+    },
     /** Opens the next period. Spend is per period, so a bump is all it takes. */
     startNewPeriod(vault: string): void {
       db.prepare("UPDATE vaults SET period = period + 1 WHERE vault = ?").run(lc(vault));

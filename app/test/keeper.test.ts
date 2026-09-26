@@ -221,6 +221,19 @@ test("the drift check compares the company key's usage with recorded model cost"
   assert.ok(logs.includes(`drift ${V}: openrouter usage 3 recorded 2.5 drift 0.5`), logs.join("\n"));
 });
 
+test("the daily check reports recorded cost that no settlement billed", async () => {
+  const { d, store, logs, spend } = setup({ orUsage: [2.75] });
+  spend("k1", 0.25);
+  store.startNewPeriod(V); // the 0.25 row now sits in a period no settlement covered
+  spend("k1", 2);
+  await settleVault(d, V); // bills 2; the vault moves to period 2
+  assert.equal(store.vault(V)!.period, 2);
+  spend("k1", 0.5);
+  await checkDrift(d);
+  assert.ok(logs.includes(`drift ${V}: openrouter usage 2.75 recorded 2.75 drift 0`), logs.join("\n"));
+  assert.ok(logs.includes(`billing ${V}: recorded 2.75 billed 2 current period 0.5 unbilled 0.25`), logs.join("\n"));
+});
+
 test("pending model calls are resolved through the generation lookup with the company key", async () => {
   const { d, store, events, ctl } = setup();
   store.recordPendingModelCall({ keyId: "k1", model: "m", generationId: "gen-1" });

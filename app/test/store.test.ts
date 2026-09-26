@@ -160,6 +160,26 @@ test("a new period is a bump: this period's spend starts at zero, history stays"
   assert.equal(s.totalModelCost(V), 4.5);
 });
 
+test("settled usage sums the vault's settlements in USD", () => {
+  const s = fresh();
+  assert.equal(s.settledUsageUsd(V), 0);
+  s.recordSettlement(V, 1_500_000n, "0x1");
+  s.recordSettlement(V, 500_000n, "0x2");
+  s.recordSettlement("0x00000000000000000000000000000000000000bb", 9_000_000n, "0x3");
+  assert.equal(s.settledUsageUsd(V), 2);
+});
+
+test("tool spend before a period sums the vault's tool calls in earlier periods", () => {
+  const s = fresh();
+  assert.equal(s.toolSpendBeforePeriod(V, 1), 0);
+  s.recordToolCall("k1", "a", "/b", 0.01);
+  s.recordToolCall("k2", "a", "/b", 0.02);
+  s.startNewPeriod(V);
+  s.recordToolCall("k1", "a", "/b", 0.05);
+  assert.equal(s.toolSpendBeforePeriod(V, 1), 0.03);
+  assert.equal(s.toolSpendBeforePeriod(V, 0), 0);
+});
+
 test("rotate replaces the secret on the same row; revoke keeps the row and its spend", () => {
   const s = fresh();
   s.recordModelCall({ keyId: "k1", model: "m", costUsd: 1, generationId: "g1" });

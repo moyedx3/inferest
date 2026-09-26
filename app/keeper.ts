@@ -35,6 +35,7 @@ const DEFAULT_MAX_PENDING_MS = 30 * 60_000;
 const DEFAULT_RETRY_DELAY_MS = 10 * 60_000;
 const DEFAULT_DRAIN_MS = 10_000;
 const DEFAULT_STALE_SETTLING_MS = 15 * 60_000;
+const round6 = (x: number) => Math.round(x * 1e6) / 1e6;
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const noDrain = async (): Promise<void> => {};
 
@@ -139,7 +140,8 @@ export async function reportAll(d: KeeperDeps, now: number = Date.now()): Promis
 
 /**
  * Compares each company key's cumulative usage on OpenRouter with the model cost recorded here since the vault
- * was registered. Logs the drift and corrects nothing: it is the alarm for lost metering.
+ * was registered, and the recorded cost with what settlements have billed plus this period's spend. Logs both
+ * and corrects nothing: the first is the alarm for lost metering, the second for recorded cost no settlement billed.
  */
 export async function checkDrift(d: KeeperDeps): Promise<void> {
   for (const v of d.store.listVaults()) {
@@ -150,6 +152,12 @@ export async function checkDrift(d: KeeperDeps): Promise<void> {
       const recorded = d.store.totalModelCost(v.vault);
       const drift = Math.round((live.usage - recorded) * 1e6) / 1e6;
       d.log(`drift ${v.vault}: openrouter usage ${live.usage} recorded ${recorded} drift ${drift}`);
+      // settlement usage is sum(modelCost) / (1 - railFee) + sum(toolSpend), so this inverts it to model cost
+      const billedModel = round6(Math.max(0,
+        (d.store.settledUsageUsd(v.vault) - d.store.toolSpendBeforePeriod(v.vault, v.period)) * (1 - d.params.railFee)));
+      const current = d.store.spendForVault(v.vault).modelUsd;
+      const unbilled = round6(recorded - billedModel - current);
+      d.log(`billing ${v.vault}: recorded ${recorded} billed ${billedModel} current period ${current} unbilled ${unbilled}`);
     } catch (e) {
       d.log(`drift ${v.vault} check failed: ${(e as Error).message}`);
     }
