@@ -232,3 +232,14 @@ details.operator[open] { display: flex; gap: 8px; align-items: center; }
 }
 .signin p:empty, #operatorslot:empty { display: none; }
 #contracts { display: inline-flex; gap: 16px; }
+
+/* polish: note icons, the funded chip, the first-call line */
+.notes li { align-items: start; }
+.noteicon { flex: none; color: var(--ink-2); padding-top: 2px; display: inline-flex; }
+.notes b { margin-bottom: 3px; }
+.notes b.mono { font-family: var(--mono); font-weight: 500; }
+.btn-lime:disabled { opacity: 1; cursor: default; }
+.result { display: flex; align-items: center; gap: 12px; padding: 14px 24px; background: var(--surface-2); border-top: 1px solid var(--line); font-size: 12px; }
+.result #resulttext { flex: 1; min-width: 0; font-family: var(--mono); color: var(--ink-2); }
+.result .status { padding: 2px 6px; border-radius: 4px; background: #DDF1E3; color: #1F6B3A; font: 12px var(--mono); }
+.result .status.wait { background: var(--tag); color: var(--ink-3); }

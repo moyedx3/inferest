@@ -31,9 +31,10 @@ Header: Authorization: Bearer ${key}` },
   ];
 }
 
+/** What a developer needs to know about an Inferest key, as short titled notes; `icon` names an icon in app.js. */
 export const NOTES = [
-  "Base URL: the Inferest server above, path /v1. Only POST /v1/chat/completions and GET /v1/models are served.",
-  "Model ids are OpenRouter's (for example moonshotai/kimi-k2.6, openai/gpt-4o-mini). Streaming works.",
-  "A 402 insufficient_quota means this key's yield budget for the period is used up or its vault is frozen; it is not retryable.",
-  "A 401 means the key is unknown or revoked. Keys are shown once; rotate to get a new secret on the same budget.",
+  { icon: "link", title: "Base URL", text: "This server, path /v1. Only POST /v1/chat/completions and GET /v1/models are served." },
+  { icon: "box", title: "Model ids", text: "OpenRouter's, for example moonshotai/kimi-k2.6 or openai/gpt-4o-mini. Streaming works." },
+  { icon: "stop", title: "402 insufficient_quota", text: "This key's yield budget for the period is used up, or its vault is frozen. Not retryable." },
+  { icon: "lock", title: "401", text: "The key is unknown or revoked. Keys are shown once; rotate for a new secret on the same budget." },
 ];
