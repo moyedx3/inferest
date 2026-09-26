@@ -6,7 +6,9 @@
     "test": "node --test engine/*.test.ts app/test/*.test.ts",
     "typecheck": "tsc --noEmit",
     "build:dashboard": "esbuild app/dashboard/src/dynamic.js --bundle --format=esm --platform=browser --target=es2022 --minify --outfile=app/dashboard/dynamic.bundle.js --log-level=warning",
-    "serve": "npm run build:dashboard && node --env-file-if-exists=.env app/cli.ts serve"
+    "serve": "npm run build:dashboard && node --env-file-if-exists=.env --env-file-if-exists=.env.local app/cli.ts serve",
+    "demo:treasury": "node --env-file-if-exists=.env --env-file-if-exists=.env.local demo/treasury.ts",
+    "demo:agent": "node --env-file-if-exists=.env --env-file-if-exists=.env.local demo/agent.ts"
   },
   "engines": {
     "node": ">=22.9"
