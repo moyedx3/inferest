@@ -123,7 +123,7 @@ async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse): Pro
       const vault = String(body.vault ?? "").toLowerCase();
       if (!d.store.vault(vault)) return send(res, 404, { error: "unknown vault" });
       const weight = Number(body.weight ?? 1);
-      if (!(weight >= 0)) return send(res, 400, { error: "weight must be >= 0" });
+      if (!(Number.isFinite(weight) && weight >= 0)) return send(res, 400, { error: "weight must be a finite number >= 0" });
       const name = String(body.name ?? "key");
       const { id, secret } = newInferestKey();
       d.store.addKey({ id, vault, name, weight, secretSha256: sha256(secret) });
@@ -136,7 +136,7 @@ async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse): Pro
       if (!key) return send(res, 404, { error: "unknown key" });
       if (action === "weight") {
         const weight = Number(body.weight);
-        if (!(weight >= 0)) return send(res, 400, { error: "weight must be >= 0" });
+        if (!(Number.isFinite(weight) && weight >= 0)) return send(res, 400, { error: "weight must be a finite number >= 0" });
         d.store.setWeight(id, weight);
         return send(res, 200, { ok: true });
       }

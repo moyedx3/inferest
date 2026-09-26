@@ -68,3 +68,7 @@ test("the company limit is cumulative usage plus open credit, floored to 4 decim
   assert.equal(companyLimit(12.34567, l), 102.3456);
   assert.equal(companyLimit(5, []), 5);
 });
+
+test("the company limit ignores a non-finite open credit", () => {
+  assert.equal(companyLimit(5, [{ id: "a", budget: NaN, spent: 0, remaining: NaN }]), 5);
+});
