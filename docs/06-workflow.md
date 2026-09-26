@@ -145,7 +145,7 @@ transfer the remaining shares, worth leftover − fee, to the customer
 
 The leftover shares land in the customer's wallet, where they are principal. This is the kernel's `settle`: principal grows by `leftover − fee`. Because limits never open beyond `y`, `usage ≤ y` always holds and nothing is ever owed; if usage were ever reported above `y`, the contract pays `y` and emits the shortfall.
 
-In the demos settlement is triggered by hand. In production the keeper settles each vault on the first tick of a new month and keeps retrying within the month until it succeeds.
+In the demos settlement is triggered by hand. The `settle` command asks the running server to do it, so the drain and the snapshot happen where the requests are; only when no server answers does it settle in its own process. In production the keeper settles each vault on the first tick of a new month and keeps retrying within the month until it succeeds.
 
 ### 6. Withdraw
 
