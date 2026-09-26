@@ -378,12 +378,15 @@ test("state is scoped: the operator sees every vault, a session its own, nobody 
   const W = "0x00000000000000000000000000000000000000bb";
   store.addVault(W, OTHER, "Other");
   store.recordSettlement(W, 5n, "0xw");
+  store.setPendingSettlement(W, { usageMicro: 7n, baselines: [], tx: "0xpw" });
   const all = await stateAs(base, { "x-admin-token": "admin" });
   assert.deepEqual(all.vaults.map((v: any) => v.vault).sort(), [V, W]);
   assert.equal(all.settlements.length, 1);
+  assert.equal(all.pendingSettlements.length, 1);
   const own = await stateAs(base, { Authorization: `Bearer ${tokenFor([OWNER])}` });
   assert.deepEqual(own.vaults.map((v: any) => v.vault), [V]);
   assert.equal(own.settlements.length, 0);
+  assert.equal(own.pendingSettlements.length, 0);
   assert.equal(own.config.chainId, 42161);
   const none = await stateAs(base, {});
   assert.deepEqual(none.vaults, []);
@@ -515,5 +518,20 @@ test("bearers are ignored when login is not configured", async () => {
   assert.equal((await postAs(base, "/api/keys", { vault: V, name: "x", weight: 1 }, tokenFor([OWNER]))).status, 401);
   const own = await stateAs(base, { Authorization: `Bearer ${tokenFor([OWNER])}` });
   assert.deepEqual(own.vaults, []);
+  server.close();
+});
+
+test("credential combinations resolve as the spec says", async () => {
+  const logs: string[] = [];
+  const { base, server, store, d } = await start();
+  d.keeper.log = (m) => logs.push(m);
+  await post(base, "/api/vaults", { vault: V });
+  const as = (headers: Record<string, string>) =>
+    fetch(base + "/api/keys", { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify({ vault: V, name: "x", weight: 1 }) });
+  assert.equal((await as({ "x-admin-token": "wrong", Authorization: `Bearer ${tokenFor([OWNER])}` })).status, 201); // a session
+  const vaults = store.listVaults().length;
+  assert.equal((await as({ "x-admin-token": "admin", Authorization: "Bearer garbage" })).status, 201); // the operator
+  assert.equal(store.listVaults().length, vaults);
+  assert.ok(!logs.some((m) => m.startsWith("login refused")));
   server.close();
 });
