@@ -17,11 +17,14 @@ type Upstream = (url: string, init: RequestInit) => Response | Promise<Response>
 /** A real server whose proxy talks to a scripted upstream instead of OpenRouter. Yield defaults to $100. */
 async function start(
   upstream: Upstream,
-  opts: { yieldUsd?: number; frozen?: boolean; unsynced?: boolean; upstreamTimeoutMs?: number; decrypt?: (e: string) => string } = {},
+  opts: {
+    yieldUsd?: number; frozen?: boolean; unsynced?: boolean; upstreamTimeoutMs?: number; decrypt?: (e: string) => string;
+    noOrKey?: boolean;
+  } = {},
 ) {
   const store = openStore(":memory:");
   store.addVault(V, "0x00000000000000000000000000000000000000cc", "T");
-  store.setVaultOpenRouterKey(V, "orhash", `enc:${COMPANY}`);
+  if (!opts.noOrKey) store.setVaultOpenRouterKey(V, "orhash", `enc:${COMPANY}`);
   store.setVaultState(V, { yieldUsd: opts.yieldUsd ?? 100, frozen: opts.frozen ?? false });
   if (!opts.unsynced) store.setSyncedAt(V, Date.now());
   store.addKey({ id: "k1", vault: V, name: "dev-1", weight: 1, secretSha256: sha256(SECRET) });
@@ -52,6 +55,7 @@ async function start(
     secrets: { encrypt: (p) => `enc:${p}`, decrypt },
     proxy,
     keeper: undefined as unknown as AppDeps["keeper"],
+    logError: () => {},
   };
   d.keeper = { chain: d.chain, store, or: d.or, params: HACKATHON_PARAMS, log: () => {}, decrypt, drain: proxy.drain };
   const server = createApp(d);
@@ -184,6 +188,17 @@ test("a never-synced vault answers 503", async () => {
   server.close();
 });
 
+test("a vault without a provider key answers 503 with Retry-After", async () => {
+  const { base, server, calls } = await start(() => completion("g", 0), { noOrKey: true });
+  const r = await chat(base, MSG);
+  assert.equal(r.status, 503);
+  assert.equal(r.headers.get("retry-after"), "15");
+  const e: any = await r.json();
+  assert.equal(e.error.type, "server_error");
+  assert.equal(calls.length, 0);
+  server.close();
+});
+
 test("two requests that both pass the check both meter, and the third is refused", async () => {
   // $1 of yield, $0.60 per call: both concurrent calls pass the check (it happens before the call), the third finds nothing left
   let n = 0;
@@ -249,6 +264,25 @@ test("a network failure to the provider is a 502 that names no host", async () =
   const e: any = await r.json();
   assert.equal(e.error.type, "upstream_error");
   assert.ok(!e.error.message.includes("up.test"));
+  server.close();
+});
+
+test("a provider that stops answering mid-body is a 502", async () => {
+  const { base, server } = await start(() => {
+    let n = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(c) {
+        n++;
+        if (n === 1) c.enqueue(new TextEncoder().encode('{"id":"gen-1"'));
+        else c.error(new Error("connection reset"));
+      },
+    });
+    return new Response(stream, { status: 200, headers: { "content-type": "application/json" } });
+  });
+  const r = await chat(base, MSG);
+  assert.equal(r.status, 502);
+  const e: any = await r.json();
+  assert.equal(e.error.type, "upstream_error");
   server.close();
 });
 
@@ -360,12 +394,13 @@ test("the log line names key, model, cost and status, never the prompt or a secr
 });
 
 test("a failure inside the proxy answers 500 in the error shape", async () => {
-  const { base, server, store, calls } = await start(() => completion("gen-f", 0));
+  const { base, server, store, calls, logs } = await start(() => completion("gen-f", 0));
   store.setVaultOpenRouterKey(V, "orhash", "garbage");
   const r = await chat(base, MSG);
   assert.equal(r.status, 500);
   assert.equal(((await r.json()) as any).error.type, "server_error");
   assert.equal(calls.length, 0);
+  assert.ok(logs.includes("proxy key k1 failed: bad secret"), logs.join(" | "));
   server.close();
 });
 

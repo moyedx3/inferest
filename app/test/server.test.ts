@@ -39,6 +39,7 @@ async function start(customer = "0x00000000000000000000000000000000000000cc") {
       fetchFn: (async () => { throw new Error("no upstream in this test"); }) as unknown as typeof fetch,
     }),
     keeper: undefined as unknown as AppDeps["keeper"],
+    logError: () => {},
   };
   d.keeper = { chain: d.chain, store, or: d.or, params: d.params, log: () => {}, sleep: async () => {}, decrypt: d.secrets.decrypt };
   const server = createApp(d);
@@ -85,6 +86,14 @@ test("registering a vault creates its company OpenRouter key once and files it e
   assert.ok(!state.includes("sk-or-v1-company"));
   assert.ok(!state.includes("enc:"));
   assert.equal(JSON.parse(state).vaults[0].hasOpenRouterKey, true);
+  server.close();
+});
+
+test("state reports a vault without a provider key", async () => {
+  const { base, server, store } = await start();
+  store.addVault(V, "0x00000000000000000000000000000000000000cc", "T");
+  const state: any = await (await fetch(base + "/api/state")).json();
+  assert.equal(state.vaults[0].hasOpenRouterKey, false);
   server.close();
 });
 
@@ -325,7 +334,7 @@ test("clearing a pending settlement is refused while the vault is settling", asy
   server.close();
 });
 
-test("serves the setup page with the base URL filled in", async () => {
+test("serves the setup page and exposes the public URL in state", async () => {
   const { base, server, d } = await start();
   d.publicConfig.publicUrl = "https://inferest.example";
   const r = await fetch(base + "/setup");

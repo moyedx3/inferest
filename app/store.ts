@@ -136,9 +136,19 @@ export function openStore(path: string, opts: { log?: (msg: string) => void } = 
   const versionRow = db.prepare("SELECT v FROM meta WHERE k = ?").get("schemaVersion") as { v: string } | undefined;
   if (!versionRow) {
     db.prepare("INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").run("schemaVersion", SCHEMA_VERSION);
-  } else if (migrate(db, String(versionRow.v), opts.log ?? (() => {})) !== SCHEMA_VERSION) {
-    db.close();
-    throw new Error(`unsupported schema version ${versionRow.v}, expected ${SCHEMA_VERSION}`);
+  } else {
+    // whatever goes wrong inside migrate(), the handle is released before the error reaches the caller
+    let migrated: string;
+    try {
+      migrated = migrate(db, String(versionRow.v), opts.log ?? (() => {}));
+    } catch (e) {
+      db.close();
+      throw e;
+    }
+    if (migrated !== SCHEMA_VERSION) {
+      db.close();
+      throw new Error(`unsupported schema version ${versionRow.v}, expected ${SCHEMA_VERSION}`);
+    }
   }
   // Safe now: a fresh database has no conflicting tables, and a migrated one has already been brought current.
   db.exec(SCHEMA);
