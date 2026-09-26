@@ -19,6 +19,24 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&
 const show = (id, on) => { $(id).style.display = on ? "" : "none"; };
 let cfg, dyn = null, session = null, myVault;
 
+/**
+ * Takes the SDK's live session, whose token Dynamic refreshes on its own. Returns false (and signs the page out)
+ * when the SDK no longer has one; true otherwise, including when there is no login to follow.
+ */
+function syncSession() {
+  if (!dyn || !session) return true;
+  const live = dyn.currentSession();
+  if (live === null) {
+    session = null;
+    myVault = undefined;
+    renderSession();
+    log("session expired, sign in again");
+    return false;
+  }
+  session = live;
+  return true;
+}
+
 /** Every API call carries the session's bearer, or the operator token when one is typed in. */
 function headers() {
   const h = { "Content-Type": "application/json" };
@@ -28,6 +46,7 @@ function headers() {
   return h;
 }
 async function api(path, body) {
+  syncSession();
   const r = await fetch(path, body === undefined ? { headers: headers() } : { method: "POST", headers: headers(), body: JSON.stringify(body) });
   const j = await r.json();
   if (!r.ok) throw new Error(j.error ?? r.status);
@@ -78,6 +97,11 @@ function renderSession() {
   if (on) {
     $("who").textContent = session.email ?? session.address ?? "";
     $("address").textContent = session.address ?? "(no wallet yet)";
+    const active = (session.address ?? "").toLowerCase();
+    $("walletlist").innerHTML = (session.wallets ?? []).map((w) => {
+      const on = w.toLowerCase() === active;
+      return `<button class="pick${on ? " on" : ""}" data-address="${esc(w)}">${esc(w.slice(0, 6) + "..." + w.slice(-4))}${on ? " (active)" : ""}</button>`;
+    }).join(" ");
   }
 }
 
@@ -96,7 +120,7 @@ function renderProviders(container) {
     b.onclick = async () => {
       try {
         await dyn.connectWallet(p.key);
-        session = dyn.currentSession();
+        if (session) { if (!syncSession()) return; } else { session = dyn.currentSession(); }
         myVault = undefined;
         renderSession();
         await render();
@@ -108,6 +132,16 @@ function renderProviders(container) {
 }
 $("connectwallet").onclick = () => renderProviders($("providers"));
 $("linkwallet").onclick = () => renderProviders($("linkproviders"));
+/** A wallet button under "Signed in as" makes that wallet the one that signs. */
+$("loggedin").addEventListener("click", async (e) => {
+  const b = e.target.closest("button.pick");
+  if (!b) return;
+  try {
+    if (!syncSession()) return;
+    session = await dyn.chooseWallet(b.dataset.address);
+    renderSession();
+  } catch (err) { log(String(err.message ?? err)); }
+});
 $("signout").onclick = async () => {
   try { await dyn.signOut(); } catch (e) { log(String(e.message ?? e)); }
   session = null; myVault = undefined; renderSession();
@@ -115,6 +149,7 @@ $("signout").onclick = async () => {
 };
 
 $("fund").onclick = async () => {
+  if (!syncSession()) return;
   try {
     const r = await api("/api/demo/fund", { address: session.address });
     log(`funded ${session.address}: ${r.usdc / 1e6} USDC and gas`);
@@ -129,10 +164,16 @@ async function tx(wallet, pub, address, abi, functionName, args) {
 }
 
 $("open").onclick = async () => {
+  if (!syncSession()) return;
   $("open").disabled = true;
   try {
     const wallet = await dyn.walletClient();
     const pub = dyn.publicClient();
+    const code = await wallet.request({ method: "eth_getCode", params: [cfg.factory, "latest"] });
+    if (!code || code === "0x") {
+      log(`your wallet is not on the demo chain: point ${cfg.chainName} (chain ${cfg.chainId}) at ${cfg.publicRpcUrl} in your wallet and try again`);
+      return;
+    }
     const amount = parseUnits($("amount").value, 6);
     const hash = await wallet.writeContract({ address: cfg.factory, abi: factoryAbi, functionName: "createVault", args: [cfg.target, "Inferest Vault", "infVAULT"] });
     const receipt = await pub.waitForTransactionReceipt({ hash });
@@ -147,6 +188,7 @@ $("open").onclick = async () => {
 };
 
 $("withdraw").onclick = async () => {
+  if (!syncSession()) return;
   try {
     const wallet = await dyn.walletClient();
     const pub = dyn.publicClient();
@@ -156,13 +198,18 @@ $("withdraw").onclick = async () => {
   } catch (e) { log(String(e.message ?? e)); }
 };
 
+/** Signed in, sync and report act on this login's vault; in operator mode they act on every vault. */
+const scope = () => (session && myVault ? { vault: myVault } : {});
 $("sync").onclick = async () => {
-  try { await api("/api/admin/sync", myVault ? { vault: myVault } : {}); await render(); } catch (e) { log(String(e.message ?? e)); }
+  if (!syncSession()) return;
+  try { await api("/api/admin/sync", scope()); await render(); } catch (e) { log(String(e.message ?? e)); }
 };
 $("report").onclick = async () => {
-  try { await api("/api/admin/report", myVault ? { vault: myVault } : {}); await render(); } catch (e) { log(String(e.message ?? e)); }
+  if (!syncSession()) return;
+  try { await api("/api/admin/report", scope()); await render(); } catch (e) { log(String(e.message ?? e)); }
 };
 $("addkey").onclick = async () => {
+  if (!syncSession()) return;
   try {
     const vault = myVault ?? (await api("/api/state")).vaults[0]?.vault;
     if (!vault) { alert("no vault yet"); return; }

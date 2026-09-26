@@ -11,11 +11,12 @@ export type Faucet = { fund(address: string): Promise<{ native: bigint; usdc: bi
  * after. Native USDC (FiatToken v2.2) defeats anvil's slot search, so the last resort writes the balance mapping
  * at slot 9 directly. Useless on a real chain by construction: every method is refused there.
  */
-export function createFaucet(d: { rpcUrl: string; usdc: string; fetchFn?: typeof fetch }): Faucet {
+export function createFaucet(d: { rpcUrl: string; usdc: string; fetchFn?: typeof fetch; rpcTimeoutMs?: number }): Faucet {
   const fetchFn = d.fetchFn ?? fetch;
+  const timeout = d.rpcTimeoutMs ?? 30_000;
 
   async function rpc(method: string, params: unknown[]): Promise<unknown> {
-    const r = await fetchFn(d.rpcUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
+    const r = await fetchFn(d.rpcUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: AbortSignal.timeout(timeout) });
     const j: any = await r.json();
     if (j.error) throw Object.assign(new Error(`${method}: ${j.error.message}`), { code: j.error.code });
     return j.result;

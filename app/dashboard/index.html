@@ -14,6 +14,7 @@
     #panel { display: none; border: 2px solid #111; }
     #panel.open { display: block; }
     .tabs button.on { font-weight: bold; }
+    button.pick { padding: 2px 6px; margin: 0 2px; font-size: 12px; } button.pick.on { font-weight: bold; }
     details summary { cursor: pointer; }
     #secret { font-family: ui-monospace, monospace; word-break: break-all; background: #fff7d6; padding: 8px; }
   </style>
@@ -32,7 +33,7 @@
       <div id="providers"></div>
     </div>
     <div id="loggedin" style="display:none">
-      <p>Signed in as <b id="who"></b> &middot; wallet <code id="address"></code> <button id="signout">Sign out</button></p>
+      <p>Signed in as <b id="who"></b> &middot; wallet <code id="address"></code><span id="walletlist"></span> <button id="signout">Sign out</button></p>
       <button id="linkwallet">Connect treasury wallet</button> <div id="linkproviders"></div>
       <p id="nologin" class="muted"></p>
     </div>

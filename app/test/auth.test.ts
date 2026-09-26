@@ -151,3 +151,31 @@ test("a validly signed payload that is not an object is refused as malformed", a
   // testjwt's sign() types payload as Record<string, unknown>, but it JSON-serializes whatever it is given.
   await assert.rejects(auth(fn).verify(s.sign(null as any)), /invalid token: malformed/);
 });
+
+test("a hung jwks fetch is cut off", async () => {
+  const s = makeSigner();
+  let aborted = false;
+  const fn = ((_url: string, init: RequestInit) =>
+    new Promise((_, reject) => init.signal!.addEventListener("abort", () => { aborted = true; reject(init.signal!.reason); }))) as unknown as typeof fetch;
+  const started = Date.now();
+  await assert.rejects(auth(fn, { jwksTimeoutMs: 50 }).verify(s.sign(claims())), /invalid token: jwks unavailable/);
+  assert.ok(aborted, "the fetch was cut off by its signal");
+  assert.ok(Date.now() - started < 1000);
+});
+
+test("a refetch that returns no keys keeps the cached ones", async () => {
+  const s1 = makeSigner("k1");
+  const s2 = makeSigner("k2");
+  let body: unknown = { keys: [s1.jwk] };
+  let count = 0;
+  let t = NOW;
+  const fn = (async () => { count++; return new Response(JSON.stringify(body), { status: 200 }); }) as unknown as typeof fetch;
+  const a = auth(fn, { now: () => t });
+  await a.verify(s1.sign(claims()));
+  body = { keys: [] };
+  t += 61_000;
+  await assert.rejects(a.verify(s2.sign(claims())), /invalid token: unknown key/); // the empty refetch happens here
+  assert.equal(count, 2);
+  const session = await a.verify(s1.sign(claims()));
+  assert.equal(session.userId, "user-1");
+});

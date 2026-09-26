@@ -51,7 +51,7 @@ node --env-file=.env demo/treasury.ts     # or demo/agent.ts
 
 **Use a key.** Point any OpenAI-compatible client at `http://localhost:8787/v1` with an Inferest key as the API key (model ids are OpenRouter's); `http://localhost:8787/setup` has copyable snippets. The same key authenticates to the MCP tools server at `/mcp`. Set `KEY_ENCRYPTION_KEY` (`openssl rand -hex 32`) before the first start.
 
-**Sign in.** With `DYNAMIC_ENVIRONMENT_ID` set (a free environment at app.dynamic.xyz with email login and EVM embedded wallets enabled, and the dashboard's origin allowed), a finance lead signs in on the dashboard with an email code or by connecting the treasury wallet, and manages the vault that wallet created. Without it, the operator token is the only credential. `PUBLIC_RPC_URL` is the browser-facing RPC the dashboard's wallet uses; `DEMO_FAUCET=1` adds a "Get demo funds" button on a forked chain. The judge path is in [`docs/07-walkthrough.md`](docs/07-walkthrough.md).
+**Sign in.** With `DYNAMIC_ENVIRONMENT_ID` set (a free environment at app.dynamic.xyz with email login and EVM embedded wallets enabled, and the dashboard's origin allowed), a finance lead signs in on the dashboard with an email code or by connecting the treasury wallet, and manages the vault that wallet created. Without it, the operator token is the only credential. `PUBLIC_RPC_URL` is the browser-facing RPC the dashboard's wallet uses; `DEMO_FAUCET=1` adds a "Get demo funds" button on a forked chain. The judge path is in [`docs/07-walkthrough.md`](docs/07-walkthrough.md). `npm run serve` reads `.env` itself.
 
 `forge test` prints diagnostics from an upstream Foundry lint bug before its results; read the `Suite result` lines.
 

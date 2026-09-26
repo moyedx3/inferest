@@ -1,5 +1,5 @@
 // The only file that touches Dynamic's SDK. Bundled by `npm run build:dashboard`; the dashboard imports the bundle.
-import { createDynamicClient, initializeClient, sendEmailOTP, verifyOTP, getAvailableWalletProvidersData, connectAndVerifyWithWalletProvider, getPrimaryWalletAccount, getWalletAccounts, switchActiveNetwork, logout } from "@dynamic-labs-sdk/client";
+import { createDynamicClient, initializeClient, sendEmailOTP, verifyOTP, getAvailableWalletProvidersData, connectAndVerifyWithWalletProvider, getPrimaryWalletAccount, getWalletAccounts, getSelectedWalletAccount, setSelectedWalletAccount, switchActiveNetwork, logout } from "@dynamic-labs-sdk/client";
 import { createWaasWalletAccounts, getChainsMissingWaasWalletAccounts } from "@dynamic-labs-sdk/client/waas";
 import { addEvmExtension } from "@dynamic-labs-sdk/evm";
 import { addWalletConnectEvmExtension } from "@dynamic-labs-sdk/evm/wallet-connect";
@@ -8,6 +8,16 @@ import { createWalletClientForWalletAccount, createPublicClientFromNetworkData }
 let client = null;
 let network = null;
 let otp = null;
+/** The wallet that signs: the one this login last chose, kept by the SDK across reloads. */
+let active = null;
+
+const evmAccounts = () => getWalletAccounts().filter((w) => w.chain === "EVM");
+
+/** Makes `account` the signing wallet and asks the SDK to remember it. */
+async function choose(account) {
+  active = account ?? null;
+  if (active) await setSelectedWalletAccount({ walletAccount: active }).catch(() => {});
+}
 
 /** Our chain as Dynamic describes a network; placed first so it is the default for every wallet. */
 function networkFor(cfg) {
@@ -20,6 +30,7 @@ function networkFor(cfg) {
     nativeCurrency: cfg.nativeCurrency,
     rpcUrls: { http: [cfg.publicRpcUrl] },
     blockExplorerUrls: cfg.explorer ? [cfg.explorer] : [],
+    testnet: Boolean(cfg.demoFaucet), // a fork with a faucet is not a production chain
   };
 }
 
@@ -38,6 +49,7 @@ export async function initDynamic(cfg) {
   addEvmExtension();
   await addWalletConnectEvmExtension().catch(() => {}); // no WalletConnect project id configured: extensions stay browser-only
   await initializeClient();
+  active = getSelectedWalletAccount() ?? getPrimaryWalletAccount();
   return currentSession();
 }
 
@@ -52,6 +64,7 @@ export async function verifyEmailCode(code) {
   otp = null;
   const missing = getChainsMissingWaasWalletAccounts();
   if (missing.includes("EVM")) await createWaasWalletAccounts({ chains: ["EVM"] });
+  await choose(evmAccounts()[0]);
   return currentSession();
 }
 
@@ -64,7 +77,7 @@ export function listWalletProviders() {
 
 /** Connects a treasury wallet and signs Dynamic's login message; inside an existing session it links the wallet. */
 export async function connectWallet(key) {
-  await connectAndVerifyWithWalletProvider({ walletProviderKey: key });
+  await choose(await connectAndVerifyWithWalletProvider({ walletProviderKey: key }));
   return currentSession();
 }
 
@@ -73,21 +86,28 @@ function payloadOf(token) {
   try { return JSON.parse(atob(token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/"))); } catch { return {}; }
 }
 
-/** What the dashboard needs about the login: the bearer, who, and the wallet that signs. */
+/** What the dashboard needs about the login: the bearer, who, the wallet that signs, and every wallet it could pick. */
 export function currentSession() {
   if (!client || !client.token) return null;
-  const primary = getPrimaryWalletAccount();
   return {
     token: client.token,
     email: payloadOf(client.token).email ?? null,
-    address: primary ? primary.address : null,
-    wallets: getWalletAccounts().filter((w) => w.chain === "EVM").map((w) => w.address),
+    address: active ? active.address : null,
+    wallets: evmAccounts().map((w) => w.address),
   };
 }
 
-/** A viem WalletClient for the primary wallet on our chain. */
+/** Makes the session's EVM wallet at `address` the one that signs, and remembers the choice. */
+export async function chooseWallet(address) {
+  const account = evmAccounts().find((w) => w.address.toLowerCase() === String(address).toLowerCase());
+  if (!account) throw new Error(`wallet ${address} is not in this session`);
+  await choose(account);
+  return currentSession();
+}
+
+/** A viem WalletClient for the chosen wallet on our chain. */
 export async function walletClient() {
-  const primary = getPrimaryWalletAccount();
+  const primary = active;
   if (!primary) throw new Error("no wallet in this session");
   if (network) {
     await switchActiveNetwork({ networkId: network.networkId, walletAccount: primary }).catch(() => {
@@ -106,4 +126,5 @@ export function publicClient() {
 export async function signOut() {
   await logout();
   otp = null;
+  active = null;
 }

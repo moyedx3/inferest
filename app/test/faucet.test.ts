@@ -53,3 +53,13 @@ test("a real error (not an unknown method) is not skipped", async () => {
   }) as unknown as typeof fetch;
   await assert.rejects(createFaucet({ rpcUrl: "http://rpc", usdc: USDC, fetchFn: fn }).fund(TO), /tenderly_setBalance: insufficient permissions/);
 });
+
+test("a hung node is cut off", async () => {
+  let aborted = false;
+  const fn = ((_u: string, init: RequestInit) =>
+    new Promise((_, reject) => init.signal!.addEventListener("abort", () => { aborted = true; reject(init.signal!.reason); }))) as unknown as typeof fetch;
+  const started = Date.now();
+  await assert.rejects(createFaucet({ rpcUrl: "http://rpc", usdc: USDC, fetchFn: fn, rpcTimeoutMs: 50 }).fund(TO));
+  assert.ok(aborted, "the fetch was cut off by its signal");
+  assert.ok(Date.now() - started < 1000);
+});
