@@ -5,13 +5,14 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import type { Params } from "../engine/ledger.ts";
 import type { Chain } from "./chain.ts";
 import type { OpenRouter } from "./openrouter.ts";
-import type { Store } from "./store.ts";
+import type { Store, VaultRow } from "./store.ts";
 import type { ToolGateway } from "./tools.ts";
 import type { Proxy } from "./proxy.ts";
+import type { Auth, Session } from "./auth.ts";
 import { buildMcpServer } from "./mcp.ts";
 import { computeLimits } from "./limits.ts";
 import { sha256, newInferestKey, type SecretBox } from "./crypto.ts";
-import { syncAll, syncVault, reportAll, settleVault, markRegistered, isSettling, type KeeperDeps } from "./keeper.ts";
+import { syncAll, syncVault, reportAll, reportVault, settleVault, markRegistered, isSettling, type KeeperDeps } from "./keeper.ts";
 
 export { sha256 } from "./crypto.ts";
 
@@ -21,13 +22,21 @@ export type AppDeps = {
   /** Encrypts each vault's OpenRouter key at rest. */
   secrets: SecretBox;
   proxy: Proxy;
+  /** Verifies finance-lead logins; unset means the operator token is the only credential. */
+  auth?: Auth;
   /** Logs an uncaught error from a route (default console.error). */
   logError?: (msg: string) => void;
 };
 
+/** Who is asking: the operator (admin token), a signed-in finance lead, or nobody. */
+export type Caller = { kind: "operator" } | { kind: "session"; session: Session } | { kind: "none" };
+
 const DASHBOARD = fileURLToPath(new URL("./dashboard/", import.meta.url));
 const ZERO = /^0x0{40}$/i;
 const KEY_ROUTE = /^\/api\/keys\/([0-9a-f]{16})\/(weight|revoke|rotate)$/;
+const NEED_LOGIN = { error: "sign in or send the admin token" };
+const NOT_YOURS = { error: "not your vault" };
+const OPERATOR_ONLY = { error: "operator only" };
 
 function send(res: ServerResponse, status: number, body: unknown): void {
   res.writeHead(status, { "Content-Type": "application/json" });
@@ -46,11 +55,33 @@ function bearer(req: IncomingMessage): string {
   return h.startsWith("Bearer ") ? h.slice(7) : "";
 }
 
-/** The public state: field by field, never a spread of a store row, so a new secret column can never leak. */
-function state(d: AppDeps) {
+/** Resolves the request's credentials once. A bearer that fails verification counts as nobody and is logged by reason only. */
+export async function resolveCaller(d: AppDeps, req: IncomingMessage): Promise<Caller> {
+  if (req.headers["x-admin-token"] === d.adminToken) return { kind: "operator" };
+  const token = bearer(req);
+  if (!token || !d.auth) return { kind: "none" };
+  try {
+    return { kind: "session", session: await d.auth.verify(token) };
+  } catch (e) {
+    d.keeper.log(`login refused: ${(e as Error).message}`);
+    return { kind: "none" };
+  }
+}
+
+/** Whether the caller may act on a vault owned by `customer` (the creator address the factory reported). */
+function owns(caller: Caller, customer: string): boolean {
+  if (caller.kind === "operator") return true;
+  if (caller.kind === "session") return caller.session.wallets.includes(customer.toLowerCase());
+  return false;
+}
+
+/** The public state for one caller: field by field, never a spread of a store row, so a new secret column can never leak. */
+function state(d: AppDeps, caller: Caller) {
+  const vaults = d.store.listVaults().filter((v) => owns(caller, v.customer));
+  const mine = new Set(vaults.map((v) => v.vault));
   return {
     config: d.publicConfig,
-    vaults: d.store.listVaults().map((v) => {
+    vaults: vaults.map((v: VaultRow) => {
       const keys = d.store.keysForVault(v.vault);
       const limits = computeLimits(v.yieldUsd, keys, d.params, v.frozen);
       return {
@@ -63,8 +94,8 @@ function state(d: AppDeps) {
         })),
       };
     }),
-    settlements: d.store.listSettlements(),
-    pendingSettlements: d.store.listPendingSettlements().map((p) => ({
+    settlements: d.store.listSettlements().filter((s) => mine.has(s.vault)),
+    pendingSettlements: d.store.listPendingSettlements().filter((p) => mine.has(p.vault)).map((p) => ({
       vault: p.vault, usageMicro: p.usageMicro.toString(), tx: p.tx, createdAt: p.createdAt,
     })),
   };
@@ -88,6 +119,17 @@ async function mintCompanyKey(d: AppDeps, vault: string): Promise<{ hash: string
   return { hash, encrypted: d.secrets.encrypt(key) };
 }
 
+/**
+ * The one authorization question every vault-scoped route asks. Answers with the vault row when the caller may
+ * act on it, or sends 404 (unknown vault) or 403 (not the caller's) and returns undefined.
+ */
+function vaultFor(d: AppDeps, res: ServerResponse, caller: Caller, vault: string): VaultRow | undefined {
+  const row = d.store.vault(vault);
+  if (!row) { send(res, 404, { error: "unknown vault" }); return undefined; }
+  if (!owns(caller, row.customer)) { send(res, 403, NOT_YOURS); return undefined; }
+  return row;
+}
+
 async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url ?? "/", "http://localhost");
   if (await d.proxy.handle(req, res)) return;
@@ -104,17 +146,19 @@ async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse): Pro
     return;
   }
 
-  if (url.pathname === "/api/state" && req.method === "GET") return send(res, 200, state(d));
+  if (url.pathname === "/api/state" && req.method === "GET") return send(res, 200, state(d, await resolveCaller(d, req)));
 
   if (url.pathname.startsWith("/api/")) {
     if (req.method !== "POST") return send(res, 405, { error: "method not allowed" });
-    if (req.headers["x-admin-token"] !== d.adminToken) return send(res, 401, { error: "admin token required" });
+    const caller = await resolveCaller(d, req);
+    if (caller.kind === "none") return send(res, 401, NEED_LOGIN);
     const body = await readJson(req);
 
     if (url.pathname === "/api/vaults") {
       const vault = String(body.vault ?? "").toLowerCase();
       const customer = await d.chain.customerOf(vault).catch(() => "");
       if (!customer || ZERO.test(customer)) return send(res, 400, { error: "not a vault from our factory" });
+      if (!owns(caller, customer)) return send(res, 403, NOT_YOURS);
       // the provider key is minted before anything is written, so a provider failure leaves no half-registered
       // vault; a vault whose row already has a key is registered already and is only answered again
       if (!d.store.openRouterKeyFor(vault)) {
@@ -127,7 +171,7 @@ async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse): Pro
     }
     if (url.pathname === "/api/keys") {
       const vault = String(body.vault ?? "").toLowerCase();
-      if (!d.store.vault(vault)) return send(res, 404, { error: "unknown vault" });
+      if (!vaultFor(d, res, caller, vault)) return;
       const weight = Number(body.weight ?? 1);
       if (!(Number.isFinite(weight) && weight >= 0)) return send(res, 400, { error: "weight must be a finite number >= 0" });
       const name = String(body.name ?? "key");
@@ -140,6 +184,7 @@ async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse): Pro
       const [, id, action] = m;
       const key = d.store.keyById(id);
       if (!key) return send(res, 404, { error: "unknown key" });
+      if (!vaultFor(d, res, caller, key.vault)) return;
       if (action === "weight") {
         const weight = Number(body.weight);
         if (!(Number.isFinite(weight) && weight >= 0)) return send(res, 400, { error: "weight must be a finite number >= 0" });
@@ -155,16 +200,27 @@ async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse): Pro
       d.store.rotateKey(id, sha256(secret));
       return send(res, 200, { key: secret, id });
     }
-    if (url.pathname === "/api/admin/sync") { await syncAll(d.keeper); return send(res, 200, { ok: true }); }
-    if (url.pathname === "/api/admin/report") { await reportAll(d.keeper); return send(res, 200, { ok: true }); }
+    if (url.pathname === "/api/admin/sync" || url.pathname === "/api/admin/report") {
+      const report = url.pathname.endsWith("/report");
+      if (caller.kind === "operator" && body.vault === undefined) {
+        if (report) await reportAll(d.keeper); else await syncAll(d.keeper);
+        return send(res, 200, { ok: true });
+      }
+      const vault = String(body.vault ?? "").toLowerCase();
+      if (!vaultFor(d, res, caller, vault)) return;
+      if (report) await reportVault(d.keeper, vault);
+      await syncVault(d.keeper, vault);
+      return send(res, 200, { ok: true });
+    }
     if (url.pathname === "/api/admin/settle") {
       const vault = String(body.vault ?? "").toLowerCase();
-      if (!d.store.vault(vault)) return send(res, 404, { error: "unknown vault" });
+      if (!vaultFor(d, res, caller, vault)) return;
       const r = await settleVault(d.keeper, vault);
       return send(res, 200, { usageMicro: r ? r.usage.toString() : null, tx: r ? r.tx : null, pending: r?.pending === true });
     }
     if (url.pathname === "/api/admin/pending/clear") {
       // manual escape hatch for a settlement the operator has confirmed will never mine
+      if (caller.kind !== "operator") return send(res, 403, OPERATOR_ONLY);
       const vault = String(body.vault ?? "").toLowerCase();
       const tx = String(body.tx ?? "");
       if (isSettling(vault)) return send(res, 409, { error: "vault is settling" });

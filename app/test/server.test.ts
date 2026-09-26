@@ -6,11 +6,21 @@ import { createProxy } from "../proxy.ts";
 import { openStore } from "../store.ts";
 import { HACKATHON_PARAMS } from "../../engine/ledger.ts";
 import type { ToolGateway } from "../tools.ts";
+import { createAuth } from "../auth.ts";
+import { makeSigner, jwksFetch, claims } from "./testjwt.ts";
 
 const V = "0x00000000000000000000000000000000000000aa";
 const ZERO = "0x0000000000000000000000000000000000000000";
 
-async function start(customer = "0x00000000000000000000000000000000000000cc") {
+const SIGNER = makeSigner();
+const NOW = 1_800_000_000_000;
+const OWNER = "0x00000000000000000000000000000000000000cc";
+const OTHER = "0x00000000000000000000000000000000000000dd";
+/** A signed Dynamic token whose eip155 credentials are the given wallets. */
+const tokenFor = (wallets: string[], over: Record<string, unknown> = {}) =>
+  SIGNER.sign(claims({ verified_credentials: wallets.map((address, i) => ({ id: `vc-${i}`, address, chain: "eip155" })), ...over }));
+
+async function start(customer = "0x00000000000000000000000000000000000000cc", opts: { login?: boolean } = {}) {
   const store = openStore(":memory:");
   const created: string[] = [];
   const d: AppDeps = {
@@ -39,6 +49,7 @@ async function start(customer = "0x00000000000000000000000000000000000000cc") {
       fetchFn: (async () => { throw new Error("no upstream in this test"); }) as unknown as typeof fetch,
     }),
     keeper: undefined as unknown as AppDeps["keeper"],
+    auth: opts.login === false ? undefined : createAuth({ environmentId: "env-1", fetchFn: jwksFetch(SIGNER).fn, now: () => NOW }),
     logError: () => {},
   };
   d.keeper = { chain: d.chain, store, or: d.or, params: d.params, log: () => {}, sleep: async () => {}, decrypt: d.secrets.decrypt };
@@ -50,6 +61,9 @@ async function start(customer = "0x00000000000000000000000000000000000000cc") {
 
 const post = (base: string, path: string, body: unknown, token = "admin") =>
   fetch(base + path, { method: "POST", headers: { "Content-Type": "application/json", "x-admin-token": token }, body: JSON.stringify(body) });
+const postAs = (base: string, path: string, body: unknown, bearer: string) =>
+  fetch(base + path, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${bearer}` }, body: JSON.stringify(body) });
+const stateAs = async (base: string, headers: Record<string, string>) => (await fetch(base + "/api/state", { headers })).json() as Promise<any>;
 
 const mcpList = (base: string, bearer: string) =>
   fetch(base + "/mcp", {
@@ -62,6 +76,7 @@ test("mutating routes require the admin token", async () => {
   const { base, server } = await start();
   assert.equal((await post(base, "/api/vaults", { vault: V }, "wrong")).status, 401);
   assert.equal((await post(base, "/api/admin/sync", {}, "")).status, 401);
+  assert.deepEqual(await (await post(base, "/api/admin/sync", {}, "")).json(), { error: "sign in or send the admin token" });
   server.close();
 });
 
@@ -82,7 +97,7 @@ test("registering a vault creates its company OpenRouter key once and files it e
   assert.deepEqual(store.openRouterKeyFor(V), { hash: "orhash", encryptedSecret: "enc:sk-or-v1-company" });
   assert.equal((await post(base, "/api/vaults", { vault: V, label: "Treasury" })).status, 201);
   assert.equal(created.length, 1); // registering again does not mint a second key
-  const state = await (await fetch(base + "/api/state")).text();
+  const state = await (await fetch(base + "/api/state", { headers: { "x-admin-token": "admin" } })).text();
   assert.ok(!state.includes("sk-or-v1-company"));
   assert.ok(!state.includes("enc:"));
   assert.equal(JSON.parse(state).vaults[0].hasOpenRouterKey, true);
@@ -92,7 +107,7 @@ test("registering a vault creates its company OpenRouter key once and files it e
 test("state reports a vault without a provider key", async () => {
   const { base, server, store } = await start();
   store.addVault(V, "0x00000000000000000000000000000000000000cc", "T");
-  const state: any = await (await fetch(base + "/api/state")).json();
+  const state: any = await (await fetch(base + "/api/state", { headers: { "x-admin-token": "admin" } })).json();
   assert.equal(state.vaults[0].hasOpenRouterKey, false);
   server.close();
 });
@@ -130,7 +145,7 @@ test("creating a key returns an sk-inf secret once and stores only its hash", as
   assert.match(body.id, /^[0-9a-f]{16}$/);
   assert.equal(store.keyBySecret(sha256(body.key))!.id, body.id);
   assert.equal(created.length, 1); // no OpenRouter key per developer any more
-  const state: any = await (await fetch(base + "/api/state")).json();
+  const state: any = await (await fetch(base + "/api/state", { headers: { "x-admin-token": "admin" } })).json();
   const k = state.vaults[0].keys[0];
   assert.equal(k.name, "dev-1");
   assert.equal(k.id, body.id);
@@ -255,7 +270,7 @@ test("rotate issues a new secret on the same key; revoke keeps the row and refus
   const again = await post(base, `/api/keys/${id}/rotate`, {});
   assert.equal(again.status, 409);
   assert.deepEqual(await again.json(), { error: "key is revoked" });
-  const state: any = await (await fetch(base + "/api/state")).json();
+  const state: any = await (await fetch(base + "/api/state", { headers: { "x-admin-token": "admin" } })).json();
   assert.equal(state.vaults[0].keys[0].revoked, true);
   server.close();
 });
@@ -272,7 +287,7 @@ test("state exposes pending settlements and the settling flag", async () => {
   await post(base, "/api/vaults", { vault: V });
   store.setSettling(V, true);
   store.setPendingSettlement(V, { usageMicro: 12_345_678_901_234n, baselines: [], tx: "0xtx" });
-  const state: any = await (await fetch(base + "/api/state")).json();
+  const state: any = await (await fetch(base + "/api/state", { headers: { "x-admin-token": "admin" } })).json();
   assert.equal(state.vaults[0].settling, true);
   assert.equal(state.pendingSettlements.length, 1);
   const p = state.pendingSettlements[0];
@@ -354,5 +369,151 @@ test("the dashboard scripts are served as JavaScript", async () => {
   assert.equal(r.status, 200);
   assert.match(r.headers.get("content-type") ?? "", /javascript/);
   assert.match(await r.text(), /export function snippets/);
+  server.close();
+});
+
+test("state is scoped: the operator sees every vault, a session its own, nobody none", async () => {
+  const { base, server, store } = await start();
+  await post(base, "/api/vaults", { vault: V, label: "Treasury" });
+  const W = "0x00000000000000000000000000000000000000bb";
+  store.addVault(W, OTHER, "Other");
+  store.recordSettlement(W, 5n, "0xw");
+  const all = await stateAs(base, { "x-admin-token": "admin" });
+  assert.deepEqual(all.vaults.map((v: any) => v.vault).sort(), [V, W]);
+  assert.equal(all.settlements.length, 1);
+  const own = await stateAs(base, { Authorization: `Bearer ${tokenFor([OWNER])}` });
+  assert.deepEqual(own.vaults.map((v: any) => v.vault), [V]);
+  assert.equal(own.settlements.length, 0);
+  assert.equal(own.config.chainId, 42161);
+  const none = await stateAs(base, {});
+  assert.deepEqual(none.vaults, []);
+  assert.deepEqual(none.settlements, []);
+  assert.deepEqual(none.pendingSettlements, []);
+  assert.equal(none.config.chainId, 42161);
+  server.close();
+});
+
+test("a session registers only a vault its wallet created", async () => {
+  const { base, server, store, created } = await start();
+  const r = await postAs(base, "/api/vaults", { vault: V, label: "Treasury" }, tokenFor([OTHER]));
+  assert.equal(r.status, 403);
+  assert.deepEqual(await r.json(), { error: "not your vault" });
+  assert.equal(store.vault(V), undefined);
+  assert.equal(created.length, 0);
+  const ok = await postAs(base, "/api/vaults", { vault: V, label: "Treasury" }, tokenFor([OTHER, OWNER]));
+  assert.equal(ok.status, 201);
+  assert.equal(store.vault(V)!.customer, OWNER);
+  server.close();
+});
+
+test("a session manages a vault the operator registered", async () => {
+  const { base, server, store } = await start();
+  await post(base, "/api/vaults", { vault: V, label: "Treasury" });
+  const t = tokenFor([OWNER]);
+  const k = await postAs(base, "/api/keys", { vault: V, name: "dev-1", weight: 1 }, t);
+  assert.equal(k.status, 201);
+  const { id } = await k.json();
+  assert.equal((await postAs(base, `/api/keys/${id}/weight`, { weight: 2 }, t)).status, 200);
+  assert.equal(store.keyById(id)!.weight, 2);
+  assert.equal((await postAs(base, `/api/keys/${id}/rotate`, {}, t)).status, 200);
+  assert.equal((await postAs(base, `/api/keys/${id}/revoke`, {}, t)).status, 200);
+  const s = await postAs(base, "/api/admin/settle", { vault: V }, t);
+  assert.equal(s.status, 200);
+  assert.equal((await s.json()).pending, false);
+  server.close();
+});
+
+test("a session cannot touch another owner's vault", async () => {
+  const { base, server } = await start();
+  await post(base, "/api/vaults", { vault: V, label: "Treasury" });
+  const { id } = await (await post(base, "/api/keys", { vault: V, name: "dev-1", weight: 1 })).json();
+  const t = tokenFor([OTHER]);
+  for (const [path, body] of [
+    ["/api/keys", { vault: V, name: "x", weight: 1 }],
+    [`/api/keys/${id}/weight`, { weight: 2 }],
+    [`/api/keys/${id}/rotate`, {}],
+    [`/api/keys/${id}/revoke`, {}],
+    ["/api/admin/settle", { vault: V }],
+    ["/api/admin/sync", { vault: V }],
+    ["/api/admin/report", { vault: V }],
+  ] as const) {
+    const r = await postAs(base, path, body, t);
+    assert.equal(r.status, 403, path);
+    assert.deepEqual(await r.json(), { error: "not your vault" });
+  }
+  assert.equal((await postAs(base, "/api/keys/deadbeefdeadbeef/weight", { weight: 1 }, t)).status, 404);
+  assert.equal((await postAs(base, "/api/admin/settle", { vault: "0x00000000000000000000000000000000000000ee" }, t)).status, 404);
+  server.close();
+});
+
+test("two sessions with the same wallet both own the vault", async () => {
+  const { base, server } = await start();
+  await post(base, "/api/vaults", { vault: V });
+  const byEmail = tokenFor([OWNER], { sub: "user-email", email: "cfo@example.com" });
+  const byWallet = tokenFor([OWNER], { sub: "user-wallet", email: undefined });
+  assert.equal((await postAs(base, "/api/keys", { vault: V, name: "a", weight: 1 }, byEmail)).status, 201);
+  assert.equal((await postAs(base, "/api/keys", { vault: V, name: "b", weight: 1 }, byWallet)).status, 201);
+  server.close();
+});
+
+test("sync and report with a session are scoped to its vault", async () => {
+  const { base, server, store, d } = await start();
+  await post(base, "/api/vaults", { vault: V });
+  const W = "0x00000000000000000000000000000000000000bb";
+  store.addVault(W, OTHER, "Other");
+  const synced: string[] = [];
+  const reported: string[] = [];
+  d.chain.yieldOf = async (v) => { synced.push(v); return 0n; };
+  d.chain.report = async (v) => { reported.push(v); return "0x"; };
+  const t = tokenFor([OWNER]);
+  assert.equal((await postAs(base, "/api/admin/sync", { vault: V }, t)).status, 200);
+  assert.deepEqual(synced, [V]);
+  assert.equal((await postAs(base, "/api/admin/report", { vault: V }, t)).status, 200);
+  assert.deepEqual(reported, [V]);
+  assert.equal((await postAs(base, "/api/admin/sync", {}, t)).status, 404); // a session must name its vault
+  synced.length = 0;
+  assert.equal((await post(base, "/api/admin/sync", {})).status, 200); // the operator still syncs everything
+  assert.deepEqual(synced.sort(), [V, W]);
+  server.close();
+});
+
+test("operator-only routes refuse a session", async () => {
+  const { base, server, store } = await start();
+  await post(base, "/api/vaults", { vault: V });
+  store.setPendingSettlement(V, { usageMicro: 5n, baselines: [], tx: "0xtx" });
+  const r = await postAs(base, "/api/admin/pending/clear", { vault: V, tx: "0xtx" }, tokenFor([OWNER]));
+  assert.equal(r.status, 403);
+  assert.deepEqual(await r.json(), { error: "operator only" });
+  assert.equal(store.pendingSettlement(V)!.tx, "0xtx");
+  server.close();
+});
+
+test("garbage bearers are 401 and never logged", async () => {
+  const logs: string[] = [];
+  const { base, server, d } = await start();
+  d.keeper.log = (m) => logs.push(m);
+  for (const bad of ["sk-inf-abcdefghijklmnopqrstuvwxyz012345", "nope", "a.b.c"]) {
+    const r = await postAs(base, "/api/keys", { vault: V, name: "x", weight: 1 }, bad);
+    assert.equal(r.status, 401, bad);
+    assert.deepEqual(await r.json(), { error: "sign in or send the admin token" });
+    assert.ok(!logs.some((m) => m.includes(bad)), `token leaked into a log line for ${bad}`);
+  }
+  assert.ok(logs.some((m) => m.startsWith("login refused: invalid token")));
+  server.close();
+});
+
+test("an expired session is 401", async () => {
+  const { base, server } = await start();
+  const r = await postAs(base, "/api/keys", { vault: V, name: "x", weight: 1 }, tokenFor([OWNER], { exp: 1_800_000_000 - 10 }));
+  assert.equal(r.status, 401);
+  server.close();
+});
+
+test("bearers are ignored when login is not configured", async () => {
+  const { base, server } = await start(undefined, { login: false });
+  await post(base, "/api/vaults", { vault: V });
+  assert.equal((await postAs(base, "/api/keys", { vault: V, name: "x", weight: 1 }, tokenFor([OWNER]))).status, 401);
+  const own = await stateAs(base, { Authorization: `Bearer ${tokenFor([OWNER])}` });
+  assert.deepEqual(own.vaults, []);
   server.close();
 });

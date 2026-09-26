@@ -45,9 +45,8 @@ export const fundUsdc = (to: string, micro: bigint) => cheat([
 ]);
 
 export async function api(path: string, body?: unknown): Promise<any> {
-  const r = await fetch(API + path, body === undefined ? {} : {
-    method: "POST", headers: { "Content-Type": "application/json", "x-admin-token": env("ADMIN_TOKEN") }, body: JSON.stringify(body),
-  });
+  const headers = { "Content-Type": "application/json", "x-admin-token": env("ADMIN_TOKEN") };
+  const r = await fetch(API + path, body === undefined ? { headers } : { method: "POST", headers, body: JSON.stringify(body) });
   const j = await r.json();
   if (!r.ok) throw new Error(`${path}: ${j.error ?? r.status}`);
   return j;
