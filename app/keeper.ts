@@ -1,7 +1,7 @@
 import type { Params } from "../engine/ledger.ts";
 import type { Chain, TxStatus } from "./chain.ts";
 import type { OpenRouter } from "./openrouter.ts";
-import { settledMonthKey, type Store, type PendingSettlement, type SpendSnapshot } from "./store.ts";
+import { settledMonthKey, type Store, type PendingSettlement, type SpendSnapshot, type KeyRow } from "./store.ts";
 import { computeLimits, companyLimit, toolBudgetUsd, usageMicro, type KeyLimit } from "./limits.ts";
 
 export type KeeperDeps = {
@@ -291,6 +291,33 @@ async function waitForStatus(d: KeeperDeps, vault: string, tx: string): Promise<
   return "pending";
 }
 
+/** How many times the spend read is repeated when rows land during it (another process metering). */
+const SNAPSHOT_ATTEMPTS = 5;
+
+/** This period's spend together with the row-id markers a settlement snapshot needs. */
+export type SpendRead = { keys: KeyRow[]; ids: { model: number; tool: number } };
+
+/**
+ * Reads this period's spend and the row-id markers so that the two agree even when another process is
+ * inserting rows meanwhile: the markers are read before and after the spend read, and the read is repeated
+ * until they are unchanged. Row ids only grow and rows are never deleted, so equal markers mean the spend
+ * read saw exactly the rows at or below them. If rows keep landing, the last pair is used with the markers
+ * from after the read, which can only leave a row for the next period, never bill one twice.
+ */
+export function readSpendSnapshot(store: Store, vault: string, log: (msg: string) => void): SpendRead {
+  let before = store.lastCallIds();
+  let keys = store.keysForVault(vault);
+  for (let i = 1; i < SNAPSHOT_ATTEMPTS; i++) {
+    const after = store.lastCallIds();
+    if (after.model === before.model && after.tool === before.tool) return { keys, ids: after };
+    before = after;
+    keys = store.keysForVault(vault);
+  }
+  const ids = store.lastCallIds();
+  log(`settle ${vault}: rows kept landing during the spend read, using the last read`);
+  return { keys, ids };
+}
+
 /**
  * Close the vault (proxy refuses, backstop pinned at usage), drain in-flight metering, read this period's spend,
  * sign the settlement, persist it as pending, broadcast, then wait for its receipt. The bookkeeping is applied
@@ -332,10 +359,11 @@ export async function settleVault(d: KeeperDeps, vault: string, now: number = Da
     try {
       await syncCompanyKey(d, vault, []); // the backstop closes at current usage
       await (d.drain ?? noDrain)(vault, d.drainMs ?? DEFAULT_DRAIN_MS); // requests already past the budget check finish metering
-      // the snapshot and its call-id markers are read together, with no await between them: a call metered
-      // after this point has a higher id and is moved into the next period when the settlement completes
-      const keys = d.store.keysForVault(vault);
-      ids = d.store.lastCallIds();
+      // the snapshot and its call-id markers are re-read until they agree, so a call another process meters
+      // mid-read is never missing from keys while also sitting at or below the markers
+      const snapshot = readSpendSnapshot(d.store, vault, d.log);
+      const keys = snapshot.keys;
+      ids = snapshot.ids;
       usage = usageMicro(keys, d.params);
       baselines = keys.map((k) => ({ keyId: k.id, spentUsd: k.modelSpent + k.toolSpent }));
       prepared = await d.chain.prepareSettle(vault, usage);

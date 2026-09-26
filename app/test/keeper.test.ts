@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { openStore } from "../store.ts";
 import {
   syncVault, syncAll, settleVault, reportAll, tick, toolBudgetFor, reconcilePending, resolvePendingModelCalls, checkDrift,
-  type KeeperDeps,
+  readSpendSnapshot, type KeeperDeps,
 } from "../keeper.ts";
 import type { Chain, TxStatus } from "../chain.ts";
 import type { OpenRouter } from "../openrouter.ts";
@@ -368,6 +368,55 @@ test("a call metered after the snapshot is billed in the next period", async () 
   const r2 = await settleVault(d, V, NOV);
   assert.equal(r2!.usage, 5_000_000n);
   assert.equal(store.listSettlements().length, 2);
+});
+
+test("the spend snapshot is re-read when a row lands during the read", () => {
+  const { store, spend } = setup();
+  spend("k1", 1);
+  const orig = store.keysForVault;
+  let calls = 0;
+  store.keysForVault = (vault: string) => {
+    calls++;
+    if (calls === 1) spend("k1", 2); // another process metering mid-read
+    return orig(vault);
+  };
+  const { keys, ids } = readSpendSnapshot(store, V, () => {});
+  assert.equal(ids.model, 2);
+  assert.equal(keys.find((k) => k.id === "k1")!.modelSpent, 3);
+  assert.equal(calls, 2);
+});
+
+test("a spend snapshot that never stabilizes uses the last read and says so", () => {
+  const { store, spend } = setup();
+  const orig = store.keysForVault;
+  let calls = 0;
+  store.keysForVault = (vault: string) => {
+    calls++;
+    spend("k1", 1); // another row lands every time, so the markers never stabilize
+    return orig(vault);
+  };
+  const logs: string[] = [];
+  const { keys, ids } = readSpendSnapshot(store, V, (m) => logs.push(m));
+  assert.ok(logs.some((m) => m.includes("rows kept landing during the spend read")));
+  assert.equal(keys[0].modelSpent, calls);
+  assert.ok(ids.model >= calls);
+});
+
+test("a row inserted between the spend read and the markers is billed next month, not stranded", async () => {
+  const { d, store, spend } = setup({ orUsage: [100] });
+  spend("k1", 100);
+  const orig = store.lastCallIds;
+  let calls = 0;
+  store.lastCallIds = () => {
+    calls++;
+    if (calls === 2) spend("k1", 7); // lands between the spend read and this (post-read) marker read
+    return orig();
+  };
+  const r = await settleVault(d, V, OCT);
+  assert.equal(r!.usage, 107_000_000n);
+  assert.equal(store.listSettlements().length, 1);
+  const r2 = await settleVault(d, V, NOV);
+  assert.equal(r2!.usage, 0n);
 });
 
 test("an error while waiting for the receipt leaves the settlement pending", async () => {
