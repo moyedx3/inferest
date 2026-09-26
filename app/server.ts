@@ -11,7 +11,7 @@ import type { Proxy } from "./proxy.ts";
 import type { Auth, Session } from "./auth.ts";
 import type { Faucet } from "./faucet.ts";
 import { buildMcpServer } from "./mcp.ts";
-import { computeLimits } from "./limits.ts";
+import { computeLimits, settlePreview } from "./limits.ts";
 import { sha256, newInferestKey, type SecretBox } from "./crypto.ts";
 import { syncAll, syncVault, reportAll, reportVault, settleVault, markRegistered, isSettling, type KeeperDeps } from "./keeper.ts";
 
@@ -92,6 +92,8 @@ function state(d: AppDeps, caller: Caller) {
       return {
         vault: v.vault, customer: v.customer, label: v.label, period: v.period, frozen: v.frozen, settling: v.settling,
         yieldUsd: v.yieldUsd, orLimit: v.orLimit, orUsage: v.orUsage, hasOpenRouterKey: v.orKeyHash !== null,
+        credit: v.frozen ? 0 : Math.max(0, v.yieldUsd) * (1 - d.params.railFee),
+        preview: settlePreview(v.yieldUsd, keys, d.params),
         keys: keys.map((k, i) => ({
           id: k.id, name: k.name, weight: k.weight, revoked: k.revoked, createdAt: k.createdAt,
           modelSpent: k.modelSpent, toolSpent: k.toolSpent,
@@ -107,11 +109,11 @@ function state(d: AppDeps, caller: Caller) {
 }
 
 async function serveStatic(res: ServerResponse, pathname: string): Promise<void> {
-  const file = pathname === "/" ? "index.html" : pathname === "/setup" ? "setup.html" : pathname.slice(1);
+  const file = pathname === "/" ? "index.html" : pathname.slice(1);
   if (!/^[a-z0-9.-]+$/i.test(file)) return send(res, 404, { error: "not found" });
   try {
     const body = await readFile(DASHBOARD + file);
-    res.writeHead(200, { "Content-Type": file.endsWith(".js") ? "text/javascript" : "text/html" });
+    res.writeHead(200, { "Content-Type": file.endsWith(".js") ? "text/javascript" : file.endsWith(".css") ? "text/css" : "text/html" });
     res.end(body);
   } catch {
     send(res, 404, { error: "not found" });
@@ -267,6 +269,8 @@ async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse): Pro
     return send(res, 404, { error: "not found" });
   }
 
+  // the developer setup page is now the Treasury page's Use a key section
+  if (url.pathname === "/setup") { res.writeHead(302, { Location: "/#use-a-key" }); res.end(); return; }
   return serveStatic(res, url.pathname);
 }
 

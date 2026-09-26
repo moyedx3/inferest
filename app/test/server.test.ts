@@ -382,17 +382,42 @@ test("clearing a pending settlement is refused while the vault is settling", asy
   server.close();
 });
 
-test("serves the setup page and exposes the public URL in state", async () => {
+test("state exposes the public URL", async () => {
   const { base, server, d } = await start();
   d.publicConfig.publicUrl = "https://inferest.example";
-  const r = await fetch(base + "/setup");
-  assert.equal(r.status, 200);
-  assert.match(r.headers.get("content-type") ?? "", /text\/html/);
-  const html = await r.text();
-  assert.match(html, /snippets\.js/);
-  assert.match(html, /sk-inf-/);
   const state: any = await (await fetch(base + "/api/state")).json();
   assert.equal(state.config.publicUrl, "https://inferest.example");
+  server.close();
+});
+
+test("/setup sends developers to the page's snippets", async () => {
+  const { base, server } = await start();
+  const r = await fetch(base + "/setup", { redirect: "manual" });
+  assert.equal(r.status, 302);
+  assert.equal(r.headers.get("location"), "/#use-a-key");
+  server.close();
+});
+
+test("the stylesheet is served as CSS", async () => {
+  const { base, server } = await start();
+  const r = await fetch(base + "/styles.css");
+  assert.equal(r.status, 200);
+  assert.match(r.headers.get("content-type") ?? "", /text\/css/);
+  await r.text();
+  server.close();
+});
+
+test("state carries each vault's open credit and settle preview", async () => {
+  const { base, server, store } = await start();
+  store.addVault(V, OWNER, "Treasury");
+  store.setVaultState(V, { yieldUsd: 2_225 });
+  store.addKey({ id: "k1", vault: V, name: "a", weight: 1, secretSha256: "h1" });
+  store.recordModelCall({ keyId: "k1", model: "m", costUsd: 500, generationId: "g1" });
+  const v = (await stateAs(base, { "x-admin-token": "admin" })).vaults[0];
+  assert.equal(v.credit, 2_225);
+  assert.deepEqual(v.preview, { usage: 500, fee: 172.5, returned: 1552.5 });
+  store.setVaultState(V, { frozen: true });
+  assert.equal((await stateAs(base, { "x-admin-token": "admin" })).vaults[0].credit, 0);
   server.close();
 });
 

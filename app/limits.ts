@@ -1,4 +1,4 @@
-import type { Params } from "../engine/ledger.ts";
+import { settle, type Params } from "../engine/ledger.ts";
 
 /** One key's inputs to the budget math: its weight and what it has spent this period (a store KeyRow fits). */
 export type KeyInput = { id: string; weight: number; revoked: boolean; modelSpent: number; toolSpent: number };
@@ -50,4 +50,18 @@ export function toolBudgetUsd(l: KeyLimit, params: Params): number {
 export function usageMicro(keys: KeyInput[], params: Params): bigint {
   const usd = keys.reduce((s, k) => s + Math.max(0, k.modelSpent) / (1 - params.railFee) + k.toolSpent, 0);
   return BigInt(Math.round(usd * 1e6));
+}
+
+export type SettlePreview = { usage: number; fee: number; returned: number };
+
+/**
+ * What settling now would do, from the kernel's own settle(): a position whose accrued yield is `yieldUsd`,
+ * spent by every key of the vault (the same keys usageMicro bills). A preview only: the Splitter's feeBps and
+ * the chain's yield at settle time decide.
+ */
+export function settlePreview(yieldUsd: number, keys: KeyInput[], params: Params): SettlePreview {
+  const spent = keys.reduce((s, k) => s + Math.max(0, k.modelSpent), 0);
+  const toolSpent = keys.reduce((s, k) => s + k.toolSpent, 0);
+  const r = settle({ principal: 0, shares: Math.max(0, yieldUsd), spent, toolSpent }, 1, params);
+  return { usage: r.usage, fee: r.fee, returned: r.returned };
 }
