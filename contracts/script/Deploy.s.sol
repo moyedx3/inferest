@@ -16,8 +16,9 @@ contract Deploy is Script {
         address target = vm.envAddress("TARGET_VAULT");
         uint16 feeBps = uint16(vm.envOr("FEE_BPS", uint256(1_000)));
 
-        // TARGET_VAULTS is an optional comma-separated allowlist of extra yield sources beyond TARGET_VAULT;
-        // when unset, the allowlist is just [TARGET_VAULT].
+        // TARGET_VAULTS is an optional comma-separated allowlist of extra yield sources beyond TARGET_VAULT
+        // (spaces around each address are trimmed); TARGET_VAULT is always targets[0] and always allowlisted,
+        // whether or not it is repeated in TARGET_VAULTS.
         string memory targetVaultsRaw = vm.envOr("TARGET_VAULTS", string(""));
         address[] memory targets;
         if (bytes(targetVaultsRaw).length == 0) {
@@ -25,10 +26,20 @@ contract Deploy is Script {
             targets[0] = target;
         } else {
             string[] memory parts = vm.split(targetVaultsRaw, ",");
-            targets = new address[](parts.length);
+            address[] memory extra = new address[](parts.length);
+            uint256 extraCount = 0;
             for (uint256 i = 0; i < parts.length; i++) {
-                targets[i] = vm.parseAddress(parts[i]);
+                address parsed = vm.parseAddress(vm.trim(parts[i]));
+                if (parsed == target) continue;
+                bool duplicate = false;
+                for (uint256 j = 0; j < extraCount; j++) {
+                    if (extra[j] == parsed) { duplicate = true; break; }
+                }
+                if (!duplicate) { extra[extraCount] = parsed; extraCount++; }
             }
+            targets = new address[](extraCount + 1);
+            targets[0] = target;
+            for (uint256 i = 0; i < extraCount; i++) targets[i + 1] = extra[i];
         }
 
         vm.startBroadcast();
