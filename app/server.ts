@@ -118,6 +118,15 @@ async function serveStatic(res: ServerResponse, pathname: string): Promise<void>
   }
 }
 
+/** Reopens the vault's backstop right after a key change, so a new key's first call does not wait for the next tick. */
+async function resyncAfter(d: AppDeps, vault: string, why: string): Promise<void> {
+  try {
+    await syncVault(d.keeper, vault);
+  } catch (e) {
+    d.keeper.log(`sync ${vault} after ${why} failed: ${(e as Error).message}`);
+  }
+}
+
 /** Mints the vault's single OpenRouter key (limit 0 until the keeper syncs) and returns it encrypted, filing nothing. */
 async function mintCompanyKey(d: AppDeps, vault: string): Promise<{ hash: string; encrypted: string }> {
   const { key, hash } = await d.or.createKey(`inferest:vault:${vault.slice(2, 10)}`, 0);
@@ -182,6 +191,7 @@ async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse): Pro
       const name = String(body.name ?? "key");
       const { id, secret } = newInferestKey();
       d.store.addKey({ id, vault, name, weight, secretSha256: sha256(secret) });
+      await resyncAfter(d, vault, "key creation");
       return send(res, 201, { key: secret, id });
     }
     const m = url.pathname.match(KEY_ROUTE);
@@ -194,10 +204,12 @@ async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse): Pro
         const weight = Number(body.weight);
         if (!(Number.isFinite(weight) && weight >= 0)) return send(res, 400, { error: "weight must be a finite number >= 0" });
         d.store.setWeight(id, weight);
+        await resyncAfter(d, key.vault, "weight change");
         return send(res, 200, { ok: true });
       }
       if (action === "revoke") {
         d.store.revokeKey(id); // already revoked is fine: the outcome is the same
+        await resyncAfter(d, key.vault, "revocation");
         return send(res, 200, { ok: true });
       }
       if (key.revoked) return send(res, 409, { error: "key is revoked" });

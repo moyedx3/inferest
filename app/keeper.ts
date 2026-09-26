@@ -81,7 +81,25 @@ async function syncCompanyKey(d: KeeperDeps, vault: string, limits: KeyLimit[]):
   d.store.setVaultState(vault, { orLimit: limit, orUsage: live.usage });
 }
 
+const syncQueues = new Map<string, Promise<unknown>>();
+
+/**
+ * Syncs one vault. Syncs of the same vault run one after another, so a request's sync after a key change is never
+ * overwritten by a slower tick that read the keys before the change.
+ */
 export async function syncVault(d: KeeperDeps, vault: string, now: number = Date.now()): Promise<KeyLimit[]> {
+  const key = vault.toLowerCase();
+  const next = () => syncVaultNow(d, vault, now);
+  const run = (syncQueues.get(key) ?? Promise.resolve()).then(next, next);
+  syncQueues.set(key, run);
+  try {
+    return await run;
+  } finally {
+    if (syncQueues.get(key) === run) syncQueues.delete(key);
+  }
+}
+
+async function syncVaultNow(d: KeeperDeps, vault: string, now: number): Promise<KeyLimit[]> {
   if (d.store.pendingSettlement(vault)) {
     // the vault stays closed until the settlement's receipt is seen
     d.log(`sync ${vault} skipped: settlement pending`);
