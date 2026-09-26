@@ -34,6 +34,7 @@ let lastState = null;
 /** What the chosen wallet holds, read from the chain: { vault, principal, shares, sharesDecimals, usdc }. */
 let wallet = null;
 let newKeyId = null;
+let loginIsOff = false;
 const events = [];
 
 /** One row in the Activity list, newest first. Replaces the old raw log; secrets never go here. */
@@ -114,8 +115,20 @@ function loginOff(msg) {
   show("operatorhint", true);
   show("loggedout", false);
   show("loginfine", false);
-  $("operatorslot").appendChild($("operatorfield"));
-  show("operator", false);
+  loginIsOff = true;
+  placeOperatorField();
+}
+
+/**
+ * With login off the token field lives in the sign-in card while the page is signed out, and in the open
+ * footer section once a token is typed, so a mistyped token can always be corrected without a reload.
+ */
+function placeOperatorField() {
+  if (!loginIsOff) return;
+  const out = document.body.dataset.state === "out";
+  (out ? $("operatorslot") : $("operator")).appendChild($("operatorfield"));
+  show("operator", !out);
+  $("operator").open = !out;
 }
 
 function renderSession() {
@@ -145,6 +158,7 @@ function renderSession() {
 function setPageState() {
   const caller = session !== null || $("token").value !== "";
   document.body.dataset.state = !caller ? "out" : currentVault() ? "vault" : "novault";
+  placeOperatorField();
 }
 
 /** The vault the page shows: the one this login just created or picked, else the first the caller may see. */
@@ -290,7 +304,8 @@ $("settle").onclick = async () => {
   if (!v || !syncSession()) return;
   try {
     const r = await api("/api/admin/settle", { vault: v.vault });
-    activity({ icon: "✓", title: r.pending ? "Settlement sent" : `Settled period ${v.period}`, detail: r.usageMicro !== null ? `usage ${usd(Number(r.usageMicro) / 1e6)} to float` : "nothing to settle", tx: r.tx ?? "" });
+    if (r.usageMicro === null) activity({ icon: "✓", title: "Nothing to settle", detail: `period ${v.period} had no settlement to send` });
+    else activity({ icon: "✓", title: r.pending ? "Settlement sent" : `Settled period ${v.period}`, detail: `usage ${usd(Number(r.usageMicro) / 1e6)} to float${r.pending ? ", waiting for its receipt" : ""}`, tx: r.tx ?? "" });
     await render();
   } catch (e) { fail("Settle failed")(e); }
 };
