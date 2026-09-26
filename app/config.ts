@@ -7,6 +7,15 @@ export type Config = {
   rpcUrl: string; chainId: number; usdc: Hex; target: Hex; factory: Hex; splitter: Hex;
   keeperKey: Hex; openRouterKey: string; orthogonalKey: string; toolWalletKey?: Hex;
   adminToken: string; keyEncryptionKey: string; publicUrl: string; dbPath: string; port: number; params: Params;
+  /** Dynamic environment whose logins the server accepts; login is off when unset. */
+  dynamicEnvironmentId?: string;
+  /** Browser-facing RPC for the dashboard's wallet; never the keeper's rpcUrl. */
+  publicRpcUrl?: string;
+  /** Whether POST /api/demo/fund exists (DEMO_FAUCET=1). */
+  demoFaucet: boolean;
+  chainName: string;
+  nativeCurrency: { name: string; symbol: string; decimals: number };
+  explorer?: string;
 };
 
 export function loadConfig(env: Record<string, string | undefined> = process.env): Config {
@@ -45,5 +54,11 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     dbPath: env.DB_PATH ?? "inferest.db",
     port,
     params: { ...HACKATHON_PARAMS, railFee },
+    dynamicEnvironmentId: env.DYNAMIC_ENVIRONMENT_ID || undefined,
+    publicRpcUrl: env.PUBLIC_RPC_URL ? env.PUBLIC_RPC_URL.replace(/\/+$/, "") : undefined,
+    demoFaucet: env.DEMO_FAUCET === "1",
+    chainName: String(chain.name ?? `chain ${dep.chainId}`),
+    nativeCurrency: chain.nativeCurrency ?? { name: "Ether", symbol: "ETH", decimals: 18 },
+    explorer: chain.explorer ? String(chain.explorer) : undefined,
   };
 }
