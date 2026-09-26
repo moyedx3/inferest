@@ -20,6 +20,13 @@ const erc20Abi = parseAbi([
 
 const PLACEHOLDER = "sk-inf-YOUR-KEY";
 const KEY_ICON = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/></svg>`;
+const svg = (paths) => `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths}</svg>`;
+const ICONS = {
+  link: svg(`<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>`),
+  box: svg(`<path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/>`),
+  stop: svg(`<circle cx="12" cy="12" r="10"/><path d="m15 9-6 6"/>`),
+  lock: svg(`<rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>`),
+};
 const TAB_NAMES = { "OpenAI SDK (Python)": "Python", "OpenAI SDK (Node)": "Node", "MCP tools (same key)": "MCP" };
 
 const $ = (id) => document.getElementById(id);
@@ -333,7 +340,7 @@ $("addkey").onclick = async () => {
     const name = $("keyname").value;
     const r = await api("/api/keys", { vault, name, weight: Number($("weight").value) });
     newKeyId = r.id;
-    showKey(`New key: ${name}`, r.key);
+    showKey(`New key: ${name}`, r.key, r.id); // before the state read: a failed read must not lose the one-time secret
     activity({ icon: "+", title: "Key created", detail: `${name}, weight ${$("weight").value}` });
     await render();
   } catch (e) { fail("Key not created")(e); }
@@ -341,9 +348,25 @@ $("addkey").onclick = async () => {
 
 let panelSecret = null;
 let panelIndex = 0;
+/** The key the open banner shows, what it had spent when shown, and the timer that watches for its first call. */
+let panelKey = null;
+let watchTimer = null;
+let watching = false;
+const WATCH_MS = 4000;
+/** One tick of the wait for the shown key's first call; a slow read is never stacked on by the next tick. */
+function watchTick() {
+  if (watching) return;
+  watching = true;
+  render().catch(() => {}).finally(() => { watching = false; });
+}
 /** Opens the banner with a secret that is shown once; the snippets use it until the banner is closed. */
-function showKey(title, secret) {
+function showKey(title, secret, keyId) {
   panelSecret = secret;
+  const k = currentVault()?.keys.find((x) => x.id === keyId);
+  panelKey = keyId ? { id: keyId, base: k?.spent ?? 0, metered: false } : null;
+  clearInterval(watchTimer);
+  if (panelKey) watchTimer = setInterval(watchTick, WATCH_MS);
+  renderResult();
   $("paneltitle").textContent = title;
   $("secret").textContent = secret;
   show("panel", true);
@@ -369,14 +392,34 @@ $("copysnippet").onclick = () => navigator.clipboard.writeText($("snippet").text
 /** Closes the banner and takes the secret out of the page and the snippets. */
 function closePanel() {
   panelSecret = null;
+  panelKey = null;
+  clearInterval(watchTimer);
+  renderResult();
   $("secret").textContent = "";
   show("panel", false);
   renderSnippets();
 }
 $("closepanel").onclick = closePanel;
 
+/**
+ * The line under the snippet: while the banner is open it waits for the shown key's first metered call, then
+ * shows what that call cost and what the key has left. The page polls state until then, and stops once it has.
+ */
+function renderResult() {
+  const k = panelKey && currentVault()?.keys.find((x) => x.id === panelKey.id);
+  show("result", Boolean(k));
+  if (!k) return;
+  const cost = k.spent - panelKey.base;
+  if (cost > 0 && !panelKey.metered) { panelKey.metered = true; panelKey.cost = cost; clearInterval(watchTimer); }
+  $("resultstatus").textContent = panelKey.metered ? "200" : "···";
+  $("resultstatus").className = `status${panelKey.metered ? "" : " wait"}`;
+  $("resulttext").textContent = panelKey.metered ? `First call metered against ${k.name}` : `Run the snippet. This line updates when ${k.name}'s first call is metered.`;
+  $("resultcost").textContent = panelKey.metered ? `cost ${spent(panelKey.cost)} · left ${usd(k.remaining)}` : "";
+}
+
 function renderNotes() {
-  $("notes").innerHTML = NOTES.map((n) => `<li><span>${esc(n)}</span></li>`).join("");
+  $("notes").innerHTML = NOTES.map((n) => `<li><i class="noteicon">${ICONS[n.icon] ?? ""}</i><div>
+    <b class="${/^\d/.test(n.title) ? "mono" : ""}">${esc(n.title)}</b><span>${esc(n.text)}</span></div></li>`).join("");
 }
 
 /** Reads principal, shares and the USDC balance for the chosen wallet. Needs a wallet session and the browser RPC. */
@@ -427,6 +470,9 @@ function renderTreasury() {
   $("deposittitle").textContent = v ? "Add to principal" : "Create your vault";
   $("open").textContent = v ? "Deposit" : "Create vault and deposit";
   $("walletbalance").textContent = w ? `Wallet balance ${Number(formatUnits(w.usdc, 6)).toLocaleString("en-US")} USDC` : "";
+  const funded = !v && Boolean(w && w.usdc > 0n); // before the vault, a funded wallet needs no second click
+  $("fund").textContent = funded ? "✓ Funded" : "Get demo funds";
+  $("fund").disabled = funded;
   $("stepfunds").className = `step${w && w.usdc > 0n ? " done" : ""}`;
   $("stepfunds").querySelector(".num").textContent = w && w.usdc > 0n ? "✓" : "1";
 
@@ -498,7 +544,7 @@ $("keyrows").addEventListener("click", async (e) => {
       activity({ icon: "✕", title: "Key revoked", detail: b.dataset.name });
     } else if (b.classList.contains("rotate")) {
       const r = await api(`/api/keys/${b.dataset.id}/rotate`, {});
-      showKey(`Rotated key: ${b.dataset.name}`, r.key);
+      showKey(`Rotated key: ${b.dataset.name}`, r.key, b.dataset.id);
       activity({ icon: "↺", title: "Key rotated", detail: `${b.dataset.name}, same budget` });
     } else {
       return;
@@ -538,6 +584,7 @@ async function render() {
   renderTreasury();
   renderKeys();
   renderActivity();
+  renderResult();
   if (session && (!wallet || wallet.vault !== currentVault()?.vault)) await readWallet();
 }
 
