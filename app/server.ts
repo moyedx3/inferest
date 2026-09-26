@@ -80,11 +80,10 @@ async function serveStatic(res: ServerResponse, pathname: string): Promise<void>
   }
 }
 
-/** Mints the vault's single OpenRouter key (limit 0 until the keeper syncs) unless it already has one. */
-async function ensureCompanyKey(d: AppDeps, vault: string): Promise<void> {
-  if (d.store.openRouterKeyFor(vault)) return;
+/** Mints the vault's single OpenRouter key (limit 0 until the keeper syncs) and returns it encrypted, filing nothing. */
+async function mintCompanyKey(d: AppDeps, vault: string): Promise<{ hash: string; encrypted: string }> {
   const { key, hash } = await d.or.createKey(`inferest:vault:${vault.slice(2, 10)}`, 0);
-  d.store.setVaultOpenRouterKey(vault, hash, d.secrets.encrypt(key));
+  return { hash, encrypted: d.secrets.encrypt(key) };
 }
 
 async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -114,9 +113,14 @@ async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse): Pro
       const vault = String(body.vault ?? "").toLowerCase();
       const customer = await d.chain.customerOf(vault).catch(() => "");
       if (!customer || ZERO.test(customer)) return send(res, 400, { error: "not a vault from our factory" });
-      d.store.addVault(vault, customer, String(body.label ?? "customer"));
-      markRegistered(d.store, vault); // a vault added mid-month is first settled next month
-      await ensureCompanyKey(d, vault);
+      // the provider key is minted before anything is written, so a provider failure leaves no half-registered
+      // vault; a vault whose row already has a key is registered already and is only answered again
+      if (!d.store.openRouterKeyFor(vault)) {
+        const minted = await mintCompanyKey(d, vault);
+        d.store.addVault(vault, customer, String(body.label ?? "customer"));
+        markRegistered(d.store, vault); // a vault added mid-month is first settled next month
+        d.store.setVaultOpenRouterKey(vault, minted.hash, minted.encrypted);
+      }
       return send(res, 201, { vault, customer: customer.toLowerCase() });
     }
     if (url.pathname === "/api/keys") {

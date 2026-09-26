@@ -88,6 +88,29 @@ test("registering a vault creates its company OpenRouter key once and files it e
   server.close();
 });
 
+test("a provider failure during registration leaves no half-registered vault", async () => {
+  const { base, server, store, d } = await start();
+  try {
+    const createKey = d.or.createKey;
+    d.or.createKey = async () => { throw new Error("openrouter down"); };
+    const origError = console.error;
+    console.error = () => {}; // the route's 500 logs the stack
+    try {
+      assert.equal((await post(base, "/api/vaults", { vault: V, label: "Treasury" })).status, 500);
+    } finally {
+      console.error = origError;
+    }
+    assert.equal(store.vault(V), undefined);
+    assert.equal(store.getMeta("settledMonth:" + V), undefined);
+    d.or.createKey = createKey;
+    assert.equal((await post(base, "/api/vaults", { vault: V, label: "Treasury" })).status, 201);
+    assert.deepEqual(store.openRouterKeyFor(V), { hash: "orhash", encryptedSecret: "enc:sk-or-v1-company" });
+    assert.equal(store.vault(V)!.label, "Treasury");
+  } finally {
+    server.close();
+  }
+});
+
 test("creating a key returns an sk-inf secret once and stores only its hash", async () => {
   const { base, server, store, created } = await start();
   await post(base, "/api/vaults", { vault: V, label: "Treasury" });
