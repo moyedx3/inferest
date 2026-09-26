@@ -342,7 +342,9 @@ function sse(events: unknown[], opts: { gate?: Promise<void>; breakAt?: number }
       else c.enqueue(enc.encode(f));
     },
   });
-  return new Response(stream, { status: 200, headers: { "content-type": "text/event-stream", "x-openrouter-trace": "leak" } });
+  return new Response(stream, {
+    status: 200, headers: { "content-type": "text/event-stream", "cache-control": "max-age=60", "x-openrouter-trace": "leak" },
+  });
 }
 const chunk = (id: string, content: string) => ({ id, model: "openai/gpt-4o-mini", choices: [{ delta: { content } }] });
 const usageEvent = (id: string, cost: number) => ({ id, model: "openai/gpt-4o-mini", choices: [], usage: { prompt_tokens: 3, completion_tokens: 2, cost } });
@@ -353,6 +355,7 @@ test("a streamed answer is relayed event by event and metered from the final usa
   const r = await chat(base, STREAM);
   assert.equal(r.status, 200);
   assert.equal(r.headers.get("content-type"), "text/event-stream");
+  assert.equal(r.headers.get("cache-control"), "no-cache"); // ours replaces the upstream's, never both
   assert.equal(r.headers.get("x-openrouter-trace"), null);
   const text = await r.text();
   assert.ok(text.startsWith(": OPENROUTER PROCESSING\n\n")); // byte for byte, comments included
@@ -428,5 +431,25 @@ test("a streaming request answered with plain JSON is metered like a non-streami
   assert.equal(r.status, 200);
   assert.equal(((await r.json()) as any).usage.cost, 0.01);
   assert.equal(store.modelCall("gen-j")!.costUsd, 0.01);
+  server.close();
+});
+
+test("a model string with control characters is logged sanitized", async () => {
+  // The logged form drops every character outside printable ASCII, so "openai/gpt-4o-mini\ninjected" is logged as
+  // "openai/gpt-4o-miniinjected". The body is forwarded untouched. The first answer echoes the client's model
+  // (the relayed model is logged), the second is an upstream error (the client's model is logged).
+  const model = "openai/gpt-4o-mini\ninjected";
+  let n = 0;
+  const { base, server, logs, calls } = await start((_url, init) => {
+    if (n++ === 1) return json({ error: { message: "boom" } }, 500);
+    const body = completion("gen-m", 0);
+    return body.json().then((j: any) => json({ ...j, model: JSON.parse(String(init.body)).model }));
+  });
+  assert.equal((await chat(base, { ...MSG, model })).status, 200);
+  assert.equal((await chat(base, { ...MSG, model })).status, 500);
+  assert.equal(JSON.parse(String(calls[0].init.body)).model, model);
+  assert.ok(logs.every((m) => !m.includes("\n")), logs.join(" | "));
+  assert.ok(logs.some((m) => m.includes("model openai/gpt-4o-miniinjected gen gen-m")), logs.join(" | "));
+  assert.ok(logs.some((m) => m.includes("model openai/gpt-4o-miniinjected upstream 500")), logs.join(" | "));
   server.close();
 });

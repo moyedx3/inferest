@@ -188,8 +188,8 @@ test("vault state, settling flag, settlements and meta round-trip", () => {
   assert.equal(s.getMeta("nope"), undefined);
 });
 
-test("a fresh store records schema version 3", () => {
-  assert.equal(fresh().getMeta("schemaVersion"), "3");
+test("a fresh store records schema version 4", () => {
+  assert.equal(fresh().getMeta("schemaVersion"), "4");
 });
 
 test("pending settlements round-trip with the spend snapshot", () => {
@@ -202,7 +202,13 @@ test("pending settlements round-trip with the spend snapshot", () => {
   assert.deepEqual(p.baselines, [{ keyId: "k1", spentUsd: 1.5 }]);
   assert.equal(p.tx, "0xtx");
   assert.equal(p.createdAt, 7);
+  assert.equal(p.modelCallId, null); // no markers given: unknown
+  assert.equal(p.toolCallId, null);
   assert.equal(s.listPendingSettlements().length, 1);
+  const s2 = fresh();
+  s2.setPendingSettlement(V, { usageMicro: 1n, baselines: [], tx: "0xtx", modelCallId: 3, toolCallId: 0 });
+  assert.equal(s2.pendingSettlement(V)!.modelCallId, 3);
+  assert.equal(s2.pendingSettlement(V)!.toolCallId, 0);
 });
 
 test("clearing a pending settlement takes the vault out of settling, but only for its tx", () => {
@@ -241,13 +247,70 @@ test("completing a pending settlement applies it once, only for its tx, and clea
   assert.equal(s.getMeta(`settledMonth:${V.toLowerCase()}`), "2026-11");
 });
 
+test("completing a settlement moves calls recorded after the snapshot into the new period", () => {
+  const s = fresh();
+  assert.deepEqual(s.lastCallIds(), { model: 0, tool: 0 });
+  s.recordModelCall({ keyId: "k1", model: "m", costUsd: 0.5, generationId: "g1" });
+  s.recordToolCall("k1", "a", "/b", 0.01);
+  const ids = s.lastCallIds();
+  s.recordModelCall({ keyId: "k1", model: "m", costUsd: 0.25, generationId: "g2" }); // metered after the snapshot
+  s.recordToolCall("k1", "a", "/b", 0.02);
+  s.setPendingSettlement(V, { usageMicro: 500_000n, baselines: [], tx: "0xtx", modelCallId: ids.model, toolCallId: ids.tool });
+  assert.equal(s.completePendingSettlement(V, "0xtx", "2026-11"), true);
+  assert.equal(s.modelCall("g1")!.period, 0);
+  assert.equal(s.modelCall("g2")!.period, 1);
+  assert.equal(s.keyById("k1")!.modelSpent, 0.25);
+  assert.equal(s.keyById("k1")!.toolSpent, 0.02);
+  assert.equal(s.listSettlements()[0].usageMicro, "500000");
+});
+
+test("a pending row without markers moves nothing", () => {
+  const s = fresh();
+  s.recordModelCall({ keyId: "k1", model: "m", costUsd: 0.5, generationId: "g1" });
+  s.recordToolCall("k1", "a", "/b", 0.01);
+  s.recordModelCall({ keyId: "k1", model: "m", costUsd: 0.25, generationId: "g2" });
+  s.recordToolCall("k1", "a", "/b", 0.02);
+  s.setPendingSettlement(V, { usageMicro: 500_000n, baselines: [], tx: "0xtx" });
+  assert.equal(s.completePendingSettlement(V, "0xtx", "2026-11"), true);
+  assert.equal(s.modelCall("g2")!.period, 0);
+  assert.equal(s.keyById("k1")!.modelSpent, 0);
+  assert.equal(s.keyById("k1")!.toolSpent, 0);
+});
+
+test("a version 3 database migrates to version 4, adding the snapshot markers to pending settlements", () => {
+  const path = join(tmpdir(), `inferest-test-migrate3-${process.pid}-${Date.now()}.db`);
+  try {
+    const s0 = openStore(path);
+    s0.addVault(V, "0xC0FFEE000000000000000000000000000000000A", "Treasury");
+    s0.close();
+    // rewind the file to version 3: pending_settlements without the marker columns, holding one row
+    const db = new DatabaseSync(path);
+    db.exec(`DROP TABLE pending_settlements;
+      CREATE TABLE pending_settlements (vault TEXT PRIMARY KEY, usage_micro TEXT NOT NULL, baselines TEXT NOT NULL,
+        tx TEXT NOT NULL, created_at INTEGER NOT NULL);
+      INSERT INTO pending_settlements VALUES ('${V.toLowerCase()}', '7', '[]', '0xold', 1);
+      UPDATE meta SET v = '3' WHERE k = 'schemaVersion';`);
+    db.close();
+    const s = openStore(path);
+    assert.equal(s.getMeta("schemaVersion"), "4");
+    const p = s.pendingSettlement(V)!;
+    assert.equal(p.tx, "0xold");
+    assert.equal(p.modelCallId, null);
+    assert.equal(p.toolCallId, null);
+    s.close();
+    assert.equal(openStore(path).getMeta("schemaVersion"), "4"); // a second open is a no-op
+  } finally {
+    rmSync(path, { force: true });
+  }
+});
+
 for (const version of ["1", "2"] as const) {
-  test(`a version ${version} database migrates to version 3, keeping vaults and settlements`, () => {
+  test(`a version ${version} database migrates to version 4, keeping vaults and settlements`, () => {
     const path = join(tmpdir(), `inferest-test-migrate${version}-${process.pid}-${Date.now()}.db`);
     try {
       writeOldDb(path, version);
       const s = openStore(path);
-      assert.equal(s.getMeta("schemaVersion"), "3");
+      assert.equal(s.getMeta("schemaVersion"), "4");
       const v = s.vault("0xaa")!;
       assert.equal(v.period, 3);
       assert.equal(v.yieldUsd, 12.5);
@@ -260,7 +323,7 @@ for (const version of ["1", "2"] as const) {
       s.recordModelCall({ keyId: "k1", model: "m", costUsd: 1, generationId: "g" });
       assert.equal(s.keyById("k1")!.modelSpent, 1);
       s.close();
-      assert.equal(openStore(path).getMeta("schemaVersion"), "3"); // a second open is a no-op
+      assert.equal(openStore(path).getMeta("schemaVersion"), "4"); // a second open is a no-op
     } finally {
       rmSync(path, { force: true });
     }

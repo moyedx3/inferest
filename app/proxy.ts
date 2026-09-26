@@ -62,6 +62,11 @@ function readBody(req: IncomingMessage, max: number): Promise<string> {
   });
 }
 
+/** A model name as it may appear in a log line: printable ASCII only, at most 100 characters. */
+function logSafe(s: string): string {
+  return s.replace(/[^\x20-\x7e]/g, "").slice(0, 100);
+}
+
 function relayHeaders(up: Response): Record<string, string> {
   const h: Record<string, string> = {};
   for (const name of RELAYED_HEADERS) {
@@ -161,7 +166,7 @@ export function createProxy(d: ProxyDeps): Proxy {
       return;
     }
     const cost = typeof j?.usage?.cost === "number" ? j.usage.cost : undefined;
-    record(key, typeof j?.model === "string" ? j.model : model, generationId, cost, up.status, started);
+    record(key, typeof j?.model === "string" ? logSafe(j.model) : model, generationId, cost, up.status, started);
   }
 
   /**
@@ -171,7 +176,8 @@ export function createProxy(d: ProxyDeps): Proxy {
    * for the generation id seen in the first event, which the keeper resolves through the generation lookup.
    */
   async function relayStream(res: ServerResponse, up: Response, key: KeyRow, model: string, started: number): Promise<void> {
-    res.writeHead(up.status, { ...relayHeaders(up), "Cache-Control": "no-cache", "X-Accel-Buffering": "no" });
+    // lowercase keys, like relayHeaders', so ours replace the upstream's instead of adding a second line
+    res.writeHead(up.status, { ...relayHeaders(up), "cache-control": "no-cache", "x-accel-buffering": "no" });
     res.flushHeaders();
     let clientGone = false;
     res.on("close", () => { clientGone = true; }); // fires early only if the client left; otherwise after end()
@@ -192,7 +198,7 @@ export function createProxy(d: ProxyDeps): Proxy {
           try {
             const j = JSON.parse(data);
             if (!generationId && typeof j?.id === "string") generationId = j.id;
-            if (typeof j?.model === "string") usedModel = j.model;
+            if (typeof j?.model === "string") usedModel = logSafe(j.model);
             if (typeof j?.usage?.cost === "number") cost = j.usage.cost;
           } catch {
             // a partial or non-JSON data line is the provider's business; it is relayed regardless
@@ -229,7 +235,8 @@ export function createProxy(d: ProxyDeps): Proxy {
 
   /** Forwards a checked request with the company key and relays the answer. Runs tracked, so drain() can wait on it. */
   async function forward(res: ServerResponse, body: any, key: KeyRow, apiKey: string): Promise<void> {
-    const model = String(body.model ?? "");
+    // the body goes upstream untouched; the model name is only for log lines, so it is kept to printable ASCII
+    const model = logSafe(String(body.model ?? ""));
     const streaming = body.stream === true;
     const started = Date.now();
     let up: Response;

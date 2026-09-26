@@ -28,9 +28,13 @@ export function computeLimits(yieldUsd: number, keys: KeyInput[], params: Params
   return rows.map(({ k, budget, spent, remaining }) => ({ id: k.id, budget, spent, remaining: remaining * scale }));
 }
 
-/** The company key's cumulative limit on OpenRouter: what it has used plus everything still open here. */
+/**
+ * The company key's cumulative limit on OpenRouter: what it has used plus everything still open here. A
+ * non-finite open credit counts as none, since NaN would reach OpenRouter as null, which means no limit at all.
+ */
 export function companyLimit(orUsage: number, limits: KeyLimit[]): number {
-  return floor4(orUsage + limits.reduce((s, l) => s + l.remaining, 0));
+  const open = limits.reduce((s, l) => s + l.remaining, 0);
+  return floor4(orUsage + (Number.isFinite(open) ? open : 0));
 }
 
 /** USDC a key may still spend on tools (tools are paid in USDC, so no rail fee). */

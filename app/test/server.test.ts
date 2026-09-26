@@ -118,6 +118,13 @@ test("negative weights are rejected", async () => {
   const { base, server } = await start();
   await post(base, "/api/vaults", { vault: V });
   assert.equal((await post(base, "/api/keys", { vault: V, name: "x", weight: -1 })).status, 400);
+  // 1e999 parses to Infinity; it is sent as a raw string since JSON.stringify(Infinity) is null
+  const raw = (path: string, body: string) =>
+    fetch(base + path, { method: "POST", headers: { "Content-Type": "application/json", "x-admin-token": "admin" }, body });
+  assert.equal((await raw("/api/keys", `{"vault":"${V}","name":"x","weight":1e999}`)).status, 400);
+  const { id } = await (await post(base, "/api/keys", { vault: V, name: "y", weight: 1 })).json();
+  assert.equal((await raw(`/api/keys/${id}/weight`, `{"weight":1e999}`)).status, 400);
+  assert.equal((await raw(`/api/keys/${id}/weight`, `{"weight":-1}`)).status, 400);
   server.close();
 });
 

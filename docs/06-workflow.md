@@ -126,7 +126,7 @@ Settlement is the only time yield leaves the Splitter. The keeper:
 1. Marks the vault as settling, so the proxy answers its keys with 503 (retry later), and pins the vault's OpenRouter key limit at its current usage, so nothing new can land either way.
 2. Waits up to ten seconds for requests already past the budget check to finish metering, then reads this period's rows: `usage = Σ modelCost / (1 − railFee) + Σ toolSpend`.
 3. Signs the `Splitter.settle(vault, usage)` transaction locally and writes a pending settlement record (vault, usage, each key's spend snapshot, transaction hash) before broadcasting. The record is insert-only, so two processes cannot both broadcast for one vault.
-4. Broadcasts, then polls for the receipt. On success it records the settlement, starts the new period (spend is per period, so this is a bump), clears the settling flag, marks the month, and re-syncs the backstop, all in one database transaction. On a revert it drops the record and reopens the vault.
+4. Broadcasts, then polls for the receipt. On success it records the settlement, starts the new period (spend is per period, so this is a bump), moving any call metered after the snapshot into it so it is billed next month, clears the settling flag, marks the month, and re-syncs the backstop, all in one database transaction. On a revert it drops the record and reopens the vault.
 5. If the receipt does not arrive, the record stays, the vault stays closed, and every tick reconciles it until it mines. A transaction the node no longer knows after 30 minutes is dropped so the vault can retry. An operator can clear a stuck record through the admin API.
 6. Each vault carries the month it last settled. A vault whose settlement failed is retried on later ticks in the same month, with a ten-minute backoff after a failed attempt.
 
@@ -174,8 +174,8 @@ On a loss, `report()` **burns the Splitter's shares of that vault first**. So un
 | Rule | Where |
 |---|---|
 | A limit never opens ahead of yield in the Splitter, including after reweighting | `computeLimits` in `app/limits.ts` |
-| Keys freeze at usage while a loss is unreported, and that vault is not settled | `syncVault`, `settleVault` |
-| Settlement freezes, re-reads, then settles, so nothing spent after the read goes unbilled | `settleVault` |
+| Keys are refused while a loss is unreported: the proxy answers the vault's keys with 402 and the keeper pins the vault's OpenRouter key limit at its usage until the next report books the loss | `checkBudget` in `app/proxy.ts`, `syncVault` in `app/keeper.ts` |
+| Settlement closes the vault, drains, snapshots, then settles: the proxy answers 503 while the vault is settling, the keeper waits for in-flight metering, and any call metered after the snapshot is moved into the next period, so nothing spent is left unbilled | `settleVault` in `app/keeper.ts`, `completePendingSettlement` in `app/store.ts` |
 | A settlement is broadcast once and its bookkeeping applied exactly once, even across a crash, an RPC failure, or a second process | pending settlement record written before broadcast, reconciled by transaction hash, `app/keeper.ts` and `app/store.ts` |
 | A vault the server does not track is never settled | `settleVault`, `POST /api/admin/settle` |
 | Overlapping ticks and duplicate settlements of one vault are skipped | in-flight guards in `app/keeper.ts` |
