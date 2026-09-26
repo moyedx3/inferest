@@ -174,8 +174,8 @@ On a loss, `report()` **burns the Splitter's shares of that vault first**. So un
 | Rule | Where |
 |---|---|
 | A limit never opens ahead of yield in the Splitter, including after reweighting | `computeLimits` in `app/limits.ts` |
-| Keys are refused while a loss is unreported | The proxy answers the vault's keys with 402 and the keeper pins the vault's OpenRouter key limit at its usage until the next report books the loss |
-| Settlement closes the vault, drains, snapshots, then settles | The proxy answers 503 while the vault is settling, the keeper waits for in-flight metering, and any call metered after the snapshot is moved into the next period, so nothing spent is left unbilled |
+| Keys are refused while a loss is unreported: the proxy answers the vault's keys with 402 and the keeper pins the vault's OpenRouter key limit at its usage until the next report books the loss | `checkBudget` in `app/proxy.ts`, `syncVault` in `app/keeper.ts` |
+| Settlement closes the vault, drains, snapshots, then settles: the proxy answers 503 while the vault is settling, the keeper waits for in-flight metering, and any call metered after the snapshot is moved into the next period, so nothing spent is left unbilled | `settleVault` in `app/keeper.ts`, `completePendingSettlement` in `app/store.ts` |
 | A settlement is broadcast once and its bookkeeping applied exactly once, even across a crash, an RPC failure, or a second process | pending settlement record written before broadcast, reconciled by transaction hash, `app/keeper.ts` and `app/store.ts` |
 | A vault the server does not track is never settled | `settleVault`, `POST /api/admin/settle` |
 | Overlapping ticks and duplicate settlements of one vault are skipped | in-flight guards in `app/keeper.ts` |
