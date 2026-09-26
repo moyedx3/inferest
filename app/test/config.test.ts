@@ -50,3 +50,20 @@ test("public url defaults to localhost on the port", () => {
   assert.equal(loadConfig(envFor(42161, 42161)).publicUrl, "http://localhost:8787");
   assert.equal(loadConfig({ ...envFor(42161, 42161), PUBLIC_URL: "https://inferest.example/" }).publicUrl, "https://inferest.example");
 });
+
+test("login, public rpc and faucet are off unless configured", () => {
+  const cfg = loadConfig(envFor(42161, 42161));
+  assert.equal(cfg.dynamicEnvironmentId, undefined);
+  assert.equal(cfg.publicRpcUrl, undefined);
+  assert.equal(cfg.demoFaucet, false);
+  assert.equal(cfg.chainName, "chain 42161");
+  assert.deepEqual(cfg.nativeCurrency, { name: "Ether", symbol: "ETH", decimals: 18 });
+});
+
+test("login, public rpc and faucet come from the environment", () => {
+  const cfg = loadConfig({ ...envFor(42161, 42161), DYNAMIC_ENVIRONMENT_ID: "env-1", PUBLIC_RPC_URL: "http://127.0.0.1:8545/", DEMO_FAUCET: "1" });
+  assert.equal(cfg.dynamicEnvironmentId, "env-1");
+  assert.equal(cfg.publicRpcUrl, "http://127.0.0.1:8545");
+  assert.equal(cfg.demoFaucet, true);
+  assert.equal(loadConfig({ ...envFor(42161, 42161), DEMO_FAUCET: "true" }).demoFaucet, false);
+});

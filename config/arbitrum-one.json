@@ -1,6 +1,8 @@
 {
   "chainId": 42161,
   "name": "Arbitrum One",
+  "nativeCurrency": { "name": "Ether", "symbol": "ETH", "decimals": 18 },
+  "explorer": "https://arbiscan.io",
   "usdc": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
   "target": "0x1A996cb54bb95462040408C06122D45D6Cdb6096",
   "targetName": "Fluid USDC"
