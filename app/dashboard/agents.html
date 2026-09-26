@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Inferest</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500&family=Geist+Mono&family=Newsreader:opsz@6..72&display=swap" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body data-state="out">
+  <header class="topbar">
+    <div class="wrap">
+      <a class="brand" href="/">Inferest</a>
+      <nav class="nav"><a href="/">Home</a><a href="/treasury">Treasury</a><a href="/agents" aria-current="page">Agents</a></nav>
+      <div class="account">
+        <span class="chip"><i class="dot"></i><span id="network"></span></span>
+        <span class="chip in-only" id="whochip"><span id="who"></span><span class="mono faint" id="address"></span></span>
+        <span class="in-only" id="walletlist"></span>
+        <button class="linkbtn in-only" id="linkwallet" hidden>Connect treasury wallet</button>
+        <button class="linkbtn in-only" id="signout" hidden>Sign out</button>
+      </div>
+    </div>
+    <div class="wrap providers" id="linkproviders"></div>
+  </header>
+
+  <main class="wrap"><section id="runs"><p class="fine">The agent has not run yet.</p></section></main>
+
+  <footer>
+    <div class="wrap">
+      <div style="display:flex;align-items:center"><a class="brand" href="/">Inferest</a><span class="tagline">Your interest, now inference.</span></div>
+      <div class="contracts">
+        <span id="contracts"></span>
+        <details class="operator" id="operator">
+          <summary>🔒 Operator</summary>
+          <span class="pillfield operatorfield" id="operatorfield"><input id="token" type="password" placeholder="admin token" /></span>
+        </details>
+      </div>
+    </div>
+  </footer>
+  <script type="module" src="/agents.js"></script>
+</body>
+</html>

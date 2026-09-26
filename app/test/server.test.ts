@@ -395,9 +395,21 @@ test("/setup sends developers to the page's snippets", async () => {
   const { base, server } = await start();
   const r = await fetch(base + "/setup", { redirect: "manual" });
   assert.equal(r.status, 302);
-  assert.equal(r.headers.get("location"), "/#use-a-key");
-  const page = await (await fetch(base + "/")).text();
+  assert.equal(r.headers.get("location"), "/treasury#use-a-key");
+  const page = await (await fetch(base + "/treasury")).text();
   assert.match(page, /id="use-a-key"/);
+  server.close();
+});
+
+test("the three pages are served from clean paths", async () => {
+  const { base, server } = await start();
+  for (const [path, marker] of [["/", "For treasuries"], ["/treasury", 'id="signin"'], ["/agents", 'id="runs"']] as const) {
+    const r = await fetch(base + path);
+    assert.equal(r.status, 200, path);
+    assert.equal(r.headers.get("content-type"), "text/html");
+    assert.ok((await r.text()).includes(marker), `${path} carries ${marker}`);
+  }
+  assert.equal((await fetch(base + "/index.html")).status, 404);
   server.close();
 });
 

@@ -45,7 +45,7 @@ cp .env.example .env                      # then fill it in
 # TARGET_VAULT (and optionally TARGET_VAULTS, FEE_BPS) in the shell first; this writes contracts/deployments/<chainId>.json,
 # which DEPLOYMENTS in .env points at
 (cd contracts && forge script script/Deploy.s.sol --rpc-url $RPC_URL --private-key $DEPLOYER_PRIVATE_KEY --broadcast --slow)
-npm run serve                             # builds the dashboard bundle, then dashboard, API, chat at /v1, MCP at /mcp
+npm run serve                             # builds the dashboard bundle, then Home, Treasury and Agents, API, chat at /v1, MCP at /mcp
 npm run demo:treasury                     # or demo:agent
 ```
 

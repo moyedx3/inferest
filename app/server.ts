@@ -109,7 +109,9 @@ function state(d: AppDeps, caller: Caller) {
 }
 
 async function serveStatic(res: ServerResponse, pathname: string): Promise<void> {
-  const file = pathname === "/" ? "index.html" : pathname.slice(1);
+  const PAGES: Record<string, string> = { "/": "home.html", "/treasury": "treasury.html", "/agents": "agents.html" };
+  const file = PAGES[pathname] ?? pathname.slice(1);
+  if (file === "index.html" || file.endsWith(".html") && !Object.values(PAGES).includes(file)) return send(res, 404, { error: "not found" });
   if (!/^[a-z0-9.-]+$/i.test(file)) return send(res, 404, { error: "not found" });
   try {
     const body = await readFile(DASHBOARD + file);
@@ -270,7 +272,7 @@ async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse): Pro
   }
 
   // the developer setup page is now the Treasury page's Use a key section
-  if (url.pathname === "/setup") { res.writeHead(302, { Location: "/#use-a-key" }); res.end(); return; }
+  if (url.pathname === "/setup") { res.writeHead(302, { Location: "/treasury#use-a-key" }); res.end(); return; }
   return serveStatic(res, url.pathname);
 }
 

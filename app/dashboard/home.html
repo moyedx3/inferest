@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Inferest</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500&family=Geist+Mono&family=Newsreader:opsz@6..72&display=swap" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="wrap">
+      <a class="brand" href="/">Inferest</a>
+      <nav class="nav"><a href="/" aria-current="page">Home</a><a href="/treasury">Treasury</a><a href="/agents">Agents</a></nav>
+    </div>
+    <div class="wrap providers" id="linkproviders"></div>
+  </header>
+
+  <section class="hero">
+    <div class="wrap">
+      <div class="pitch">
+        <h1>Your interest,<span class="second">now inference.</span></h1>
+        <p>Deposit USDC into a yield vault that stays in your wallet. Only the interest it earns becomes LLM credit, issued as spend limits on keys for your developers and agents.</p>
+        <div class="facts">
+          <div><b>Principal never moves</b><span>Shares stay in your wallet.</span></div>
+          <div><b>Limits follow yield</b><span>Never ahead of what's earned.</span></div>
+          <div><b>Unused yield returns</b><span>Less a 10% fee.</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="doors">
+    <div class="wrap">
+      <a class="card door" href="/treasury"><span class="tag">For treasuries</span><h3>Put idle USDC to work.</h3><p>Deposit once. Issue keys to your developers. Only the interest pays.</p></a>
+      <a class="card door" href="/agents"><span class="tag">For agents</span><h3>An agent that pays for its own thinking.</h3><p>Watch our agent fund its model and tool calls from its own vault's yield.</p></a>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap">
+      <div style="display:flex;align-items:center"><a class="brand" href="/">Inferest</a><span class="tagline">Your interest, now inference.</span></div>
+      <div class="contracts">
+        <span id="contracts"></span>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>
