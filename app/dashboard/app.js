@@ -342,7 +342,7 @@ $("addkey").onclick = async () => {
     newKeyId = r.id;
     showKey(`New key: ${name}`, r.key, r.id); // before the state read: a failed read must not lose the one-time secret
     activity({ icon: "+", title: "Key created", detail: `${name}, weight ${$("weight").value}` });
-    await render();
+    await render().catch(fail("Refresh failed")); // the key exists either way
   } catch (e) { fail("Key not created")(e); }
 };
 
@@ -357,7 +357,7 @@ const WATCH_MS = 4000;
 function watchTick() {
   if (watching) return;
   watching = true;
-  render().catch(() => {}).finally(() => { watching = false; });
+  render({ chain: false }).catch(() => {}).finally(() => { watching = false; });
 }
 /** Opens the banner with a secret that is shown once; the snippets use it until the banner is closed. */
 function showKey(title, secret, keyId) {
@@ -409,6 +409,7 @@ function renderResult() {
   const k = panelKey && currentVault()?.keys.find((x) => x.id === panelKey.id);
   show("result", Boolean(k));
   if (!k) return;
+  if (k.spent < panelKey.base) panelKey.base = k.spent; // the period rolled over: spend restarted below the baseline
   const cost = k.spent - panelKey.base;
   if (cost > 0 && !panelKey.metered) { panelKey.metered = true; panelKey.cost = cost; clearInterval(watchTimer); }
   $("resultstatus").textContent = panelKey.metered ? "200" : "···";
@@ -450,15 +451,23 @@ function renderTreasury() {
   const principal = w?.principal != null ? Number(formatUnits(w.principal, 6)) : null;
 
   // tag: period and flags, or a picker when the caller sees several vaults
+  const tag = $("treasurytag");
   if (s && s.vaults.length > 1) {
-    $("treasurytag").innerHTML = `Treasury · <select id="vaultpick">${s.vaults.map((x) =>
-      `<option value="${esc(x.vault)}"${x.vault === v?.vault ? " selected" : ""}>${esc(x.label)} ${esc(short(x.vault))} · period ${x.period}</option>`).join("")}</select>`;
-    $("vaultpick").onchange = (e) => { myVault = e.target.value; wallet = null; render().catch(fail("Refresh failed")); };
+    // rebuilt only when the choices change: a rebuild while the page polls would close an open dropdown
+    const picker = s.vaults.map((x) => `${x.vault}:${x.label}:${x.period}`).join("|") + `>${v?.vault ?? ""}`;
+    if (tag.dataset.picker !== picker) {
+      tag.innerHTML = `Treasury · <select id="vaultpick">${s.vaults.map((x) =>
+        `<option value="${esc(x.vault)}"${x.vault === v?.vault ? " selected" : ""}>${esc(x.label)} ${esc(short(x.vault))} · period ${x.period}</option>`).join("")}</select>`;
+      tag.dataset.picker = picker;
+      $("vaultpick").onchange = (e) => { myVault = e.target.value; wallet = null; render().catch(fail("Refresh failed")); };
+    }
   } else {
-    $("treasurytag").innerHTML = v ? `Treasury · period ${esc(v.period)}` : "Treasury · no vault yet";
+    tag.innerHTML = v ? `Treasury · period ${esc(v.period)}` : "Treasury · no vault yet";
+    delete tag.dataset.picker;
   }
-  if (v?.frozen) $("treasurytag").insertAdjacentHTML("beforeend", ` <span class="flag">frozen: loss pending</span>`);
-  if (v?.settling) $("treasurytag").insertAdjacentHTML("beforeend", ` <span class="flag">settling</span>`);
+  for (const flag of tag.querySelectorAll(".flag")) flag.remove();
+  if (v?.frozen) tag.insertAdjacentHTML("beforeend", ` <span class="flag">frozen: loss pending</span>`);
+  if (v?.settling) tag.insertAdjacentHTML("beforeend", ` <span class="flag">settling</span>`);
 
   $("headline").innerHTML = !v
     ? `Put idle USDC to work.<span class="second">Deposit once. Your keys open as the interest comes in.</span>`
@@ -575,7 +584,8 @@ function renderActivity() {
     : `<li class="none">Nothing yet in this session.</li>`;
 }
 
-async function render() {
+/** Reads state and redraws every section; `chain: false` skips the wallet's on-chain figures (a polling tick). */
+async function render({ chain = true } = {}) {
   const s = await api("/api/state");
   cfg = s.config;
   lastState = s;
@@ -585,7 +595,7 @@ async function render() {
   renderKeys();
   renderActivity();
   renderResult();
-  if (session && (!wallet || wallet.vault !== currentVault()?.vault)) await readWallet();
+  if (chain && session && (!wallet || wallet.vault !== currentVault()?.vault)) await readWallet();
 }
 
 $("token").addEventListener("change", () => { render().catch(fail("Refresh failed")); });
