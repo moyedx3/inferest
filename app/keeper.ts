@@ -327,11 +327,15 @@ export async function settleVault(d: KeeperDeps, vault: string, now: number = Da
     d.store.setSettling(vault, true, now);
     let usage = 0n;
     let baselines: SpendSnapshot[] = [];
+    let ids = { model: 0, tool: 0 };
     let prepared;
     try {
       await syncCompanyKey(d, vault, []); // the backstop closes at current usage
       await (d.drain ?? noDrain)(vault, d.drainMs ?? DEFAULT_DRAIN_MS); // requests already past the budget check finish metering
+      // the snapshot and its call-id markers are read together, with no await between them: a call metered
+      // after this point has a higher id and is moved into the next period when the settlement completes
       const keys = d.store.keysForVault(vault);
+      ids = d.store.lastCallIds();
       usage = usageMicro(keys, d.params);
       baselines = keys.map((k) => ({ keyId: k.id, spentUsd: k.modelSpent + k.toolSpent }));
       prepared = await d.chain.prepareSettle(vault, usage);
@@ -344,7 +348,9 @@ export async function settleVault(d: KeeperDeps, vault: string, now: number = Da
       throw e;
     }
     const tx = prepared.hash;
-    const pending: PendingSettlement = { vault: key, usageMicro: usage, baselines, tx, createdAt: now };
+    const pending: PendingSettlement = {
+      vault: key, usageMicro: usage, baselines, tx, createdAt: now, modelCallId: ids.model, toolCallId: ids.tool,
+    };
     if (!d.store.setPendingSettlement(vault, pending)) {
       // another settlement (e.g. from the CLI in another process) persisted first: never broadcast a second one.
       // The signed transaction is discarded unsent, so its nonce was never consumed. The vault stays closed

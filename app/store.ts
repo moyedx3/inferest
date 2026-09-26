@@ -18,7 +18,12 @@ export type SettlementRow = { vault: string; usageMicro: string; tx: string; at:
 /** What each key had spent when a settlement was signed, kept with the pending row for the record. */
 export type SpendSnapshot = { keyId: string; spentUsd: number };
 /** A settlement sent on chain whose receipt has not yet been seen: its bookkeeping is still owed. */
-export type PendingSettlement = { vault: string; usageMicro: bigint; baselines: SpendSnapshot[]; tx: string; createdAt: number };
+export type PendingSettlement = {
+  vault: string; usageMicro: bigint; baselines: SpendSnapshot[]; tx: string; createdAt: number;
+  /** The highest model_calls and tool_calls ids at snapshot time: a call with a higher id is billed next period.
+   *  Null when unknown (a row written before version 4), in which case nothing is moved. */
+  modelCallId: number | null; toolCallId: number | null;
+};
 export type ModelCallStatus = "recorded" | "pending";
 export type ModelCallRow = {
   id: number; keyId: string; vault: string; period: number; model: string; costUsd: number | null;
@@ -52,11 +57,12 @@ CREATE TABLE IF NOT EXISTS settlements (
 );
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS pending_settlements (
-  vault TEXT PRIMARY KEY, usage_micro TEXT NOT NULL, baselines TEXT NOT NULL, tx TEXT NOT NULL, created_at INTEGER NOT NULL
+  vault TEXT PRIMARY KEY, usage_micro TEXT NOT NULL, baselines TEXT NOT NULL, tx TEXT NOT NULL, created_at INTEGER NOT NULL,
+  model_call_id INTEGER, tool_call_id INTEGER
 );
 `;
 
-export const SCHEMA_VERSION = "3";
+export const SCHEMA_VERSION = "4";
 
 /** Brings an older database up to SCHEMA_VERSION. Returns the version it ends at. Runs as one transaction, so a crash midway leaves the file at its starting version instead of half migrated. */
 function migrate(db: DatabaseSync, from: string): string {
@@ -74,6 +80,15 @@ function migrate(db: DatabaseSync, from: string): string {
       for (const col of cols) db.exec(`ALTER TABLE vaults ADD COLUMN ${col}`);
       db.exec(SCHEMA);
       at = "3";
+    }
+    if (at === "3") {
+      // Version 4 records on each pending settlement the last call ids its snapshot saw. The 2 -> 3 step above
+      // recreates the table from SCHEMA with the columns already there, hence the check.
+      const have = new Set((db.prepare("PRAGMA table_info(pending_settlements)").all() as { name: string }[]).map((c) => c.name));
+      for (const col of ["model_call_id", "tool_call_id"]) {
+        if (!have.has(col)) db.exec(`ALTER TABLE pending_settlements ADD COLUMN ${col} INTEGER`);
+      }
+      at = "4";
     }
     if (at !== from) db.prepare("UPDATE meta SET v = ? WHERE k = ?").run(at, "schemaVersion");
     db.exec("COMMIT");
@@ -127,6 +142,8 @@ export function openStore(path: string) {
   const toPending = (r: any): PendingSettlement => ({
     vault: r.vault, usageMicro: BigInt(r.usage_micro), baselines: JSON.parse(r.baselines) as SpendSnapshot[],
     tx: r.tx, createdAt: Number(r.created_at),
+    modelCallId: r.model_call_id === null || r.model_call_id === undefined ? null : Number(r.model_call_id),
+    toolCallId: r.tool_call_id === null || r.tool_call_id === undefined ? null : Number(r.tool_call_id),
   });
   const toModelCall = (r: any): ModelCallRow => ({
     id: Number(r.id), keyId: r.key_id, vault: r.vault, period: Number(r.period), model: r.model,
@@ -277,10 +294,14 @@ export function openStore(path: string) {
      * Persists a settlement about to be broadcast. Insert-only: returns false, changing nothing, when the vault
      * already has a pending settlement (possibly from another process), so the caller must not broadcast.
      */
-    setPendingSettlement(vault: string, p: { usageMicro: bigint; baselines: SpendSnapshot[]; tx: string; createdAt?: number }): boolean {
-      const r = db.prepare(`INSERT INTO pending_settlements (vault, usage_micro, baselines, tx, created_at) VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(vault) DO NOTHING`)
-        .run(lc(vault), p.usageMicro.toString(), JSON.stringify(p.baselines), p.tx, p.createdAt ?? Date.now());
+    setPendingSettlement(vault: string, p: {
+      usageMicro: bigint; baselines: SpendSnapshot[]; tx: string; createdAt?: number;
+      modelCallId?: number | null; toolCallId?: number | null;
+    }): boolean {
+      const r = db.prepare(`INSERT INTO pending_settlements (vault, usage_micro, baselines, tx, created_at, model_call_id, tool_call_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(vault) DO NOTHING`)
+        .run(lc(vault), p.usageMicro.toString(), JSON.stringify(p.baselines), p.tx, p.createdAt ?? Date.now(),
+          p.modelCallId ?? null, p.toolCallId ?? null);
       return Number(r.changes) === 1;
     },
     pendingSettlement(vault: string): PendingSettlement | undefined {
@@ -299,8 +320,9 @@ export function openStore(path: string) {
       });
     },
     /**
-     * Applies a mined settlement's bookkeeping in one transaction: records it, opens the next period, clears the
-     * pending row and the settling flag, and writes the vault's settled-month marker. Returns false, and changes
+     * Applies a mined settlement's bookkeeping in one transaction: records it, opens the next period (moving any
+     * call metered after the snapshot into it, so it is billed next period), clears the pending row and the
+     * settling flag, and writes the vault's settled-month marker. Returns false, and changes
      * nothing, unless a pending row for exactly this vault and tx exists, so it applies at most once.
      */
     completePendingSettlement(vault: string, tx: string, month: string): boolean {
@@ -309,12 +331,27 @@ export function openStore(path: string) {
         if (!r) return false;
         const p = toPending(r);
         insertSettlement(vault, p.usageMicro, p.tx);
+        const period = Number((db.prepare("SELECT period FROM vaults WHERE vault = ?").get(lc(vault)) as any)?.period ?? 0);
+        if (p.modelCallId !== null) {
+          db.prepare("UPDATE model_calls SET period = period + 1 WHERE vault = ? AND period = ? AND id > ?")
+            .run(lc(vault), period, p.modelCallId);
+        }
+        if (p.toolCallId !== null) {
+          db.prepare(`UPDATE tool_calls SET period = period + 1 WHERE period = ? AND id > ?
+            AND key_id IN (SELECT id FROM keys WHERE vault = ?)`).run(period, p.toolCallId, lc(vault));
+        }
         db.prepare("UPDATE vaults SET period = period + 1, settling = 0 WHERE vault = ?").run(lc(vault));
         db.prepare("DELETE FROM pending_settlements WHERE vault = ?").run(lc(vault));
         db.prepare("INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v")
           .run(settledMonthKey(vault), month);
         return true;
       });
+    },
+    /** The highest model and tool call ids so far (0 when none): the settlement snapshot's markers. */
+    lastCallIds(): { model: number; tool: number } {
+      const m: any = db.prepare("SELECT COALESCE(MAX(id), 0) AS id FROM model_calls").get();
+      const t: any = db.prepare("SELECT COALESCE(MAX(id), 0) AS id FROM tool_calls").get();
+      return { model: Number(m.id), tool: Number(t.id) };
     },
     listSettlements(): SettlementRow[] {
       return db.prepare("SELECT vault, usage_micro AS usageMicro, tx, at FROM settlements ORDER BY id DESC").all()

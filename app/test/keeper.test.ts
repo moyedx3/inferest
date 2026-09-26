@@ -345,9 +345,29 @@ test("a settlement is persisted before the broadcast", async () => {
   assert.equal(p.usageMicro, 100_000_000n);
   assert.deepEqual(p.baselines, [{ keyId: "k1", spentUsd: 100 }, { keyId: "k2", spentUsd: 0 }]);
   assert.equal(p.createdAt, OCT);
+  assert.equal(p.modelCallId, 1); // the one model call spend() recorded
+  assert.equal(p.toolCallId, 0); // no tool calls
   assert.equal(store.vault(V)!.period, 0);
   assert.equal(store.vault(V)!.settling, true); // the proxy keeps refusing until the receipt is seen
   assert.equal(store.listSettlements().length, 0);
+});
+
+test("a call metered after the snapshot is billed in the next period", async () => {
+  const { d, store, spend } = setup({ orUsage: [100] });
+  spend("k1", 100);
+  const orig = d.chain.prepareSettle;
+  d.chain.prepareSettle = async (v, u) => {
+    spend("k1", 5); // metered after the snapshot, before the pending row exists
+    return orig(v, u);
+  };
+  const r = await settleVault(d, V, OCT);
+  assert.equal(r!.usage, 100_000_000n);
+  assert.equal(store.vault(V)!.period, 1);
+  assert.equal(store.keyById("k1")!.modelSpent, 5);
+  assert.equal(store.listSettlements().length, 1);
+  const r2 = await settleVault(d, V, NOV);
+  assert.equal(r2!.usage, 5_000_000n);
+  assert.equal(store.listSettlements().length, 2);
 });
 
 test("an error while waiting for the receipt leaves the settlement pending", async () => {
