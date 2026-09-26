@@ -59,6 +59,7 @@ function syncSession() {
     myVault = undefined;
     wallet = null;
     renderSession();
+    closePanel();
     activity({ title: "Session expired", detail: "sign in again", error: true });
     return false;
   }
@@ -216,6 +217,7 @@ $("walletlist").addEventListener("click", async (e) => {
 $("signout").onclick = async () => {
   try { await dyn.signOut(); } catch (e) { fail("Sign out")(e); }
   session = null; myVault = undefined; wallet = null; renderSession();
+  closePanel(); // a key shown to this login must not outlive the session on a shared screen
   try { await render(); } catch (e) { fail("Refresh failed")(e); }
 };
 
@@ -355,12 +357,14 @@ function renderSnippets() {
 }
 $("copysecret").onclick = () => { if (panelSecret) navigator.clipboard.writeText(panelSecret); };
 $("copysnippet").onclick = () => navigator.clipboard.writeText($("snippet").textContent);
-$("closepanel").onclick = () => {
+/** Closes the banner and takes the secret out of the page and the snippets. */
+function closePanel() {
   panelSecret = null;
   $("secret").textContent = "";
   show("panel", false);
   renderSnippets();
-};
+}
+$("closepanel").onclick = closePanel;
 
 function renderNotes() {
   $("notes").innerHTML = NOTES.map((n) => `<li><span>${esc(n)}</span></li>`).join("");
