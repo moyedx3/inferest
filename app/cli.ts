@@ -1,6 +1,7 @@
 import { loadConfig } from "./config.ts";
 import { secretBox } from "./crypto.ts";
 import { openStore } from "./store.ts";
+import { openAgentLog } from "../agent/log.ts";
 import { makeChain } from "./chain.ts";
 import { openRouter } from "./openrouter.ts";
 import { toolGateway, x402PayingFetch, type PayingFetchFactory } from "./tools.ts";
@@ -41,6 +42,7 @@ switch (cmd) {
     const app = createApp({
       store, or, chain, gateway, params: cfg.params, adminToken: cfg.adminToken, keeper, secrets: box, proxy, auth,
       faucet: cfg.demoFaucet ? createFaucet({ rpcUrl: cfg.rpcUrl, usdc: cfg.usdc }) : undefined,
+      agentLog: openAgentLog(cfg.dbPath),
       publicConfig: {
         chainId: cfg.chainId, factory: cfg.factory, splitter: cfg.splitter, usdc: cfg.usdc, target: cfg.target, targets: cfg.targets, publicUrl: cfg.publicUrl,
         dynamicEnvironmentId: cfg.dynamicEnvironmentId ?? null, publicRpcUrl: cfg.publicRpcUrl ?? null, chainName: cfg.chainName,

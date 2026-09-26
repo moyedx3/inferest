@@ -14,6 +14,8 @@ import { buildMcpServer } from "./mcp.ts";
 import { computeLimits, settlePreview } from "./limits.ts";
 import { sha256, newInferestKey, type SecretBox } from "./crypto.ts";
 import { syncAll, syncVault, reportAll, reportVault, settleVault, markRegistered, isSettling, type KeeperDeps } from "./keeper.ts";
+import type { AgentLog } from "../agent/log.ts";
+import { rateFrom } from "../agent/rate.ts";
 
 export { sha256 } from "./crypto.ts";
 
@@ -27,6 +29,8 @@ export type AppDeps = {
   auth?: Auth;
   /** Funds a signed-in wallet on a demo chain; unset on real chains. */
   faucet?: Faucet;
+  /** The hosted agent's run log, read-only here; unset when no runner exists. */
+  agentLog?: AgentLog;
   /** Logs an uncaught error from a route (default console.error). */
   logError?: (msg: string) => void;
 };
@@ -80,27 +84,30 @@ function owns(caller: Caller, customer: string): boolean {
   return false;
 }
 
-/** The public state for one caller: field by field, never a spread of a store row, so a new secret column can never leak. */
+/** One vault's public entry: field by field, never a spread of a store row, so a new secret column can never leak. */
+function vaultEntry(d: AppDeps, v: VaultRow) {
+  const keys = d.store.keysForVault(v.vault);
+  const limits = computeLimits(v.yieldUsd, keys, d.params, v.frozen);
+  return {
+    vault: v.vault, customer: v.customer, label: v.label, period: v.period, frozen: v.frozen, settling: v.settling,
+    yieldUsd: v.yieldUsd, orLimit: v.orLimit, orUsage: v.orUsage, hasOpenRouterKey: v.orKeyHash !== null,
+    credit: v.frozen ? 0 : Math.max(0, v.yieldUsd) * (1 - d.params.railFee),
+    preview: settlePreview(v.yieldUsd, keys, d.params),
+    keys: keys.map((k, i) => ({
+      id: k.id, name: k.name, weight: k.weight, revoked: k.revoked, createdAt: k.createdAt,
+      modelSpent: k.modelSpent, toolSpent: k.toolSpent,
+      budget: limits[i].budget, spent: limits[i].spent, remaining: limits[i].remaining,
+    })),
+  };
+}
+
+/** The public state for one caller. */
 function state(d: AppDeps, caller: Caller) {
   const vaults = d.store.listVaults().filter((v) => owns(caller, v.customer));
   const mine = new Set(vaults.map((v) => v.vault));
   return {
     config: d.publicConfig,
-    vaults: vaults.map((v: VaultRow) => {
-      const keys = d.store.keysForVault(v.vault);
-      const limits = computeLimits(v.yieldUsd, keys, d.params, v.frozen);
-      return {
-        vault: v.vault, customer: v.customer, label: v.label, period: v.period, frozen: v.frozen, settling: v.settling,
-        yieldUsd: v.yieldUsd, orLimit: v.orLimit, orUsage: v.orUsage, hasOpenRouterKey: v.orKeyHash !== null,
-        credit: v.frozen ? 0 : Math.max(0, v.yieldUsd) * (1 - d.params.railFee),
-        preview: settlePreview(v.yieldUsd, keys, d.params),
-        keys: keys.map((k, i) => ({
-          id: k.id, name: k.name, weight: k.weight, revoked: k.revoked, createdAt: k.createdAt,
-          modelSpent: k.modelSpent, toolSpent: k.toolSpent,
-          budget: limits[i].budget, spent: limits[i].spent, remaining: limits[i].remaining,
-        })),
-      };
-    }),
+    vaults: vaults.map((v: VaultRow) => vaultEntry(d, v)),
     settlements: d.store.listSettlements().filter((s) => mine.has(s.vault)),
     pendingSettlements: d.store.listPendingSettlements().filter((p) => mine.has(p.vault)).map((p) => ({
       vault: p.vault, usageMicro: p.usageMicro.toString(), tx: p.tx, createdAt: p.createdAt,
@@ -165,6 +172,32 @@ async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse): Pro
   }
 
   if (url.pathname === "/api/state" && req.method === "GET") return send(res, 200, state(d, await resolveCaller(d, req)));
+
+  if (url.pathname === "/api/agent" && req.method === "GET") {
+    const log = d.agentLog;
+    const vault = log?.getMeta("vault")?.toLowerCase();
+    const row = vault ? d.store.vault(vault) : undefined;
+    if (!log || !vault || !row) return send(res, 404, { error: "no agent yet" });
+    const keyIds: string[] = JSON.parse(log.getMeta("keys") ?? "[]");
+    const runs = log.listRuns(50).map((r) => ({
+      id: r.id, startedAt: r.startedAt, finishedAt: r.finishedAt, clockAt: r.clockAt, status: r.status, note: r.note, decision: r.decision,
+      actions: r.actions.map((a) => ({ kind: a.kind, detail: a.detail, tx: a.tx })),
+      cost: (({ modelUsd, toolUsd }) => ({ models: modelUsd, tools: toolUsd }))(d.store.spendInWindow(keyIds, r.startedAt, r.finishedAt ?? Date.now())),
+    }));
+    const sources = (d.publicConfig.targets as { address: string; name: string }[] | undefined ?? []).map((t) => {
+      const s = log.lastSamples(t.address);
+      return { target: t.address, name: t.name, rate: rateFrom(s), current: t.address.toLowerCase() === (log.getMeta("source") ?? "").toLowerCase() };
+    });
+    const book = JSON.parse(log.getMeta("book") ?? "{}");
+    return send(res, 200, {
+      agent: { address: log.getMeta("address") ?? null, vault, source: sources.find((s) => s.current) ?? null, period: row.period, runCount: log.latestRun()?.id ?? 0 },
+      book: { walletUsdc: book.walletUsdc ?? null, vaultValue: book.vaultValue ?? null, floor: Number(log.getMeta("floor") ?? 200), positions: log.openPositions() },
+      budget: vaultEntry(d, row),
+      sources,
+      runs,
+      settlements: d.store.listSettlements().filter((s) => s.vault === vault),
+    });
+  }
 
   if (url.pathname.startsWith("/api/")) {
     if (req.method !== "POST") return send(res, 405, { error: "method not allowed" });
