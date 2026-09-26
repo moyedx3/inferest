@@ -111,6 +111,9 @@ const round6 = (x: number) => Math.round(x * 1e6) / 1e6;
 /** The meta key holding the last month a vault was settled for. */
 export const settledMonthKey = (vault: string): string => `settledMonth:${lc(vault)}`;
 
+/** The meta key holding when the keeper last synced a vault. */
+const syncedAtKey = (vault: string): string => `syncedAt:${lc(vault)}`;
+
 export function openStore(path: string) {
   const db = new DatabaseSync(path);
   // Bootstrap only `meta` first: an old (pre-3) database already has `keys` and `tool_calls` under their old
@@ -368,6 +371,15 @@ export function openStore(path: string) {
     },
     setMeta(k: string, v: string): void {
       db.prepare("INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").run(k, v);
+    },
+    /** Records when the keeper last synced the vault's yield and backstop (ms since the epoch). */
+    setSyncedAt(vault: string, now: number = Date.now()): void {
+      db.prepare("INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").run(syncedAtKey(vault), String(now));
+    },
+    /** When the keeper last synced the vault (ms since the epoch), or 0 when it never has. */
+    syncedAt(vault: string): number {
+      const r: any = db.prepare("SELECT v FROM meta WHERE k = ?").get(syncedAtKey(vault));
+      return r ? Number(r.v) : 0;
     },
     close(): void {
       db.close();

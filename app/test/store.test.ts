@@ -52,6 +52,15 @@ test("stores addresses lowercase and starts at period 0, unfrozen, not settling"
   assert.equal(s.listVaults().length, 1);
 });
 
+test("a vault's last sync time round-trips", () => {
+  const s = fresh();
+  assert.equal(s.syncedAt(V), 0);
+  s.setSyncedAt(V, 123);
+  assert.equal(s.syncedAt(V), 123);
+  assert.equal(s.syncedAt(V.toLowerCase()), 123);
+  assert.equal(s.syncedAt("0x00000000000000000000000000000000000000bb"), 0);
+});
+
 test("keys carry weight, this period's model and tool spend, and are found by secret hash", () => {
   const s = fresh();
   s.recordModelCall({ keyId: "k1", model: "m", costUsd: 0.5, generationId: "g1" });

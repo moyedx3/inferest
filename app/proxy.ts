@@ -15,6 +15,10 @@ export type ProxyDeps = {
   /** Where a developer looks when a key is out of budget; printed in 402 messages. */
   dashboardUrl: string;
   log: (msg: string) => void;
+  /** How long after the keeper's last sync of a vault its budget is still trusted (default DEFAULT_STALE_BUDGET_MS). */
+  staleBudgetMs?: number;
+  /** How long a chat completion may take upstream, headers and body together (default DEFAULT_UPSTREAM_TIMEOUT_MS). */
+  upstreamTimeoutMs?: number;
 };
 
 export type Proxy = {
@@ -28,10 +32,16 @@ export type Proxy = {
 
 export const MAX_BODY_BYTES = 4 * 1024 * 1024;
 export const DEFAULT_UPSTREAM = "https://openrouter.ai/api/v1";
+/** Ten keeper sync intervals: past this the vault's yield and backstop are too old to open credit against. */
+export const DEFAULT_STALE_BUDGET_MS = 10 * 60_000;
+/** Long enough for a slow generation; a provider that hangs past it is cut off. */
+export const DEFAULT_UPSTREAM_TIMEOUT_MS = 10 * 60_000;
 /** Upstream response headers relayed to the client; the rest, which name the provider, are dropped. */
 const RELAYED_HEADERS = ["content-type", "cache-control"];
 /** The provider's answer when the company key's limit (our backstop) is hit before the sync caught up. */
 const KEY_LIMIT = /key limit exceeded/i;
+/** Past this much buffered stream text without an event boundary, the proxy stops parsing and only relays. */
+export const MAX_SSE_BUFFER = 1024 * 1024;
 
 class BodyTooLarge extends Error {}
 
@@ -67,6 +77,11 @@ function logSafe(s: string): string {
   return s.replace(/[^\x20-\x7e]/g, "").slice(0, 100);
 }
 
+/** A thrown value as log text: an Error's message, or the value itself when something else was thrown. */
+function errText(e: unknown): string {
+  return String((e as Error)?.message ?? e);
+}
+
 function relayHeaders(up: Response): Record<string, string> {
   const h: Record<string, string> = {};
   for (const name of RELAYED_HEADERS) {
@@ -79,11 +94,21 @@ function relayHeaders(up: Response): Record<string, string> {
 export type Budget = { ok: true; remaining: number } | { ok: false; status: 402 | 503; type: string; message: string };
 
 /** The key's open budget this period, or why it has none. A store read: microseconds, no network. */
-export function checkBudget(store: Store, params: Params, key: KeyRow, dashboardUrl: string): Budget {
+export function checkBudget(
+  store: Store, params: Params, key: KeyRow, dashboardUrl: string, staleBudgetMs: number = DEFAULT_STALE_BUDGET_MS, now: number = Date.now(),
+): Budget {
   const vault = store.vault(key.vault);
   if (!vault) return { ok: false, status: 402, type: "insufficient_quota", message: `this key's vault is not registered. See ${dashboardUrl}` };
   if (vault.settling || store.pendingSettlement(vault.vault)) {
     return { ok: false, status: 503, type: "server_error", message: "settlement in progress for this key's vault; retry in a minute" };
+  }
+  // a never-synced vault has age = now, so it is refused until the keeper's first sync
+  const age = now - store.syncedAt(vault.vault);
+  if (age > staleBudgetMs) {
+    return {
+      ok: false, status: 503, type: "server_error",
+      message: `this key's vault has not been synced for ${Math.round(age / 60_000)} min; the budget is stale, retry in a minute`,
+    };
   }
   if (vault.frozen) {
     return {
@@ -133,9 +158,9 @@ export function createProxy(d: ProxyDeps): Proxy {
   async function relayModels(res: ServerResponse): Promise<void> {
     let up: Response;
     try {
-      up = await d.fetchFn(`${upstream}/models`);
+      up = await d.fetchFn(`${upstream}/models`, { signal: AbortSignal.timeout(30_000) });
     } catch (e) {
-      d.log(`proxy models upstream unreachable: ${(e as Error).message}`);
+      d.log(`proxy models upstream unreachable: ${errText(e)}`);
       return fail(res, 502, "upstream_error", "could not reach the model provider");
     }
     res.writeHead(up.status, relayHeaders(up));
@@ -146,7 +171,11 @@ export function createProxy(d: ProxyDeps): Proxy {
   async function relayError(res: ServerResponse, up: Response, key: KeyRow, model: string, started: number): Promise<void> {
     const text = await up.text();
     d.log(`proxy key ${key.id} model ${model} upstream ${up.status} ${Date.now() - started}ms`);
-    if (up.status === 403 && KEY_LIMIT.test(text)) {
+    // only the provider's own error message counts; a JSON body that mentions the phrase elsewhere is relayed as is
+    let j: any;
+    try { j = JSON.parse(text); } catch { j = undefined; }
+    const message = j === undefined ? text : String(j?.error?.message ?? "");
+    if (up.status === 403 && KEY_LIMIT.test(message)) {
       return fail(res, 402, "insufficient_quota", `the vault's provider limit was reached ahead of the budget sync; retry in a minute. See ${d.dashboardUrl}`);
     }
     res.writeHead(up.status, { "Content-Type": up.headers.get("content-type") ?? "application/json" });
@@ -185,30 +214,45 @@ export function createProxy(d: ProxyDeps): Proxy {
     let usedModel = model;
     let cost: number | undefined;
     let buffer = "";
-    const consume = (text: string) => {
-      buffer += text.replace(/\r\n/g, "\n");
+    let carriedCr = false; // a chunk that ends on "\r" may be half of a "\r\n" split across chunks
+    let parsing = true;
+    const consume = (text: string, final = false) => {
+      if (!parsing) return;
+      let t = (carriedCr ? "\r" : "") + text;
+      carriedCr = !final && t.endsWith("\r");
+      if (carriedCr) t = t.slice(0, -1);
+      buffer += t.replace(/\r\n?/g, "\n"); // the spec's three line endings, "\r\n", "\r" and "\n", become "\n"
       let i: number;
       while ((i = buffer.indexOf("\n\n")) >= 0) {
         const event = buffer.slice(0, i);
         buffer = buffer.slice(i + 2);
+        // an event's data is every data line's value (after "data:" and one optional space) joined with "\n"
+        const lines: string[] = [];
         for (const line of event.split("\n")) {
           if (!line.startsWith("data:")) continue;
-          const data = line.slice(5).trim();
-          if (!data || data === "[DONE]") continue;
-          try {
-            const j = JSON.parse(data);
-            if (!generationId && typeof j?.id === "string") generationId = j.id;
-            if (typeof j?.model === "string") usedModel = logSafe(j.model);
-            if (typeof j?.usage?.cost === "number") cost = j.usage.cost;
-          } catch {
-            // a partial or non-JSON data line is the provider's business; it is relayed regardless
-          }
+          lines.push(line.startsWith("data: ") ? line.slice(6) : line.slice(5));
+        }
+        const data = lines.join("\n");
+        if (!data.trim() || data.trim() === "[DONE]") continue;
+        try {
+          const j = JSON.parse(data);
+          if (!generationId && typeof j?.id === "string") generationId = j.id;
+          if (typeof j?.model === "string") usedModel = logSafe(j.model);
+          if (typeof j?.usage?.cost === "number") cost = j.usage.cost;
+        } catch {
+          // a partial or non-JSON event is the provider's business; it is relayed regardless
         }
       }
+      if (buffer.length > MAX_SSE_BUFFER) {
+        // no event boundary in over a megabyte: stop parsing (and buffering) for the rest of the stream, keep relaying
+        parsing = false;
+        buffer = "";
+        d.log(`proxy key ${key.id} model ${model} sse buffer over 1 MB without an event boundary: metering from the stream stopped`);
+      }
     };
-    let broken: Error | undefined;
+    let broken: string | undefined;
     if (!up.body) {
-      broken = new Error("empty upstream body");
+      broken = "empty upstream body";
     } else {
       const reader = up.body.getReader();
       const decoder = new TextDecoder();
@@ -219,17 +263,17 @@ export function createProxy(d: ProxyDeps): Proxy {
           if (!clientGone && !res.destroyed) res.write(value);
           consume(decoder.decode(value, { stream: true }));
         }
-        consume(decoder.decode());
+        consume(decoder.decode(), true);
       } catch (e) {
-        broken = e as Error;
+        broken = errText(e);
       }
     }
     if (!clientGone && !res.destroyed) res.end();
     if (!generationId) {
-      d.log(`proxy key ${key.id} model ${model} stream without a generation id: nothing to meter${broken ? ` (${broken.message})` : ""}`);
+      d.log(`proxy key ${key.id} model ${model} stream without a generation id: nothing to meter${broken !== undefined ? ` (${broken})` : ""}`);
       return;
     }
-    if (cost === undefined && broken) d.log(`proxy key ${key.id} model ${usedModel} gen ${generationId} stream broke before usage: ${broken.message}`);
+    if (cost === undefined && broken !== undefined) d.log(`proxy key ${key.id} model ${usedModel} gen ${generationId} stream broke before usage: ${broken}`);
     record(key, usedModel, generationId, cost, up.status, started);
   }
 
@@ -245,9 +289,10 @@ export function createProxy(d: ProxyDeps): Proxy {
         method: "POST",
         headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json", Accept: streaming ? "text/event-stream" : "application/json" },
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(d.upstreamTimeoutMs ?? DEFAULT_UPSTREAM_TIMEOUT_MS),
       });
     } catch (e) {
-      d.log(`proxy key ${key.id} model ${model} upstream unreachable: ${(e as Error).message}`);
+      d.log(`proxy key ${key.id} model ${model} upstream unreachable: ${errText(e)}`);
       return fail(res, 502, "upstream_error", "could not reach the model provider");
     }
     if (!up.ok) return relayError(res, up, key, model, started);
@@ -267,7 +312,7 @@ export function createProxy(d: ProxyDeps): Proxy {
     let body: any;
     try { body = JSON.parse(raw); } catch { body = undefined; }
     if (!body || typeof body !== "object" || Array.isArray(body)) return fail(res, 400, "invalid_request_error", "request body must be a JSON object");
-    const budget = checkBudget(d.store, d.params, key, d.dashboardUrl);
+    const budget = checkBudget(d.store, d.params, key, d.dashboardUrl, d.staleBudgetMs);
     if (!budget.ok) return fail(res, budget.status, budget.type, budget.message, budget.status === 503 ? { "Retry-After": "15" } : {});
     const orKey = d.store.openRouterKeyFor(key.vault);
     if (!orKey) {
@@ -294,7 +339,7 @@ export function createProxy(d: ProxyDeps): Proxy {
         else if (url.pathname === "/v1/chat/completions" && req.method === "POST") await completions(req, res, key);
         else fail(res, 404, "invalid_request_error", "only POST /v1/chat/completions and GET /v1/models are served");
       } catch (e) {
-        d.log(`proxy key ${key.id} failed: ${(e as Error).message}`);
+        d.log(`proxy key ${key.id} failed: ${errText(e)}`);
         if (!res.headersSent) fail(res, 500, "server_error", "internal error");
         else if (!res.writableEnded) res.end();
       }

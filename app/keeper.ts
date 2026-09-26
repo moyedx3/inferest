@@ -100,6 +100,7 @@ export async function syncVault(d: KeeperDeps, vault: string, now: number = Date
   if (frozen) d.log(`loss pending on ${vault}: keys frozen at current usage`);
   const limits = computeLimits(yieldUsd, d.store.keysForVault(vault), d.params, frozen);
   await syncCompanyKey(d, vault, limits);
+  d.store.setSyncedAt(vault, now);
   return limits;
 }
 
