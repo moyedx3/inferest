@@ -146,6 +146,22 @@ test("model and tool calls reject an unknown key", () => {
   assert.throws(() => s.recordPendingModelCall({ keyId: "nope", model: "m", generationId: "g" }), /unknown key/);
 });
 
+test("a model call on a key whose vault row is missing is refused", () => {
+  const path = join(tmpdir(), `inferest-test-orphan-${process.pid}-${Date.now()}.db`);
+  try {
+    openStore(path).close();
+    const db = new DatabaseSync(path, { enableForeignKeyConstraints: false });
+    db.exec("INSERT INTO keys (id, vault, name, weight, secret_sha256, created_at) VALUES ('ko', '0xnovault', 'orphan', 1, 'so', 1)");
+    db.close();
+    const s = openStore(path);
+    assert.throws(() => s.recordModelCall({ keyId: "ko", model: "m", costUsd: 1, generationId: "g1" }), /unknown vault for key ko/);
+    assert.throws(() => s.recordPendingModelCall({ keyId: "ko", model: "m", generationId: "g2" }), /unknown vault for key ko/);
+    s.close();
+  } finally {
+    rmSync(path, { force: true });
+  }
+});
+
 test("a new period is a bump: this period's spend starts at zero, history stays", () => {
   const s = fresh();
   s.recordModelCall({ keyId: "k1", model: "m", costUsd: 3.5, generationId: "g1" });
@@ -190,6 +206,8 @@ test("rotate replaces the secret on the same row; revoke keeps the row and its s
   assert.equal(s.revokeKey("k1"), true);
   assert.equal(s.revokeKey("nope"), false);
   assert.equal(s.rotateKey("nope", "x"), false);
+  assert.equal(s.rotateKey("k1", "x"), false); // a revoked row is never rotated
+  assert.equal(s.keyBySecret("x"), undefined);
   const k = s.keyBySecret("s1b")!;
   assert.equal(k.revoked, true);
   assert.equal(k.modelSpent, 1);

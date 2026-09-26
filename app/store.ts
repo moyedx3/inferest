@@ -189,6 +189,12 @@ export function openStore(path: string, opts: { log?: (msg: string) => void } = 
     const r = db.prepare(`${KEY_SELECT} WHERE k.id = ?`).get(id);
     return r ? toKey(r) : undefined;
   };
+  // the insert selects through the key's vault row, so a key whose vault row is missing inserts nothing
+  const requireInserted = (c: { keyId: string; generationId: string }): void => {
+    if (db.prepare("SELECT 1 FROM model_calls WHERE generation_id = ?").get(c.generationId) === undefined) {
+      throw new Error(`unknown vault for key ${c.keyId}`);
+    }
+  };
   const MODEL_CALL_INSERT = `INSERT INTO model_calls (key_id, vault, period, model, cost_usd, generation_id, status, at)
     SELECT k.id, k.vault, v.period, ?, ?, ?, ?, ? FROM keys k JOIN vaults v ON v.vault = k.vault WHERE k.id = ?`;
 
@@ -230,9 +236,9 @@ export function openStore(path: string, opts: { log?: (msg: string) => void } = 
     setWeight(id: string, weight: number): void {
       db.prepare("UPDATE keys SET weight = ? WHERE id = ?").run(weight, id);
     },
-    /** Replaces the secret on the same row, so budget and history stay with the developer. */
+    /** Replaces the secret on the same row, so budget and history stay with the developer. A revoked row is never rotated. */
     rotateKey(id: string, secretSha256: string): boolean {
-      return Number(db.prepare("UPDATE keys SET secret_sha256 = ? WHERE id = ?").run(secretSha256, id).changes) > 0;
+      return Number(db.prepare("UPDATE keys SET secret_sha256 = ? WHERE id = ? AND revoked_at IS NULL").run(secretSha256, id).changes) > 0;
     },
     revokeKey(id: string, now: number = Date.now()): boolean {
       return Number(db.prepare("UPDATE keys SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL").run(now, id).changes) > 0;
@@ -255,12 +261,14 @@ export function openStore(path: string, opts: { log?: (msg: string) => void } = 
       db.prepare(`${MODEL_CALL_INSERT}
         ON CONFLICT(generation_id) DO UPDATE SET cost_usd = excluded.cost_usd, status = 'recorded' WHERE model_calls.status = 'pending'`)
         .run(c.model, c.costUsd, c.generationId, "recorded", now, c.keyId);
+      requireInserted(c);
     },
     /** A call whose cost did not arrive; the keeper resolves it through OpenRouter's generation lookup. */
     recordPendingModelCall(c: { keyId: string; model: string; generationId: string }, now: number = Date.now()): void {
       requireKey(c.keyId);
       db.prepare(`${MODEL_CALL_INSERT} ON CONFLICT(generation_id) DO NOTHING`)
         .run(c.model, null, c.generationId, "pending", now, c.keyId);
+      requireInserted(c);
     },
     /**
      * Resolves a pending call once its cost is known. If the vault has already moved past the call's period
