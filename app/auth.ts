@@ -10,6 +10,8 @@ export type AuthDeps = {
   now?: () => number;
   /** Overrides the JWKS URL (tests). */
   jwksUrl?: string;
+  /** How long a JWKS fetch may take before it is abandoned (default DEFAULT_JWKS_TIMEOUT_MS). */
+  jwksTimeoutMs?: number;
 };
 
 export type Auth = { verify(token: string): Promise<Session> };
@@ -18,6 +20,7 @@ export const jwksUrlFor = (environmentId: string): string =>
   `https://app.dynamicauth.com/api/v0/sdk/${encodeURIComponent(environmentId)}/.well-known/jwks`;
 
 const REFETCH_MIN_MS = 60_000;
+export const DEFAULT_JWKS_TIMEOUT_MS = 10_000;
 const invalid = (why: string) => new Error(`invalid token: ${why}`);
 
 function decodePart(part: string): any {
@@ -32,13 +35,15 @@ function decodePart(part: string): any {
  * Verifies Dynamic's RS256 access tokens against the environment's JWKS, which is fetched once, cached by key id,
  * and refetched at most once a minute when a token names a key we do not hold. Concurrent callers that arrive
  * before the first fetch resolves share it, and a fetch that fails (or returns no usable keys) is itself
- * throttled to once a minute rather than attempted on every request. Only the signature, the expiry and the
+ * throttled to once a minute rather than attempted on every request. A fetch that hangs is abandoned after
+ * `jwksTimeoutMs`, and a refetch that yields no usable keys keeps the keys already held. Only the signature, the expiry and the
  * environment are checked; authorization is the caller's job.
  */
 export function createAuth(d: AuthDeps): Auth {
   const fetchFn = d.fetchFn ?? fetch;
   const now = d.now ?? Date.now;
   const url = d.jwksUrl ?? jwksUrlFor(d.environmentId);
+  const timeout = d.jwksTimeoutMs ?? DEFAULT_JWKS_TIMEOUT_MS;
   let keys = new Map<string, KeyObject>();
   let fetchedAt = 0;
   let attempted = false;
@@ -49,7 +54,7 @@ export function createAuth(d: AuthDeps): Auth {
     try {
       let res: Response;
       try {
-        res = await fetchFn(url);
+        res = await fetchFn(url, { signal: AbortSignal.timeout(timeout) });
       } catch {
         throw invalid("jwks unavailable");
       }
@@ -64,7 +69,7 @@ export function createAuth(d: AuthDeps): Auth {
           // an unusable key is skipped; a token naming it fails as unknown
         }
       }
-      keys = next;
+      if (next.size > 0) keys = next; // an empty answer never wipes keys we hold
       lastFetchError = null;
     } catch (err) {
       lastFetchError = err instanceof Error ? err : invalid("jwks unavailable");

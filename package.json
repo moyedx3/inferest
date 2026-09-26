@@ -6,10 +6,10 @@
     "test": "node --test engine/*.test.ts app/test/*.test.ts",
     "typecheck": "tsc --noEmit",
     "build:dashboard": "esbuild app/dashboard/src/dynamic.js --bundle --format=esm --platform=browser --target=es2022 --minify --outfile=app/dashboard/dynamic.bundle.js --log-level=warning",
-    "serve": "npm run build:dashboard && node app/cli.ts serve"
+    "serve": "npm run build:dashboard && node --env-file-if-exists=.env app/cli.ts serve"
   },
   "engines": {
-    "node": ">=22.6"
+    "node": ">=22.9"
   },
   "dependencies": {
     "@dynamic-labs-sdk/client": "^1.34.2",
@@ -18,12 +18,12 @@
     "@x402/core": "^2.27.0",
     "@x402/evm": "^2.27.0",
     "@x402/fetch": "^2.27.0",
+    "esbuild": "^0.28.2",
     "viem": "^2.56.9",
     "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/node": "^26.6.2",
-    "esbuild": "^0.28.2",
     "typescript": "^5.9.3"
   }
 }
