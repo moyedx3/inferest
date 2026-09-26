@@ -107,6 +107,8 @@ A key's credit is fixed by its weight, so what one key leaves unused does not fl
 
 **Loss pending:** if the yield source is worth less than the vault last reported, the proxy refuses the vault's keys with 402 and the keeper pins the company key's limit at its usage, until the next `report()` books the loss.
 
+**Stale budget:** the proxy refuses a vault's keys with 503 when the keeper has not synced that vault for ten minutes, so an RPC outage stops opening credit instead of serving against yield the keeper can no longer see.
+
 ### 4. Paid tools
 
 The key holder adds our MCP endpoint (`/mcp`, bearer token is the key secret) and gets three tools: `search_tools`, `tool_details` (free, returns the exact parameters and price) and `run_tool`. LLM calls go through the same server on the same key, at `/v1/chat/completions`.

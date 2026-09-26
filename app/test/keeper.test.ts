@@ -82,6 +82,12 @@ test("sync pins the company key at its usage plus open credit and stores yield",
   assert.equal(v.orUsage, 100);
 });
 
+test("a successful sync records its time", async () => {
+  const { d, store } = setup({ orUsage: [100] });
+  await syncVault(d, V, OCT);
+  assert.equal(store.syncedAt(V), OCT);
+});
+
 test("the backstop is held flat while a model call is pending", async () => {
   const { d, store, events, logs } = setup({ orUsage: [0, 10, 10, 10] });
   await syncVault(d, V);
@@ -356,6 +362,7 @@ test("a fresh settling flag from another process is left alone", async () => {
   assert.equal(store.vault(V)!.settling, true);
   assert.ok(!events.some((e) => e.startsWith("limit:")));
   assert.ok(logs.some((m) => m.includes(`sync ${V} skipped: settling`)));
+  assert.equal(store.syncedAt(V), 0);
 });
 
 test("settling an unknown vault does nothing", async () => {

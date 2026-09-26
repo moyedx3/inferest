@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { AddressInfo } from "node:net";
 import { createApp, sha256, type AppDeps } from "../server.ts";
-import { createProxy, MAX_BODY_BYTES } from "../proxy.ts";
+import { createProxy, MAX_BODY_BYTES, MAX_SSE_BUFFER } from "../proxy.ts";
 import { openStore } from "../store.ts";
 import { HACKATHON_PARAMS } from "../../engine/ledger.ts";
 import type { ToolGateway } from "../tools.ts";
@@ -15,11 +15,15 @@ const COMPANY = "sk-or-v1-company";
 type Upstream = (url: string, init: RequestInit) => Response | Promise<Response>;
 
 /** A real server whose proxy talks to a scripted upstream instead of OpenRouter. Yield defaults to $100. */
-async function start(upstream: Upstream, opts: { yieldUsd?: number; frozen?: boolean } = {}) {
+async function start(
+  upstream: Upstream,
+  opts: { yieldUsd?: number; frozen?: boolean; unsynced?: boolean; upstreamTimeoutMs?: number; decrypt?: (e: string) => string } = {},
+) {
   const store = openStore(":memory:");
   store.addVault(V, "0x00000000000000000000000000000000000000cc", "T");
   store.setVaultOpenRouterKey(V, "orhash", `enc:${COMPANY}`);
   store.setVaultState(V, { yieldUsd: opts.yieldUsd ?? 100, frozen: opts.frozen ?? false });
+  if (!opts.unsynced) store.setSyncedAt(V, Date.now());
   store.addKey({ id: "k1", vault: V, name: "dev-1", weight: 1, secretSha256: sha256(SECRET) });
   const calls: { url: string; init: RequestInit }[] = [];
   const logs: string[] = [];
@@ -29,7 +33,8 @@ async function start(upstream: Upstream, opts: { yieldUsd?: number; frozen?: boo
   }) as unknown as typeof fetch;
   const decrypt = (e: string) => { if (!e.startsWith("enc:")) throw new Error("bad secret"); return e.slice(4); };
   const proxy = createProxy({
-    store, params: HACKATHON_PARAMS, decrypt, fetchFn, upstream: "https://up.test/api/v1/", dashboardUrl: "https://dash.test", log: (m) => logs.push(m),
+    store, params: HACKATHON_PARAMS, decrypt: opts.decrypt ?? decrypt, fetchFn, upstream: "https://up.test/api/v1/", dashboardUrl: "https://dash.test",
+    log: (m) => logs.push(m), staleBudgetMs: 10 * 60_000, ...(opts.upstreamTimeoutMs === undefined ? {} : { upstreamTimeoutMs: opts.upstreamTimeoutMs }),
   });
   const d: AppDeps = {
     store,
@@ -157,6 +162,28 @@ test("a vault with a pending settlement answers 503", async () => {
   server.close();
 });
 
+test("a vault the keeper has not synced for too long answers 503", async () => {
+  const { base, server, store, calls } = await start(() => completion("g", 0));
+  store.setSyncedAt(V, Date.now() - 11 * 60_000);
+  const r = await chat(base, MSG);
+  assert.equal(r.status, 503);
+  assert.equal(r.headers.get("retry-after"), "15");
+  const e: any = await r.json();
+  assert.equal(e.error.type, "server_error");
+  assert.match(e.error.message, /not been synced for 11 min/);
+  assert.equal(calls.length, 0);
+  server.close();
+});
+
+test("a never-synced vault answers 503", async () => {
+  const { base, server, calls } = await start(() => completion("g", 0), { unsynced: true });
+  const r = await chat(base, MSG);
+  assert.equal(r.status, 503);
+  assert.equal(r.headers.get("retry-after"), "15");
+  assert.equal(calls.length, 0);
+  server.close();
+});
+
 test("two requests that both pass the check both meter, and the third is refused", async () => {
   // $1 of yield, $0.60 per call: both concurrent calls pass the check (it happens before the call), the third finds nothing left
   let n = 0;
@@ -191,6 +218,27 @@ test("the provider's key limit becomes our 402", async () => {
   const e: any = await r.json();
   assert.equal(e.error.type, "insufficient_quota");
   assert.match(e.error.message, /https:\/\/dash\.test/);
+  server.close();
+});
+
+test("a 403 whose body only mentions the key limit elsewhere is relayed as is", async () => {
+  const body = { error: { message: "forbidden", code: 403 }, hint: "key limit exceeded is a different error" };
+  const { base, server } = await start(() => json(body, 403));
+  const r = await chat(base, MSG);
+  assert.equal(r.status, 403);
+  assert.deepEqual(await r.json(), body);
+  server.close();
+});
+
+test("a provider that never answers is cut off with 502", async () => {
+  const { base, server, calls } = await start(
+    (_url, init) => new Promise<Response>((_, reject) => init.signal?.addEventListener("abort", () => reject(init.signal!.reason))),
+    { upstreamTimeoutMs: 100 },
+  );
+  const r = await chat(base, MSG);
+  assert.equal(r.status, 502);
+  assert.equal(((await r.json()) as any).error.type, "upstream_error");
+  assert.equal(calls.length, 1);
   server.close();
 });
 
@@ -318,6 +366,15 @@ test("a failure inside the proxy answers 500 in the error shape", async () => {
   assert.equal(r.status, 500);
   assert.equal(((await r.json()) as any).error.type, "server_error");
   assert.equal(calls.length, 0);
+  server.close();
+});
+
+test("a non-Error throw inside the proxy is logged as text", async () => {
+  const { base, server, logs } = await start(() => completion("gen-f", 0), { decrypt: () => { throw "bad"; } });
+  const r = await chat(base, MSG);
+  assert.equal(r.status, 500);
+  assert.equal(((await r.json()) as any).error.type, "server_error");
+  assert.ok(logs.includes("proxy key k1 failed: bad"), logs.join(" | "));
   server.close();
 });
 
@@ -451,5 +508,110 @@ test("a model string with control characters is logged sanitized", async () => {
   assert.ok(logs.every((m) => !m.includes("\n")), logs.join(" | "));
   assert.ok(logs.some((m) => m.includes("model openai/gpt-4o-miniinjected gen gen-m")), logs.join(" | "));
   assert.ok(logs.some((m) => m.includes("model openai/gpt-4o-miniinjected upstream 500")), logs.join(" | "));
+  server.close();
+});
+
+/** An SSE response over the given raw frames, one per pull, so the test controls every byte and boundary. */
+function rawSse(frames: string[]) {
+  const enc = new TextEncoder();
+  let next = 0;
+  const stream = new ReadableStream<Uint8Array>({
+    pull(c) {
+      if (next >= frames.length) c.close();
+      else c.enqueue(enc.encode(frames[next++]));
+    },
+  });
+  return new Response(stream, { status: 200, headers: { "content-type": "text/event-stream" } });
+}
+
+test("a stream that stalls before usage is cut off and filed pending", async () => {
+  let cutOff = false;
+  const { base, server, store, proxy, logs } = await start((_url, init) => {
+    const signal = init.signal;
+    assert.ok(signal, "the proxy passes an abort signal upstream");
+    let sent = false;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(c) {
+        if (!sent) {
+          sent = true;
+          c.enqueue(new TextEncoder().encode(`data: ${JSON.stringify(chunk("gen-stall", "a"))}\n\n`));
+          return;
+        }
+        // the provider goes quiet: nothing more until the proxy's timeout aborts the request
+        return new Promise<void>((_, reject) => {
+          const stop = () => { cutOff = true; reject(signal.reason); };
+          if (signal.aborted) stop();
+          else signal.addEventListener("abort", stop, { once: true });
+        });
+      },
+    });
+    return new Response(stream, { status: 200, headers: { "content-type": "text/event-stream" } });
+  }, { upstreamTimeoutMs: 200 });
+  const r = await chat(base, STREAM);
+  assert.equal(r.status, 200);
+  await r.text().catch(() => {});
+  await proxy.drain(V, 1_000);
+  assert.equal(cutOff, true);
+  assert.equal(store.modelCall("gen-stall")!.status, "pending");
+  assert.ok(logs.some((m) => m.includes("gen-stall stream broke before usage")), logs.join(" | "));
+  server.close();
+});
+
+test("a usage event split across several data lines is still metered", async () => {
+  const { base, server, store } = await start(() => rawSse([
+    `data: ${JSON.stringify(chunk("gen-ml", "a"))}\n\n`,
+    'data: {"id":"gen-ml",\ndata: "model":"m",\ndata: "usage":{"cost":0.003}}\n\n',
+    "data: [DONE]\n\n",
+  ]));
+  const r = await chat(base, STREAM);
+  assert.equal(r.status, 200);
+  await r.text();
+  assert.equal(store.modelCall("gen-ml")!.costUsd, 0.003);
+  server.close();
+});
+
+test("carriage-return line endings are parsed", async () => {
+  const body = [
+    `data: ${JSON.stringify(chunk("gen-cr", "a"))}`,
+    "",
+    'data: {"id":"gen-cr",',
+    'data: "model":"m",',
+    'data: "usage":{"cost":0.004}}',
+    "",
+    "data: [DONE]",
+    "",
+    "",
+  ].join("\r");
+  // split mid-way through a line ending too, so a frame can end on a lone carriage return
+  const cut = body.indexOf("\r", body.indexOf("gen-cr\",")) + 1;
+  const { base, server, store } = await start(() => rawSse([body.slice(0, cut), body.slice(cut)]));
+  const r = await chat(base, STREAM);
+  assert.equal(r.status, 200);
+  assert.equal(await r.text(), body); // relayed byte for byte
+  assert.equal(store.modelCall("gen-cr")!.costUsd, 0.004);
+  server.close();
+});
+
+test("a stream without event boundaries stops being parsed but is still relayed", async () => {
+  const piece = "x".repeat(64 * 1024);
+  const frames = [
+    `data: ${JSON.stringify(chunk("gen-big", "a"))}\n\n`, // the generation id is seen first
+    'data: {"id":"gen-big"',
+    ...Array.from({ length: Math.ceil((1.1 * MAX_SSE_BUFFER) / piece.length) }, () => piece),
+    "\n\n",
+    `data: ${JSON.stringify(usageEvent("gen-big", 0.02))}\n\n`,
+    "data: [DONE]\n\n",
+  ];
+  const bytes = frames.reduce((n, f) => n + Buffer.byteLength(f), 0);
+  const { base, server, store, logs, proxy } = await start(() => rawSse(frames));
+  const r = await chat(base, STREAM);
+  assert.equal(r.status, 200);
+  const text = await r.text();
+  assert.ok(text.length >= bytes, `${text.length} < ${bytes}`);
+  assert.ok(text.endsWith("data: [DONE]\n\n"));
+  await proxy.drain(V, 1_000);
+  assert.equal(store.modelCall("gen-big")!.status, "pending"); // the usage event came after parsing stopped
+  const line = "proxy key k1 model openai/gpt-4o-mini sse buffer over 1 MB without an event boundary: metering from the stream stopped";
+  assert.equal(logs.filter((m) => m === line).length, 1, logs.join(" | "));
   server.close();
 });
