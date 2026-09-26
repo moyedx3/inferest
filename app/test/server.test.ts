@@ -20,7 +20,7 @@ const OTHER = "0x00000000000000000000000000000000000000dd";
 const tokenFor = (wallets: string[], over: Record<string, unknown> = {}) =>
   SIGNER.sign(claims({ verified_credentials: wallets.map((address, i) => ({ id: `vc-${i}`, address, chain: "eip155" })), ...over }));
 
-async function start(customer = "0x00000000000000000000000000000000000000cc", opts: { login?: boolean } = {}) {
+async function start(customer = "0x00000000000000000000000000000000000000cc", opts: { login?: boolean; faucet?: (address: string) => void } = {}) {
   const store = openStore(":memory:");
   const created: string[] = [];
   const d: AppDeps = {
@@ -50,6 +50,7 @@ async function start(customer = "0x00000000000000000000000000000000000000cc", op
     }),
     keeper: undefined as unknown as AppDeps["keeper"],
     auth: opts.login === false ? undefined : createAuth({ environmentId: "env-1", fetchFn: jwksFetch(SIGNER).fn, now: () => NOW }),
+    faucet: opts.faucet ? { fund: async (a) => { opts.faucet!(a); return { native: 10n ** 18n, usdc: 100_000_000_000n }; } } : undefined,
     logError: () => {},
   };
   d.keeper = { chain: d.chain, store, or: d.or, params: d.params, log: () => {}, sleep: async () => {}, decrypt: d.secrets.decrypt };
@@ -533,5 +534,29 @@ test("credential combinations resolve as the spec says", async () => {
   assert.equal((await as({ "x-admin-token": "admin", Authorization: "Bearer garbage" })).status, 201); // the operator
   assert.equal(store.listVaults().length, vaults);
   assert.ok(!logs.some((m) => m.startsWith("login refused")));
+  server.close();
+});
+
+test("the faucet is absent when disabled", async () => {
+  const { base, server } = await start();
+  await post(base, "/api/vaults", { vault: V });
+  assert.equal((await post(base, "/api/demo/fund", { address: OWNER })).status, 404);
+  assert.equal((await postAs(base, "/api/demo/fund", { address: OWNER }, tokenFor([OWNER]))).status, 404);
+  server.close();
+});
+
+test("the faucet funds a session's own wallet and refuses a foreign address", async () => {
+  const funded: string[] = [];
+  const { base, server } = await start(undefined, { faucet: (a) => { funded.push(a); } });
+  const own = await postAs(base, "/api/demo/fund", { address: OWNER.toUpperCase().replace("0X", "0x") }, tokenFor([OWNER]));
+  assert.equal(own.status, 200);
+  assert.deepEqual(await own.json(), { ok: true, native: "1000000000000000000", usdc: "100000000000" });
+  assert.deepEqual(funded, [OWNER]);
+  const foreign = await postAs(base, "/api/demo/fund", { address: OTHER }, tokenFor([OWNER]));
+  assert.equal(foreign.status, 403);
+  assert.deepEqual(await foreign.json(), { error: "not your wallet" });
+  assert.equal((await postAs(base, "/api/demo/fund", { address: "nope" }, tokenFor([OWNER]))).status, 400);
+  assert.equal((await post(base, "/api/demo/fund", { address: OTHER })).status, 200); // the operator may fund anyone
+  assert.equal((await fetch(base + "/api/demo/fund", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ address: OWNER }) })).status, 401);
   server.close();
 });

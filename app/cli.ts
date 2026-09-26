@@ -9,6 +9,7 @@ import { createApp } from "./server.ts";
 import { createProxy } from "./proxy.ts";
 import { settleThroughServer, describeSettle } from "./remote.ts";
 import { createAuth } from "./auth.ts";
+import { createFaucet } from "./faucet.ts";
 
 const cfg = loadConfig();
 const store = openStore(cfg.dbPath, { log: (m) => console.log(new Date().toISOString(), m) });
@@ -39,6 +40,7 @@ switch (cmd) {
   case "serve": {
     const app = createApp({
       store, or, chain, gateway, params: cfg.params, adminToken: cfg.adminToken, keeper, secrets: box, proxy, auth,
+      faucet: cfg.demoFaucet ? createFaucet({ rpcUrl: cfg.rpcUrl, usdc: cfg.usdc }) : undefined,
       publicConfig: {
         chainId: cfg.chainId, factory: cfg.factory, splitter: cfg.splitter, usdc: cfg.usdc, target: cfg.target, publicUrl: cfg.publicUrl,
         dynamicEnvironmentId: cfg.dynamicEnvironmentId ?? null, publicRpcUrl: cfg.publicRpcUrl ?? null, chainName: cfg.chainName,
