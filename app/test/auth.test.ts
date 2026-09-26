@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createAuth, jwksUrlFor } from "../auth.ts";
-import { makeSigner, jwksFetch, claims } from "./testjwt.ts";
+import { createAuth, jwksUrlFor, usersUrlFor } from "../auth.ts";
+import { makeSigner, jwksFetch, dynamicFetch, claims, hashedClaims } from "./testjwt.ts";
 
 const NOW = 1_800_000_000_000; // ms; this is iat (1_800_000_000 s) converted to ms, not 60 s after it
 const auth = (fetchFn: typeof fetch, over: Partial<Parameters<typeof createAuth>[0]> = {}) =>
@@ -178,4 +178,89 @@ test("a refetch that returns no keys keeps the cached ones", async () => {
   assert.equal(count, 2);
   const session = await a.verify(s1.sign(claims()));
   assert.equal(session.userId, "user-1");
+});
+
+const LIVE_USER = {
+  id: "user-1", email: "cfo@example.com", sessionId: "s-1", scope: "user:basic",
+  verifiedCredentials: [
+    { format: "blockchain", chain: "eip155", address: "0x558a4f72fB8f155dB3c58e40Edb59C652c58DAF5", walletName: "dynamicwaas", walletProvider: "embeddedWallet" },
+    { format: "email" },
+  ],
+};
+const LIVE_WALLET = "0x558a4f72fb8f155db3c58e40edb59c652c58daf5";
+
+test("the users url is the jwks url's sibling", () => {
+  assert.equal(usersUrlFor("env-1"), "https://app.dynamicauth.com/api/v0/sdk/env-1/users");
+});
+
+test("wallets come from the token when the claim is present", async () => {
+  const s = makeSigner();
+  const { fn, calls } = dynamicFetch([s], { body: LIVE_USER });
+  const session = await auth(fn).verify(s.sign(claims()));
+  assert.deepEqual(session.wallets, ["0x00000000000000000000000000000000000000cc"]);
+  assert.equal(calls.users, 0);
+});
+
+test("wallets are looked up when the token carries only hashes", async () => {
+  const s = makeSigner();
+  const { fn, calls } = dynamicFetch([s], { body: LIVE_USER });
+  const token = s.sign(hashedClaims());
+  const session = await auth(fn).verify(token);
+  assert.deepEqual(session, { userId: "user-1", email: "cfo@example.com", wallets: [LIVE_WALLET] });
+  assert.deepEqual(calls.bearers, [`Bearer ${token}`]);
+  assert.equal(calls.jwks, 1);
+  assert.equal(calls.users, 1);
+});
+
+test("the lookup is cached per user and credential hash", async () => {
+  const s = makeSigner();
+  const { fn, calls } = dynamicFetch([s], { body: LIVE_USER });
+  const a = auth(fn);
+  await a.verify(s.sign(hashedClaims()));
+  await a.verify(s.sign(hashedClaims()));
+  assert.equal(calls.users, 1);
+  const session = await a.verify(s.sign(hashedClaims({ verifiedCredentialsHashes: { blockchain: "cc", email: "bb" } })));
+  assert.equal(calls.users, 2);
+  assert.deepEqual(session.wallets, [LIVE_WALLET]);
+});
+
+test("the cache expires", async () => {
+  const s = makeSigner();
+  const { fn, calls } = dynamicFetch([s], { body: LIVE_USER });
+  let t = NOW;
+  const a = auth(fn, { now: () => t, walletCacheMs: 1000 });
+  await a.verify(s.sign(hashedClaims()));
+  t += 1001;
+  await a.verify(s.sign(hashedClaims()));
+  assert.equal(calls.users, 2);
+});
+
+test("a failed lookup falls back to the last known wallets, else to none with a reason", async () => {
+  const s = makeSigner();
+  const { fn, calls, users } = dynamicFetch([s], { body: LIVE_USER });
+  const a = auth(fn, { walletCacheMs: 0 });
+  assert.deepEqual((await a.verify(s.sign(hashedClaims()))).wallets, [LIVE_WALLET]);
+  users.reply = { status: 503, body: { error: "down" } };
+  const kept = await a.verify(s.sign(hashedClaims({ verifiedCredentialsHashes: { blockchain: "dd", email: "bb" } })));
+  assert.equal(calls.users, 2);
+  assert.deepEqual(kept.wallets, [LIVE_WALLET]);
+  assert.equal(kept.walletsError, undefined);
+  const fresh = await a.verify(s.sign(hashedClaims({ sub: "user-new" })));
+  assert.deepEqual(fresh.wallets, []);
+  assert.match(fresh.walletsError ?? "", /503/);
+  users.reply = { hang: true };
+  const started = Date.now();
+  const hung = await auth(fn, { lookupTimeoutMs: 50 }).verify(s.sign(hashedClaims({ sub: "user-hung" })));
+  assert.deepEqual(hung.wallets, []);
+  assert.match(hung.walletsError ?? "", /abort|timeout/i);
+  assert.ok(Date.now() - started < 1000);
+});
+
+test("a lookup body without eip155 entries yields no wallets", async () => {
+  const s = makeSigner();
+  const { fn, calls } = dynamicFetch([s], { body: { id: "user-1", verifiedCredentials: [{ format: "email" }] } });
+  const session = await auth(fn).verify(s.sign(hashedClaims()));
+  assert.deepEqual(session.wallets, []);
+  assert.equal(session.walletsError, undefined);
+  assert.equal(calls.users, 1);
 });

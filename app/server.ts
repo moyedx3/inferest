@@ -64,7 +64,9 @@ export async function resolveCaller(d: AppDeps, req: IncomingMessage): Promise<C
   const token = bearer(req);
   if (!token || !d.auth) return { kind: "none" };
   try {
-    return { kind: "session", session: await d.auth.verify(token) };
+    const session = await d.auth.verify(token);
+    if (session.walletsError) d.keeper.log(`session ${session.userId} wallets unavailable: ${session.walletsError}`);
+    return { kind: "session", session };
   } catch (e) {
     d.keeper.log(`login refused: ${(e as Error).message}`);
     return { kind: "none" };
