@@ -257,7 +257,7 @@ _Numbers use `HACKATHON_PARAMS` at 4.5% APY and are pinned in `engine/ledger.tes
 ## Known gaps
 
 - **One OpenRouter account.** Every vault's key lives under our account. Per-company isolation would mean one OpenRouter account per company, each with its own float.
-- **Company admins use our admin token.** Self-service needs wallet login: the factory records the vault's owner, so a signed message from that wallet can authorize key creation for that vault.
+- **One admin per vault.** The vault's admin is the login whose verified wallet created it; a company that wants several finance leads, or a Safe multisig as its treasury, needs named co-admins and an EIP-1271 signature path. Both are next.
 - **Orthogonal descriptions.** Coinbase's facilitator rejects a payment whose echoed resource description is longer than about 255 characters; our client caps it before signing. Any other client hits the same on long-description listings.
 - **A daily report on an emptied vault fails Octant's health check.** Harmless, logged, and skipped until the vault is funded again.
 
