@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { computeLimits, companyLimit, toolBudgetUsd, usageMicro, type KeyInput } from "../limits.ts";
+import { computeLimits, companyLimit, settlePreview, toolBudgetUsd, usageMicro, type KeyInput } from "../limits.ts";
 import { HACKATHON_PARAMS } from "../../engine/ledger.ts";
 
 const key = (id: string, weight: number, modelSpent = 0, toolSpent = 0, revoked = false): KeyInput =>
@@ -71,4 +71,19 @@ test("the company limit is cumulative usage plus open credit, floored to 4 decim
 
 test("the company limit ignores a non-finite open credit", () => {
   assert.equal(companyLimit(5, [{ id: "a", budget: NaN, spent: 0, remaining: NaN }]), 5);
+});
+
+test("the settle preview matches the kernel: usage, 10% of the leftover, the rest returned", () => {
+  const p = settlePreview(2_225, [key("a", 2, 300.12, 12.28), key("b", 1, 126.82, 24.54), key("c", 1, 36.24)], HACKATHON_PARAMS);
+  close(p.usage, 500); close(p.fee, 172.5); close(p.returned, 1552.5);
+});
+
+test("the settle preview grosses model spend up by the rail fee", () => {
+  const p = settlePreview(1_000, [key("a", 1, 95, 10)], { ourFee: 0.1, railFee: 0.05 });
+  close(p.usage, 110); close(p.fee, 89); close(p.returned, 801);
+});
+
+test("the settle preview never takes a fee on spend above yield", () => {
+  const p = settlePreview(100, [key("a", 1, 150)], HACKATHON_PARAMS);
+  close(p.usage, 150); close(p.fee, 0); close(p.returned, 0);
 });
