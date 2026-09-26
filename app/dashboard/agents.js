@@ -2,8 +2,12 @@
 const runs = document.getElementById("runs");
 
 async function load() {
-  const r = await fetch("/api/agent");
-  if (r.status === 404) runs.textContent = "no agent yet";
+  try {
+    const r = await fetch("/api/agent");
+    if (!r.ok) runs.textContent = "no agent yet";
+  } catch {
+    runs.textContent = "no agent yet";
+  }
 }
 
 load();
