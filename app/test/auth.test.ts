@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createAuth, jwksUrlFor } from "../auth.ts";
 import { makeSigner, jwksFetch, claims } from "./testjwt.ts";
 
-const NOW = 1_800_000_000_000; // ms, 60 s after iat
+const NOW = 1_800_000_000_000; // ms; this is iat (1_800_000_000 s) converted to ms, not 60 s after it
 const auth = (fetchFn: typeof fetch, over: Partial<Parameters<typeof createAuth>[0]> = {}) =>
   createAuth({ environmentId: "env-1", fetchFn, now: () => NOW, ...over });
 
@@ -54,6 +54,42 @@ test("an unknown key id does not refetch within a minute of the last fetch", asy
   assert.equal(calls.count, 1); // a rotated key is picked up a minute later, not on every miss
 });
 
+test("a failed jwks fetch is not retried within a minute", async () => {
+  const s = makeSigner();
+  let count = 0;
+  let t = NOW;
+  const fn = (async () => {
+    count++;
+    return new Response("down", { status: 503 });
+  }) as unknown as typeof fetch;
+  const a = auth(fn, { now: () => t });
+  await assert.rejects(a.verify(s.sign(claims())), /invalid token: jwks unavailable/);
+  await assert.rejects(a.verify(s.sign(claims())), /invalid token: jwks unavailable/);
+  assert.equal(count, 1); // the outage itself is throttled, not retried on every request
+  t += 61_000;
+  await assert.rejects(a.verify(s.sign(claims())), /invalid token: jwks unavailable/);
+  assert.equal(count, 2);
+});
+
+test("concurrent first logins share one jwks fetch", async () => {
+  const s = makeSigner();
+  const { fn, calls } = jwksFetch(s);
+  const a = auth(fn);
+  const sessions = await Promise.all([
+    a.verify(s.sign(claims({ sub: "user-1" }))),
+    a.verify(s.sign(claims({ sub: "user-2" }))),
+    a.verify(s.sign(claims({ sub: "user-3" }))),
+  ]);
+  assert.deepEqual(sessions.map((session) => session.userId), ["user-1", "user-2", "user-3"]);
+  assert.equal(calls.count, 1);
+});
+
+test("a jwks body of null yields no usable keys; the fetch itself succeeded, so the token's kid is unknown", async () => {
+  const s = makeSigner();
+  const fn = (async () => new Response("null", { status: 200 })) as unknown as typeof fetch;
+  await assert.rejects(auth(fn).verify(s.sign(claims())), /invalid token: unknown key/);
+});
+
 test("a bad signature is refused", async () => {
   const s = makeSigner();
   const other = makeSigner("k1"); // same kid, different key
@@ -65,6 +101,8 @@ test("an expired token is refused", async () => {
   const s = makeSigner();
   const { fn } = jwksFetch(s);
   await assert.rejects(auth(fn).verify(s.sign(claims({ exp: 1_800_000_000 - 1 }))), /invalid token: expired/);
+  // exp equal to the current second is refused too: the comparison is <=, not <
+  await assert.rejects(auth(fn).verify(s.sign(claims({ exp: 1_800_000_000 }))), /invalid token: expired/);
 });
 
 test("a token for another environment is refused", async () => {
@@ -105,4 +143,11 @@ test("a jwks fetch failure is reported, not thrown as a raw error", async () => 
   const s = makeSigner();
   const fn = (async () => new Response("down", { status: 503 })) as unknown as typeof fetch;
   await assert.rejects(auth(fn).verify(s.sign(claims())), /invalid token: jwks unavailable/);
+});
+
+test("a validly signed payload that is not an object is refused as malformed", async () => {
+  const s = makeSigner();
+  const { fn } = jwksFetch(s);
+  // testjwt's sign() types payload as Record<string, unknown>, but it JSON-serializes whatever it is given.
+  await assert.rejects(auth(fn).verify(s.sign(null as any)), /invalid token: malformed/);
 });

@@ -30,8 +30,10 @@ function decodePart(part: string): any {
 
 /**
  * Verifies Dynamic's RS256 access tokens against the environment's JWKS, which is fetched once, cached by key id,
- * and refetched at most once a minute when a token names a key we do not hold. Only the signature, the expiry
- * and the environment are checked; authorization is the caller's job.
+ * and refetched at most once a minute when a token names a key we do not hold. Concurrent callers that arrive
+ * before the first fetch resolves share it, and a fetch that fails (or returns no usable keys) is itself
+ * throttled to once a minute rather than attempted on every request. Only the signature, the expiry and the
+ * environment are checked; authorization is the caller's job.
  */
 export function createAuth(d: AuthDeps): Auth {
   const fetchFn = d.fetchFn ?? fetch;
@@ -39,37 +41,55 @@ export function createAuth(d: AuthDeps): Auth {
   const url = d.jwksUrl ?? jwksUrlFor(d.environmentId);
   let keys = new Map<string, KeyObject>();
   let fetchedAt = 0;
+  let attempted = false;
+  let lastFetchError: Error | null = null;
+  let inFlight: Promise<void> | null = null;
 
-  async function refresh(): Promise<void> {
-    let res: Response;
+  async function fetchJwks(): Promise<void> {
     try {
-      res = await fetchFn(url);
-    } catch {
-      throw invalid("jwks unavailable");
-    }
-    if (!res.ok) throw invalid("jwks unavailable");
-    const body: any = await res.json().catch(() => ({}));
-    const next = new Map<string, KeyObject>();
-    for (const jwk of Array.isArray(body.keys) ? body.keys : []) {
-      if (jwk?.kty !== "RSA" || typeof jwk.kid !== "string") continue;
+      let res: Response;
       try {
-        next.set(jwk.kid, createPublicKey({ key: jwk, format: "jwk" }));
+        res = await fetchFn(url);
       } catch {
-        // an unusable key is skipped; a token naming it fails as unknown
+        throw invalid("jwks unavailable");
       }
+      if (!res.ok) throw invalid("jwks unavailable");
+      const body: any = await res.json().catch(() => null);
+      const next = new Map<string, KeyObject>();
+      for (const jwk of Array.isArray(body?.keys) ? body.keys : []) {
+        if (jwk?.kty !== "RSA" || typeof jwk.kid !== "string") continue;
+        try {
+          next.set(jwk.kid, createPublicKey({ key: jwk, format: "jwk" }));
+        } catch {
+          // an unusable key is skipped; a token naming it fails as unknown
+        }
+      }
+      keys = next;
+      lastFetchError = null;
+    } catch (err) {
+      lastFetchError = err instanceof Error ? err : invalid("jwks unavailable");
+      throw err;
+    } finally {
+      attempted = true;
+      fetchedAt = now();
     }
-    keys = next;
-    fetchedAt = now();
+  }
+
+  /** Runs at most one JWKS fetch at a time; concurrent callers await the same in-flight attempt. */
+  function refresh(): Promise<void> {
+    if (inFlight) return inFlight;
+    const attempt = fetchJwks().finally(() => {
+      inFlight = null;
+    });
+    inFlight = attempt;
+    return attempt;
   }
 
   async function keyFor(kid: string): Promise<KeyObject> {
-    if (keys.size === 0) await refresh();
-    let key = keys.get(kid);
-    if (!key && now() - fetchedAt >= REFETCH_MIN_MS) {
-      await refresh();
-      key = keys.get(kid);
-    }
-    if (!key) throw invalid("unknown key");
+    const stale = !attempted || now() - fetchedAt >= REFETCH_MIN_MS;
+    if (!keys.has(kid) && stale) await refresh();
+    const key = keys.get(kid);
+    if (!key) throw lastFetchError ?? invalid("unknown key");
     return key;
   }
 
@@ -80,6 +100,7 @@ export function createAuth(d: AuthDeps): Auth {
       if (parts.length !== 3 || parts.some((p) => p.length === 0)) throw invalid("malformed");
       const header = decodePart(parts[0]);
       const payload = decodePart(parts[1]);
+      if (payload === null || typeof payload !== "object") throw invalid("malformed");
       if (header?.alg !== "RS256") throw invalid("unsupported algorithm");
       if (typeof header.kid !== "string") throw invalid("malformed");
       const key = await keyFor(header.kid);
