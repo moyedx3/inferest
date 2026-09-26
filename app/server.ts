@@ -21,6 +21,8 @@ export type AppDeps = {
   /** Encrypts each vault's OpenRouter key at rest. */
   secrets: SecretBox;
   proxy: Proxy;
+  /** Logs an uncaught error from a route (default console.error). */
+  logError?: (msg: string) => void;
 };
 
 const DASHBOARD = fileURLToPath(new URL("./dashboard/", import.meta.url));
@@ -95,7 +97,7 @@ async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse): Pro
     if (!key || key.revoked) return send(res, 401, { error: "unknown key" });
     const body = req.method === "POST" ? await readJson(req) : undefined;
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
-    const server = buildMcpServer(d.gateway, key.id);
+    const server = buildMcpServer(d.gateway, key.id, d.keeper.log);
     res.on("close", () => { void transport.close(); void server.close(); });
     await server.connect(transport);
     await transport.handleRequest(req, res, body);
@@ -191,7 +193,7 @@ export function createApp(d: AppDeps): Server {
   return createServer((req, res) => {
     route(d, req, res).catch((e) => {
       const err = e as Error;
-      console.error(err.stack ?? err.message);
+      (d.logError ?? console.error)(err.stack ?? err.message);
       if (res.headersSent) { res.end(); return; }
       send(res, 500, { error: sanitizeError(err.message) });
     });

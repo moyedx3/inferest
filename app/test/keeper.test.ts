@@ -247,6 +247,16 @@ test("the daily check reports recorded cost that no settlement billed", async ()
   assert.ok(logs.includes(`billing ${V}: recorded 2.75 billed 2 current period 0.5 unbilled 0.25`), logs.join("\n"));
 });
 
+test("the billing check flags a vault whose settlement predates metering", async () => {
+  const { d, store, logs } = setup();
+  store.recordSettlement(V, 5_000_000n, "0xold"); // billed directly, with no model_calls rows behind it
+  await checkDrift(d);
+  assert.ok(
+    logs.includes(`billing ${V}: recorded 0 billed 5 current period 0 unbilled -5 (settlements predate metering)`),
+    logs.join("\n"),
+  );
+});
+
 test("pending model calls are resolved through the generation lookup with the company key", async () => {
   const { d, store, events, ctl } = setup();
   store.recordPendingModelCall({ keyId: "k1", model: "m", generationId: "gen-1" });

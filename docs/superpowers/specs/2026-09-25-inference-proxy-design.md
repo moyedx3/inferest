@@ -63,7 +63,7 @@ Store methods added: `addKey({ id, vault, name, weight, secretSha256 })`, `rotat
 - **Settlement:** the freeze step marks the vault as settling in the store (`vaults.settling = 1`) so the proxy refuses new requests for it, waits for in-flight calls to finish metering (bounded, default ten seconds), then reads spend. Usage for `settle` is `Σ recorded model cost / (1 − railFee) + Σ tool spend` for the period. The persisted settlement flow (pending record before broadcast, reconciliation, retry within the month, escape hatch) is unchanged. After settlement the flag clears and the period increments.
 - **Cross-check:** once a day the keeper compares the company key's cumulative usage on OpenRouter with the sum of recorded model costs since the vault was registered and logs the drift with the vault id. It corrects nothing; it is the alarm for lost metering.
 
-Overshoot bounds: one in-flight request per key beyond its remaining budget, and one keeper tick of lag on the company backstop.
+Overshoot bounds: each request in flight per key beyond its remaining budget (the check is local and precedes the call), and one keeper tick of lag on the company backstop.
 
 ## 4. Metering
 
@@ -95,7 +95,7 @@ Overshoot bounds: one in-flight request per key beyond its remaining budget, and
 
 - `demo/lib.ts` points `chat()` at the Inferest server's `/v1/chat/completions`; both demo scripts otherwise run unchanged. The agent demo keeps its MCP connection.
 - Tests (node:test, fakes for upstream and chain, real in-memory store): proxy unit tests (streaming and non-streaming cost capture, client disconnect mid-stream, upstream failure producing a pending row, pending resolution by lookup, 401 unknown and revoked, 402 exhausted and frozen, upstream error relay, the two rewrites, body cap); store migration to version 3 and the new methods; keeper tests adapted to one OpenRouter key per company and metered spend; settlement snapshot and freeze-wait tests; server tests for the new admin routes and the setup page. Existing tests keep passing or are adapted with their assertions intact.
-- Migration: schema version 3 on open, additive only.
+- Migration: schema version 3 on open; the version 2 key, tool call and pending settlement rows (demo data keyed by OpenRouter hashes) are dropped, vault rows and the settlement history are kept.
 - Docs: README (keys are Inferest keys; setup), workflow doc sections 2 and 3, deck wording.
 
 ## 8. Out of scope

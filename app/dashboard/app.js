@@ -113,7 +113,7 @@ async function render() {
       <h3>${esc(v.label)} <span class="muted">${esc(v.vault)}</span></h3>
       <p>Yield in Splitter: <b>$${v.yieldUsd.toFixed(2)}</b>
         ${v.frozen ? "<b>(frozen: loss pending)</b>" : ""} ${v.settling ? "<b>(settling)</b>" : ""}
-        &middot; period ${v.period}
+        &middot; period ${esc(v.period)}
         &middot; provider backstop: limit $${v.orLimit.toFixed(2)}, used $${v.orUsage.toFixed(2)}${v.hasOpenRouterKey ? "" : " (no provider key yet)"}</p>
       <table><tr><th>Key</th><th>Weight</th><th>Budget</th><th>Models</th><th>Tools</th><th>Left</th><th></th></tr>
       ${v.keys.map((k) => `<tr class="${k.revoked ? "revoked" : ""}"><td>${esc(k.name)}${k.revoked ? " (revoked)" : ""}</td><td>${k.weight}</td>

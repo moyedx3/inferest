@@ -161,13 +161,28 @@ export function createProxy(d: ProxyDeps): Proxy {
       d.log(`proxy models upstream unreachable: ${errText(e)}`);
       return fail(res, 502, "upstream_error", "could not reach the model provider");
     }
+    let body: ArrayBuffer;
+    try {
+      body = await up.arrayBuffer();
+    } catch (e) {
+      d.log(`proxy models upstream body read failed: ${errText(e)}`);
+      if (!res.headersSent) return fail(res, 502, "upstream_error", "the model provider stopped answering");
+      return;
+    }
     res.writeHead(up.status, relayHeaders(up));
-    res.end(Buffer.from(await up.arrayBuffer()));
+    res.end(Buffer.from(body));
   }
 
   /** Relays an upstream 4xx or 5xx as is, except that the company key's limit becomes our 402. */
   async function relayError(res: ServerResponse, up: Response, key: KeyRow, model: string, started: number): Promise<void> {
-    const text = await up.text();
+    let text: string;
+    try {
+      text = await up.text();
+    } catch (e) {
+      d.log(`proxy key ${key.id} model ${model} upstream body read failed: ${errText(e)}`);
+      if (!res.headersSent) return fail(res, 502, "upstream_error", "the model provider stopped answering");
+      return;
+    }
     d.log(`proxy key ${key.id} model ${model} upstream ${up.status} ${Date.now() - started}ms`);
     // only the provider's own error message counts; a JSON body that mentions the phrase elsewhere is relayed as is
     let j: any;
@@ -182,7 +197,14 @@ export function createProxy(d: ProxyDeps): Proxy {
 
   /** Non-streaming: relay the JSON body untouched and meter from its usage object. */
   async function relayJson(res: ServerResponse, up: Response, key: KeyRow, model: string, started: number): Promise<void> {
-    const text = await up.text();
+    let text: string;
+    try {
+      text = await up.text();
+    } catch (e) {
+      d.log(`proxy key ${key.id} model ${model} upstream body read failed: ${errText(e)}`);
+      if (!res.headersSent) return fail(res, 502, "upstream_error", "the model provider stopped answering");
+      return;
+    }
     res.writeHead(up.status, relayHeaders(up));
     res.end(text);
     let j: any;
@@ -315,7 +337,7 @@ export function createProxy(d: ProxyDeps): Proxy {
     const orKey = d.store.openRouterKeyFor(key.vault);
     if (!orKey) {
       d.log(`proxy key ${key.id}: vault ${key.vault} has no OpenRouter key on file`);
-      return fail(res, 503, "server_error", "this key's vault has no provider key yet; ask the admin to re-register it");
+      return fail(res, 503, "server_error", "this key's vault has no provider key yet; ask the admin to re-register it", { "Retry-After": "15" });
     }
     body.usage = { ...(body.usage && typeof body.usage === "object" && !Array.isArray(body.usage) ? body.usage : {}), include: true };
     const work = forward(res, body, key, d.decrypt(orKey.encryptedSecret));

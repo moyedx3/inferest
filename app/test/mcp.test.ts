@@ -6,7 +6,7 @@ import { buildMcpServer } from "../mcp.ts";
 import { BudgetExhausted, type ToolGateway } from "../tools.ts";
 
 async function connect(gateway: ToolGateway) {
-  const server = buildMcpServer(gateway, "h1");
+  const server = buildMcpServer(gateway, "h1", () => {});
   const [c, s] = InMemoryTransport.createLinkedPair();
   await server.connect(s);
   const client = new Client({ name: "test", version: "0.0.0" });

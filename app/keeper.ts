@@ -73,6 +73,8 @@ async function syncCompanyKey(d: KeeperDeps, vault: string, limits: KeyLimit[]):
   // A pending call is in OpenRouter's usage but not in our spend, so raising the limit by the open credit would
   // double its headroom. Hold the limit where it is until the keeper has resolved the call's cost, but never
   // below the live usage: an in-flight request may have overshot the stored limit, and the hold then pins at usage.
+  // When usage overshot, the held value is live usage itself, which can sit above the 4-decimal floored candidate
+  // by under 1e-4; that is intended.
   const limit = pending > 0 && stored > 0 ? Math.max(live.usage, Math.min(candidate, stored)) : candidate;
   if (limit !== candidate) d.log(`sync ${vault}: ${pending} pending model call(s), backstop held at ${limit}`);
   await d.or.setLimit(orKey.hash, limit);
@@ -158,7 +160,8 @@ export async function checkDrift(d: KeeperDeps): Promise<void> {
         (d.store.settledUsageUsd(v.vault) - d.store.toolSpendBeforePeriod(v.vault, v.period)) * (1 - d.params.railFee)));
       const current = d.store.spendForVault(v.vault).modelUsd;
       const unbilled = round6(recorded - billedModel - current);
-      d.log(`billing ${v.vault}: recorded ${recorded} billed ${billedModel} current period ${current} unbilled ${unbilled}`);
+      const note = unbilled < 0 ? " (settlements predate metering)" : "";
+      d.log(`billing ${v.vault}: recorded ${recorded} billed ${billedModel} current period ${current} unbilled ${unbilled}${note}`);
     } catch (e) {
       d.log(`drift ${v.vault} check failed: ${(e as Error).message}`);
     }

@@ -4,7 +4,7 @@ import type { ToolGateway } from "./tools.ts";
 
 const text = (value: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(value) }] });
 
-export function buildMcpServer(gateway: ToolGateway, keyId: string): McpServer {
+export function buildMcpServer(gateway: ToolGateway, keyId: string, log: (msg: string) => void = console.error): McpServer {
   const server = new McpServer({ name: "inferest-tools", version: "0.1.0" });
 
   server.registerTool(
@@ -51,7 +51,7 @@ export function buildMcpServer(gateway: ToolGateway, keyId: string): McpServer {
         return text(await gateway.run(keyId, { ...args, query }));
       } catch (e) {
         const message = (e as Error).message;
-        console.error(`run_tool ${keyId}: ${message}`);
+        log(`run_tool ${keyId}: ${message}`);
         return { isError: true, content: [{ type: "text" as const, text: message }] };
       }
     },

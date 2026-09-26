@@ -52,13 +52,18 @@ switch (cmd) {
       process.exitCode = 1;
       break;
     }
-    const remote = await settleThroughServer(cfg.publicUrl, cfg.adminToken, String(arg));
-    if (remote) {
-      console.log(`settled through the server at ${cfg.publicUrl}: ${describeSettle(remote)}`);
-    } else {
-      console.log(`no server at ${cfg.publicUrl}, settling in this process`);
-      const result = await settleVault(keeper, String(arg));
-      console.log(describeSettle(result));
+    try {
+      const remote = await settleThroughServer(cfg.publicUrl, cfg.adminToken, String(arg));
+      if (remote) {
+        console.log(`settled through the server at ${cfg.publicUrl}: ${describeSettle(remote)}`);
+      } else {
+        console.log(`no server at ${cfg.publicUrl}, settling in this process`);
+        const result = await settleVault(keeper, String(arg));
+        console.log(describeSettle(result));
+      }
+    } catch (e) {
+      console.error(`settle failed: ${(e as Error).message}`);
+      process.exitCode = 1;
     }
     break;
   }

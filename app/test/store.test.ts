@@ -31,6 +31,7 @@ function writeOldDb(path: string, version: "1" | "2") {
     INSERT INTO meta (k, v) VALUES ('schemaVersion', '${version}');
     INSERT INTO vaults (vault, customer, label, period, yield_usd) VALUES ('0xaa', '0xcc', 'T', 3, 12.5);
     INSERT INTO keys (hash, vault, name, weight, secret_sha256) VALUES ('h1', '0xaa', 'old', 1, 's1');
+    INSERT INTO tool_calls (key_hash, api, path, price, period, at) VALUES ('h1', 'a', '/b', 0.02, 3, 1);
     INSERT INTO settlements (vault, usage_micro, tx, at) VALUES ('0xaa', '5', '0xold', 1);
   `);
   if (version === "2") {
@@ -371,7 +372,7 @@ for (const version of ["1", "2"] as const) {
       const lines: string[] = [];
       const s = openStore(path, { log: (m) => lines.push(m) });
       assert.equal(s.getMeta("schemaVersion"), "4");
-      assert.ok(lines.includes("migration: 1 keys and 0 tool call rows from version 2 dropped"), lines.join("\n"));
+      assert.ok(lines.includes("migration: 1 keys and 1 tool call rows from version 2 dropped"), lines.join("\n"));
       if (version === "2") {
         assert.ok(lines.some((m) => m.includes("pending settlement 0xpending2 for 0xaa")), lines.join("\n"));
       } else {
@@ -388,6 +389,8 @@ for (const version of ["1", "2"] as const) {
       s.addKey({ id: "k1", vault: "0xaa", name: "new", weight: 1, secretSha256: "s1" });
       s.recordModelCall({ keyId: "k1", model: "m", costUsd: 1, generationId: "g" });
       assert.equal(s.keyById("k1")!.modelSpent, 1);
+      s.recordToolCall("k1", "a", "/b", 0.03);
+      assert.equal(s.keysForVault("0xaa")[0].toolSpent, 0.03); // only the new call; the dropped version 2 row does not count
       s.close();
       assert.equal(openStore(path).getMeta("schemaVersion"), "4"); // a second open is a no-op
     } finally {
@@ -403,7 +406,7 @@ test("an unsupported schema version is refused", () => {
     s.setMeta("schemaVersion", "99");
     s.close();
     assert.throws(() => openStore(path), /unsupported schema version 99/);
-    // the refused open released its handle: the file can be corrected and opened again
+    // the file can be corrected and reopened
     const db = new DatabaseSync(path);
     db.exec("UPDATE meta SET v = '4' WHERE k = 'schemaVersion'");
     db.close();
