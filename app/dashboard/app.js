@@ -310,6 +310,7 @@ $("settle").onclick = async () => {
     const r = await api("/api/admin/settle", { vault: v.vault });
     if (r.usageMicro === null) activity({ icon: "✓", title: "Nothing to settle", detail: `period ${v.period} had no settlement to send` });
     else activity({ icon: "✓", title: r.pending ? "Settlement sent" : `Settled period ${v.period}`, detail: `usage ${spent(Number(r.usageMicro) / 1e6)} to float${r.pending ? ", waiting for its receipt" : ""}`, tx: r.tx ?? "" });
+    wallet = null; // the leftover came back as shares: read principal and shares again
     await render();
   } catch (e) { fail("Settle failed")(e); }
 };
