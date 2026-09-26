@@ -64,7 +64,9 @@ export async function resolveCaller(d: AppDeps, req: IncomingMessage): Promise<C
   const token = bearer(req);
   if (!token || !d.auth) return { kind: "none" };
   try {
-    return { kind: "session", session: await d.auth.verify(token) };
+    const session = await d.auth.verify(token);
+    if (session.walletsError) d.keeper.log(`session ${session.userId} wallets unavailable: ${session.walletsError}`);
+    return { kind: "session", session };
   } catch (e) {
     d.keeper.log(`login refused: ${(e as Error).message}`);
     return { kind: "none" };
@@ -207,7 +209,10 @@ async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse): Pro
       if (!d.faucet) return send(res, 404, { error: "not found" });
       const address = String(body.address ?? "").toLowerCase();
       if (!/^0x[0-9a-f]{40}$/.test(address)) return send(res, 400, { error: "address must be 0x plus 40 hex characters" });
-      if (caller.kind === "session" && !caller.session.wallets.includes(address)) return send(res, 403, { error: "not your wallet" });
+      if (caller.kind === "session" && !caller.session.wallets.includes(address)) {
+        d.keeper.log(`faucet refused ${address}: the session's verified wallets are [${caller.session.wallets.join(", ")}]`);
+        return send(res, 403, { error: "not your wallet" });
+      }
       const funded = await d.faucet.fund(address);
       d.keeper.log(`faucet funded ${address}`);
       return send(res, 200, { ok: true, native: funded.native.toString(), usdc: funded.usdc.toString() });

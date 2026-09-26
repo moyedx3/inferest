@@ -7,7 +7,7 @@ import { openStore } from "../store.ts";
 import { HACKATHON_PARAMS } from "../../engine/ledger.ts";
 import type { ToolGateway } from "../tools.ts";
 import { createAuth } from "../auth.ts";
-import { makeSigner, jwksFetch, claims } from "./testjwt.ts";
+import { makeSigner, dynamicFetch, claims, hashedClaims } from "./testjwt.ts";
 
 const V = "0x00000000000000000000000000000000000000aa";
 const ZERO = "0x0000000000000000000000000000000000000000";
@@ -49,7 +49,11 @@ async function start(customer = "0x00000000000000000000000000000000000000cc", op
       fetchFn: (async () => { throw new Error("no upstream in this test"); }) as unknown as typeof fetch,
     }),
     keeper: undefined as unknown as AppDeps["keeper"],
-    auth: opts.login === false ? undefined : createAuth({ environmentId: "env-1", fetchFn: jwksFetch(SIGNER).fn, now: () => NOW }),
+    auth: opts.login === false ? undefined : createAuth({
+      environmentId: "env-1", now: () => NOW,
+      // a token with only credential hashes gets its wallets from the users endpoint, which answers with OWNER
+      fetchFn: dynamicFetch([SIGNER], { body: { verifiedCredentials: [{ format: "blockchain", chain: "eip155", address: OWNER }, { format: "email" }] } }).fn,
+    }),
     faucet: opts.faucet ? { fund: async (a) => { opts.faucet!(a); return { native: 10n ** 18n, usdc: 100_000_000_000n }; } } : undefined,
     logError: () => {},
   };
@@ -424,6 +428,14 @@ test("a session manages a vault the operator registered", async () => {
   const s = await postAs(base, "/api/admin/settle", { vault: V }, t);
   assert.equal(s.status, 200);
   assert.equal((await s.json()).pending, false);
+  server.close();
+});
+
+test("a session whose wallets come from the lookup manages its vault", async () => {
+  const { base, server } = await start();
+  await post(base, "/api/vaults", { vault: V, label: "Treasury" });
+  const k = await postAs(base, "/api/keys", { vault: V, name: "dev-1", weight: 1 }, SIGNER.sign(hashedClaims()));
+  assert.equal(k.status, 201);
   server.close();
 });
 

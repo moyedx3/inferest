@@ -1,5 +1,5 @@
 // The only file that touches Dynamic's SDK. Bundled by `npm run build:dashboard`; the dashboard imports the bundle.
-import { createDynamicClient, initializeClient, sendEmailOTP, verifyOTP, getAvailableWalletProvidersData, connectAndVerifyWithWalletProvider, getPrimaryWalletAccount, getWalletAccounts, getSelectedWalletAccount, setSelectedWalletAccount, switchActiveNetwork, logout } from "@dynamic-labs-sdk/client";
+import { createDynamicClient, initializeClient, sendEmailOTP, verifyOTP, getAvailableWalletProvidersData, connectAndVerifyWithWalletProvider, getPrimaryWalletAccount, getWalletAccounts, getSelectedWalletAccount, setSelectedWalletAccount, switchActiveNetwork, logout, refreshAuth } from "@dynamic-labs-sdk/client";
 import { createWaasWalletAccounts, getChainsMissingWaasWalletAccounts } from "@dynamic-labs-sdk/client/waas";
 import { addEvmExtension } from "@dynamic-labs-sdk/evm";
 import { addWalletConnectEvmExtension } from "@dynamic-labs-sdk/evm/wallet-connect";
@@ -49,6 +49,7 @@ export async function initDynamic(cfg) {
   addEvmExtension();
   await addWalletConnectEvmExtension().catch(() => {}); // no WalletConnect project id configured: extensions stay browser-only
   await initializeClient();
+  if (client.token) await refreshAuth().catch(() => {}); // a restored session gets a fresh token that lists every wallet
   active = getSelectedWalletAccount() ?? getPrimaryWalletAccount();
   return currentSession();
 }
@@ -64,6 +65,8 @@ export async function verifyEmailCode(code) {
   otp = null;
   const missing = getChainsMissingWaasWalletAccounts();
   if (missing.includes("EVM")) await createWaasWalletAccounts({ chains: ["EVM"] });
+  // the token issued at verification predates the wallet; a refresh re-issues it with the wallet as a verified credential
+  await refreshAuth();
   await choose(evmAccounts()[0]);
   return currentSession();
 }
@@ -78,6 +81,7 @@ export function listWalletProviders() {
 /** Connects a treasury wallet and signs Dynamic's login message; inside an existing session it links the wallet. */
 export async function connectWallet(key) {
   await choose(await connectAndVerifyWithWalletProvider({ walletProviderKey: key }));
+  await refreshAuth(); // the token must carry the newly verified wallet before the server will accept it as an owner
   return currentSession();
 }
 

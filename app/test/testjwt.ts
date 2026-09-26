@@ -37,3 +37,39 @@ export function claims(over: Record<string, unknown> = {}): Record<string, unkno
     ...over,
   };
 }
+
+/** What the fake users endpoint answers: a JSON body with a status, or a request that hangs until its signal aborts. */
+export type UsersReply = { body?: unknown; status?: number; hang?: boolean };
+
+/**
+ * A fetch that routes by URL like Dynamic does: the environment's JWKS URL serves the signers' keys, and its sibling
+ * users URL answers with `users.reply` (mutable, so a test can change it between calls), recording each bearer it saw.
+ */
+export function dynamicFetch(signers: Signer[], reply: UsersReply = { body: { verifiedCredentials: [] } }, environmentId = "env-1") {
+  const base = `https://app.dynamicauth.com/api/v0/sdk/${encodeURIComponent(environmentId)}`;
+  const calls = { jwks: 0, users: 0, bearers: [] as string[] };
+  const users = { reply };
+  const fn = (async (url: string, init: RequestInit = {}) => {
+    if (url === `${base}/.well-known/jwks`) {
+      calls.jwks++;
+      return new Response(JSON.stringify({ keys: signers.map((s) => s.jwk) }), { status: 200, headers: { "content-type": "application/json" } });
+    }
+    if (url === `${base}/users`) {
+      calls.users++;
+      calls.bearers.push(String(new Headers(init.headers).get("authorization") ?? ""));
+      const r = users.reply;
+      if (r.hang) {
+        return new Promise<Response>((_, reject) => init.signal?.addEventListener("abort", () => reject(init.signal!.reason)));
+      }
+      return new Response(JSON.stringify(r.body ?? null), { status: r.status ?? 200, headers: { "content-type": "application/json" } });
+    }
+    return new Response("not found", { status: 404 });
+  }) as unknown as typeof fetch;
+  return { fn, calls, users };
+}
+
+/** The claims a current Dynamic environment issues: credential hashes only, no `verified_credentials` list. */
+export function hashedClaims(over: Record<string, unknown> = {}): Record<string, unknown> {
+  const { verified_credentials: _dropped, ...rest } = claims();
+  return { ...rest, scope: "user:basic", verifiedCredentialsHashes: { blockchain: "aa", email: "bb" }, ...over };
+}

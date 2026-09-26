@@ -84,7 +84,7 @@ Our factory deploys an Octant `ERC4626Strategy` for the customer over an allowli
 
 ### 2. Keys
 
-In the dashboard the vault's admin (the login whose verified wallet created the vault, or the operator) creates keys and sets a weight per key (default 1). A key is an Inferest secret (`sk-inf-...`) shown once and stored as a hash; the admin can rotate it (new secret, same budget and history) or revoke it (next request gets 401). Developers use it as the API key of any OpenAI-compatible client with the base URL set to the Inferest server, and as the bearer for the MCP tools server.
+In the dashboard the vault's admin (the login whose verified wallet created the vault, or the operator) creates keys and sets a weight per key (default 1). The login's wallets are verified from Dynamic's token on our server, looking the wallets up from Dynamic when the token carries only credential hashes. A key is an Inferest secret (`sk-inf-...`) shown once and stored as a hash; the admin can rotate it (new secret, same budget and history) or revoke it (next request gets 401). Developers use it as the API key of any OpenAI-compatible client with the base URL set to the Inferest server, and as the bearer for the MCP tools server.
 
 Behind every vault sits one OpenRouter key, minted when the vault is registered and stored encrypted. The proxy forwards each call with that key; the keeper holds its limit at the vault's open credit as a backstop, so a proxy bug cannot spend past yield.
 

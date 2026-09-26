@@ -30,6 +30,8 @@ The dashboard signs in through Dynamic and sends the resulting JWT as `Authoriza
 - The session is `{ userId: sub, email?, wallets }`, where `wallets` is every entry of `verified_credentials` with `chain === "eip155"`, lowercased and deduplicated.
 - `verifyDynamicJwt(token, deps)` takes the environment id, a fetch function and a clock, so tests sign tokens with a locally generated RSA key and a fake JWKS. It never logs a token. Only `node:crypto` is used.
 
+Current Dynamic environments issue tokens that carry only hashes of the user's credentials (`verifiedCredentialsHashes`) and no `verified_credentials` list. For those, the server resolves the wallets through Dynamic's SDK user endpoint (`GET /api/v0/sdk/<environmentId>/users` with the same bearer) and caches the answer per user and credential hash for ten minutes; the hash changes whenever the credential set changes, so a newly created or linked wallet is seen on the next token. Tokens that still carry `verified_credentials` are used as is.
+
 A request is resolved once into one of three callers: the operator (the `x-admin-token` header, unchanged), a session (a valid bearer), or nobody. Every vault-scoped route asks one question: is the caller the operator, or does the session own this vault? The vault's owner is `vaults.customer`, the creator address the factory reported at registration. The answers are 401 with no credentials, 403 with a session that does not own the vault, and 404 for an unknown vault or key, as today.
 
 | Route | Operator | Session |
