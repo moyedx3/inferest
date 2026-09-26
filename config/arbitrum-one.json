@@ -6,5 +6,8 @@
   "usdc": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
   "target": "0x1A996cb54bb95462040408C06122D45D6Cdb6096",
   "targetName": "Fluid USDC",
-  "targets": [{ "address": "0x1A996cb54bb95462040408C06122D45D6Cdb6096", "name": "Fluid USDC" }]
+  "targets": [
+    { "address": "0x1A996cb54bb95462040408C06122D45D6Cdb6096", "name": "Fluid USDC" },
+    { "address": "0x7CFaDFD5645B50bE87d546f42699d863648251ad", "name": "Aave USDC (static)" }
+  ]
 }
