@@ -2,7 +2,7 @@ import type { Params } from "../engine/ledger.ts";
 import type { Chain, TxStatus } from "./chain.ts";
 import type { OpenRouter } from "./openrouter.ts";
 import { settledMonthKey, type Store, type PendingSettlement, type SpendSnapshot, type KeyRow } from "./store.ts";
-import { computeLimits, companyLimit, toolBudgetUsd, usageMicro, type KeyLimit } from "./limits.ts";
+import { computeLimits, companyLimit, toolBudgetUsd, usageMicro, DEFAULT_STALE_BUDGET_MS, type KeyLimit } from "./limits.ts";
 
 export type KeeperDeps = {
   chain: Chain; store: Store; or: OpenRouter; params: Params; log: (msg: string) => void;
@@ -35,6 +35,7 @@ const DEFAULT_MAX_PENDING_MS = 30 * 60_000;
 const DEFAULT_RETRY_DELAY_MS = 10 * 60_000;
 const DEFAULT_DRAIN_MS = 10_000;
 const DEFAULT_STALE_SETTLING_MS = 15 * 60_000;
+const round6 = (x: number) => Math.round(x * 1e6) / 1e6;
 const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const noDrain = async (): Promise<void> => {};
 
@@ -70,8 +71,9 @@ async function syncCompanyKey(d: KeeperDeps, vault: string, limits: KeyLimit[]):
   const pending = d.store.pendingModelCalls(vault);
   const stored = d.store.vault(vault)?.orLimit ?? 0;
   // A pending call is in OpenRouter's usage but not in our spend, so raising the limit by the open credit would
-  // double its headroom. Hold the limit where it is until the keeper has resolved the call's cost.
-  const limit = pending > 0 && stored > 0 ? Math.min(candidate, stored) : candidate;
+  // double its headroom. Hold the limit where it is until the keeper has resolved the call's cost, but never
+  // below the live usage: an in-flight request may have overshot the stored limit, and the hold then pins at usage.
+  const limit = pending > 0 && stored > 0 ? Math.max(live.usage, Math.min(candidate, stored)) : candidate;
   if (limit !== candidate) d.log(`sync ${vault}: ${pending} pending model call(s), backstop held at ${limit}`);
   await d.or.setLimit(orKey.hash, limit);
   d.store.setVaultState(vault, { orLimit: limit, orUsage: live.usage });
@@ -139,7 +141,8 @@ export async function reportAll(d: KeeperDeps, now: number = Date.now()): Promis
 
 /**
  * Compares each company key's cumulative usage on OpenRouter with the model cost recorded here since the vault
- * was registered. Logs the drift and corrects nothing: it is the alarm for lost metering.
+ * was registered, and the recorded cost with what settlements have billed plus this period's spend. Logs both
+ * and corrects nothing: the first is the alarm for lost metering, the second for recorded cost no settlement billed.
  */
 export async function checkDrift(d: KeeperDeps): Promise<void> {
   for (const v of d.store.listVaults()) {
@@ -150,6 +153,12 @@ export async function checkDrift(d: KeeperDeps): Promise<void> {
       const recorded = d.store.totalModelCost(v.vault);
       const drift = Math.round((live.usage - recorded) * 1e6) / 1e6;
       d.log(`drift ${v.vault}: openrouter usage ${live.usage} recorded ${recorded} drift ${drift}`);
+      // settlement usage is sum(modelCost) / (1 - railFee) + sum(toolSpend), so this inverts it to model cost
+      const billedModel = round6(Math.max(0,
+        (d.store.settledUsageUsd(v.vault) - d.store.toolSpendBeforePeriod(v.vault, v.period)) * (1 - d.params.railFee)));
+      const current = d.store.spendForVault(v.vault).modelUsd;
+      const unbilled = round6(recorded - billedModel - current);
+      d.log(`billing ${v.vault}: recorded ${recorded} billed ${billedModel} current period ${current} unbilled ${unbilled}`);
     } catch (e) {
       d.log(`drift ${v.vault} check failed: ${(e as Error).message}`);
     }
@@ -194,8 +203,13 @@ export async function resolvePendingModelCalls(d: KeeperDeps, now: number = Date
       d.log(`model call ${row.generationId} lookup failed: ${(e as Error).message}`);
     }
     const age = now - row.at;
-    if (age >= DAY_MS) {
+    const days = Math.floor(age / DAY_MS);
+    // logged once per day of age, not every tick; the meta key is left behind when the row resolves
+    const alarmKey = `pendingAlarm:${row.generationId}`;
+    const logged = d.store.getMeta(alarmKey);
+    if (days >= 1 && (logged === undefined || days > Number(logged))) {
       d.log(`model call ${row.generationId} on key ${row.keyId} unresolved for ${Math.round(age / 3_600_000)} h: operator attention needed`);
+      d.store.setMeta(alarmKey, String(days));
     }
   }
 }
@@ -446,6 +460,9 @@ export async function tick(d: KeeperDeps, now: number = Date.now()): Promise<voi
       } catch (e) {
         d.log(`settle ${v.vault} failed: ${(e as Error).message}`);
       }
+      // a settlement can wait minutes for its receipt while later ticks are skipped: refresh the other vaults
+      // now, so their last sync does not go stale behind a queue of settlements (a settling vault is skipped)
+      await syncAll(d);
     }
     d.store.setMeta("lastSettleMonth", month);
   } finally {
@@ -453,12 +470,18 @@ export async function tick(d: KeeperDeps, now: number = Date.now()): Promise<voi
   }
 }
 
-/** USDC a key may still spend on tools from the last synced state. Zero for a revoked key or a closed vault. */
-export function toolBudgetFor(store: Store, params: Params, keyId: string): number {
+/**
+ * USDC a key may still spend on tools from the last synced state. Zero for a revoked key, a closed vault, or a
+ * vault last synced more than staleBudgetMs ago (never synced counts as stale), as the proxy refuses it too.
+ */
+export function toolBudgetFor(
+  store: Store, params: Params, keyId: string, staleBudgetMs: number = DEFAULT_STALE_BUDGET_MS, now: number = Date.now(),
+): number {
   const key = store.keyById(keyId);
   if (!key || key.revoked) return 0;
   const v = store.vault(key.vault);
   if (!v || v.settling || store.pendingSettlement(v.vault)) return 0;
+  if (now - store.syncedAt(v.vault) > staleBudgetMs) return 0;
   const l = computeLimits(v.yieldUsd, store.keysForVault(key.vault), params, v.frozen).find((x) => x.id === keyId);
   return l ? toolBudgetUsd(l, params) : 0;
 }

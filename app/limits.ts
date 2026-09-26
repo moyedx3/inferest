@@ -4,6 +4,10 @@ import type { Params } from "../engine/ledger.ts";
 export type KeyInput = { id: string; weight: number; revoked: boolean; modelSpent: number; toolSpent: number };
 export type KeyLimit = { id: string; budget: number; spent: number; remaining: number };
 
+/** Ten keeper sync intervals: past this the vault's yield and backstop are too old to open credit against.
+ *  Shared by the proxy and the paid-tool budget. */
+export const DEFAULT_STALE_BUDGET_MS = 10 * 60_000;
+
 const floor4 = (x: number) => Math.floor(x * 1e4) / 1e4;
 
 /**

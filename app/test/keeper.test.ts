@@ -116,6 +116,19 @@ test("the backstop is held flat while a model call is pending", async () => {
   assert.equal(lastLimit(events), `limit:${OR}:3000`); // 10 used + 2990 open
 });
 
+test("a held backstop is pinned at usage when usage overshot the stored limit", async () => {
+  const { d, store, events, logs } = setup({ orUsage: [0, 2500, 2500] });
+  await syncVault(d, V);
+  assert.equal(lastLimit(events), `limit:${OR}:2000`);
+  store.recordPendingModelCall({ keyId: "k1", model: "m", generationId: "gen-p" });
+  await syncVault(d, V);
+  assert.equal(lastLimit(events), `limit:${OR}:2500`); // at usage, never below it
+  assert.ok(logs.some((m) => m.includes("1 pending model call(s), backstop held at 2500")), logs.join("\n"));
+  store.resolveModelCall("gen-p", 500);
+  await syncVault(d, V);
+  assert.equal(lastLimit(events), `limit:${OR}:4000`); // 2,500 used + 1,500 open
+});
+
 test("a vault with no stored limit is not held", async () => {
   const { d, store, events, logs } = setup({ orUsage: [0] });
   store.recordPendingModelCall({ keyId: "k1", model: "m", generationId: "gen-p" });
@@ -221,6 +234,19 @@ test("the drift check compares the company key's usage with recorded model cost"
   assert.ok(logs.includes(`drift ${V}: openrouter usage 3 recorded 2.5 drift 0.5`), logs.join("\n"));
 });
 
+test("the daily check reports recorded cost that no settlement billed", async () => {
+  const { d, store, logs, spend } = setup({ orUsage: [2.75] });
+  spend("k1", 0.25);
+  store.startNewPeriod(V); // the 0.25 row now sits in a period no settlement covered
+  spend("k1", 2);
+  await settleVault(d, V); // bills 2; the vault moves to period 2
+  assert.equal(store.vault(V)!.period, 2);
+  spend("k1", 0.5);
+  await checkDrift(d);
+  assert.ok(logs.includes(`drift ${V}: openrouter usage 2.75 recorded 2.75 drift 0`), logs.join("\n"));
+  assert.ok(logs.includes(`billing ${V}: recorded 2.75 billed 2 current period 0.5 unbilled 0.25`), logs.join("\n"));
+});
+
 test("pending model calls are resolved through the generation lookup with the company key", async () => {
   const { d, store, events, ctl } = setup();
   store.recordPendingModelCall({ keyId: "k1", model: "m", generationId: "gen-1" });
@@ -245,10 +271,16 @@ test("a pending model call unresolved for a day is logged, not dropped", async (
   await resolvePendingModelCalls(d, OCT);
   assert.equal(store.listPendingModelCalls().length, 1);
   assert.ok(logs.some((m) => m.includes("gen-old") && m.includes("lookup failed")));
-  assert.ok(logs.some((m) => m.includes("gen-old") && m.includes("unresolved for 48 h")));
+  const unresolved = () => logs.filter((m) => m.includes("gen-old") && m.includes("unresolved for"));
+  assert.equal(unresolved().length, 1);
+  assert.ok(unresolved()[0].includes("unresolved for 48 h"));
   d.or.getGeneration = async () => undefined;
   await resolvePendingModelCalls(d, OCT + MIN);
   assert.equal(store.listPendingModelCalls().length, 1);
+  assert.equal(unresolved().length, 1); // once a day, not every tick
+  await resolvePendingModelCalls(d, OCT + 86_400_000);
+  assert.equal(unresolved().length, 2);
+  assert.ok(unresolved()[1].includes("unresolved for 72 h"));
 });
 
 test("a vault whose OpenRouter key cannot be decrypted does not stop the keeper", async () => {
@@ -316,6 +348,7 @@ test("toolBudgetFor uses the last synced state and refuses revoked keys and clos
   await syncVault(d, V);
   store.recordToolCall("k1", "a", "/b", 50);
   assert.equal(toolBudgetFor(store, HACKATHON_PARAMS, "k1"), 850);
+  assert.equal(toolBudgetFor(store, HACKATHON_PARAMS, "k1", 10 * 60_000, Date.now() + 11 * 60_000), 0); // a stale budget
   assert.equal(toolBudgetFor(store, HACKATHON_PARAMS, "nope"), 0);
   store.setSettling(V, true);
   assert.equal(toolBudgetFor(store, HACKATHON_PARAMS, "k1"), 0);
@@ -588,6 +621,29 @@ test("a failed prepare reopens the vault and backs off before retrying", async (
   await tick(d, NOV + 10 * MIN);
   assert.equal(settles(events), 1);
   assert.equal(store.listSettlements().length, 1);
+});
+
+test("other vaults are re-synced between settlements on a month roll", async () => {
+  const { d, store, events } = setup();
+  const W = "0x00000000000000000000000000000000000000bb";
+  store.addVault(W, "0x00000000000000000000000000000000000000cc", "U");
+  store.setVaultOpenRouterKey(W, "orhash2", "enc:sk-or-v1-other");
+  const limitsFor = (h: string) => events.filter((e) => e.startsWith(`limit:${h}:`)).length;
+  await tick(d, OCT); // both vaults marked for October
+  const atPrepare: { vault: string; firstLimits: number; secondSyncedAt: number }[] = [];
+  const prepare = d.chain.prepareSettle;
+  d.chain.prepareSettle = async (v, u) => {
+    atPrepare.push({ vault: v, firstLimits: limitsFor(OR), secondSyncedAt: store.syncedAt(W) });
+    // age the second vault's last sync, so only a sync after the first settlement can refresh it: its own
+    // settlement's freeze pins the backstop but is not a sync
+    if (atPrepare.length === 1) store.setSyncedAt(W, 1);
+    return prepare(v, u);
+  };
+  await tick(d, NOV);
+  assert.deepEqual(atPrepare.map((p) => p.vault), [V, W]);
+  assert.ok(atPrepare[1].firstLimits > atPrepare[0].firstLimits); // the first vault was synced again after its settlement
+  assert.ok(atPrepare[1].secondSyncedAt > 1, "the second vault was re-synced before its own settlement began");
+  assert.equal(store.listSettlements().length, 2);
 });
 
 test("a vault registered mid-month is not settled that month", async () => {

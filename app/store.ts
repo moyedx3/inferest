@@ -65,15 +65,26 @@ CREATE TABLE IF NOT EXISTS pending_settlements (
 export const SCHEMA_VERSION = "4";
 
 /** Brings an older database up to SCHEMA_VERSION. Returns the version it ends at. Runs as one transaction, so a crash midway leaves the file at its starting version instead of half migrated. */
-function migrate(db: DatabaseSync, from: string): string {
+function migrate(db: DatabaseSync, from: string, log: (msg: string) => void): string {
+  if (from === SCHEMA_VERSION) return from;
   db.exec("BEGIN");
   try {
     let at = from;
-    if (at === "1") at = "2"; // version 2 only added pending_settlements, which SCHEMA has already created
+    // version 2 only added pending_settlements; a version 1 file has none, and the SCHEMA run inside the 2 -> 3
+    // step below creates it
+    if (at === "1") at = "2";
     if (at === "2") {
       // Version 3 files keys under our own ids and meters spend in our own rows. The old keys, tool_calls and
       // pending_settlements rows were keyed by OpenRouter hashes that mean nothing now; they came from demos and
       // are dropped. Vault rows and the settlement history survive, with the new vault columns added.
+      const exists = (table: string) => db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table) !== undefined;
+      const count = (table: string) => (exists(table) ? Number((db.prepare(`SELECT COUNT(*) AS c FROM ${table}`).get() as { c: number }).c) : 0);
+      if (exists("pending_settlements")) {
+        for (const r of db.prepare("SELECT vault, tx FROM pending_settlements ORDER BY created_at, vault").all() as { vault: string; tx: string }[]) {
+          log(`migration: dropping the version 2 pending settlement ${r.tx} for ${r.vault}; it cannot be reconciled by this version`);
+        }
+      }
+      log(`migration: ${count("keys")} keys and ${count("tool_calls")} tool call rows from version 2 dropped`);
       db.exec("DROP TABLE IF EXISTS keys; DROP TABLE IF EXISTS tool_calls; DROP TABLE IF EXISTS pending_settlements;");
       const cols = ["settling INTEGER NOT NULL DEFAULT 0", "or_key_hash TEXT", "or_key_secret TEXT",
         "or_limit REAL NOT NULL DEFAULT 0", "or_usage REAL NOT NULL DEFAULT 0"];
@@ -114,7 +125,7 @@ export const settledMonthKey = (vault: string): string => `settledMonth:${lc(vau
 /** The meta key holding when the keeper last synced a vault. */
 const syncedAtKey = (vault: string): string => `syncedAt:${lc(vault)}`;
 
-export function openStore(path: string) {
+export function openStore(path: string, opts: { log?: (msg: string) => void } = {}) {
   const db = new DatabaseSync(path);
   // Bootstrap only `meta` first: an old (pre-3) database already has `keys` and `tool_calls` under their old
   // column names, and SCHEMA now indexes those tables by their new columns. Running the full SCHEMA before
@@ -125,7 +136,8 @@ export function openStore(path: string) {
   const versionRow = db.prepare("SELECT v FROM meta WHERE k = ?").get("schemaVersion") as { v: string } | undefined;
   if (!versionRow) {
     db.prepare("INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").run("schemaVersion", SCHEMA_VERSION);
-  } else if (migrate(db, String(versionRow.v)) !== SCHEMA_VERSION) {
+  } else if (migrate(db, String(versionRow.v), opts.log ?? (() => {})) !== SCHEMA_VERSION) {
+    db.close();
     throw new Error(`unsupported schema version ${versionRow.v}, expected ${SCHEMA_VERSION}`);
   }
   // Safe now: a fresh database has no conflicting tables, and a migrated one has already been brought current.
@@ -177,6 +189,12 @@ export function openStore(path: string) {
     const r = db.prepare(`${KEY_SELECT} WHERE k.id = ?`).get(id);
     return r ? toKey(r) : undefined;
   };
+  // the insert selects through the key's vault row, so a key whose vault row is missing inserts nothing
+  const requireInserted = (c: { keyId: string; generationId: string }): void => {
+    if (db.prepare("SELECT 1 FROM model_calls WHERE generation_id = ?").get(c.generationId) === undefined) {
+      throw new Error(`unknown vault for key ${c.keyId}`);
+    }
+  };
   const MODEL_CALL_INSERT = `INSERT INTO model_calls (key_id, vault, period, model, cost_usd, generation_id, status, at)
     SELECT k.id, k.vault, v.period, ?, ?, ?, ?, ? FROM keys k JOIN vaults v ON v.vault = k.vault WHERE k.id = ?`;
 
@@ -218,9 +236,9 @@ export function openStore(path: string) {
     setWeight(id: string, weight: number): void {
       db.prepare("UPDATE keys SET weight = ? WHERE id = ?").run(weight, id);
     },
-    /** Replaces the secret on the same row, so budget and history stay with the developer. */
+    /** Replaces the secret on the same row, so budget and history stay with the developer. A revoked row is never rotated. */
     rotateKey(id: string, secretSha256: string): boolean {
-      return Number(db.prepare("UPDATE keys SET secret_sha256 = ? WHERE id = ?").run(secretSha256, id).changes) > 0;
+      return Number(db.prepare("UPDATE keys SET secret_sha256 = ? WHERE id = ? AND revoked_at IS NULL").run(secretSha256, id).changes) > 0;
     },
     revokeKey(id: string, now: number = Date.now()): boolean {
       return Number(db.prepare("UPDATE keys SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL").run(now, id).changes) > 0;
@@ -243,12 +261,14 @@ export function openStore(path: string) {
       db.prepare(`${MODEL_CALL_INSERT}
         ON CONFLICT(generation_id) DO UPDATE SET cost_usd = excluded.cost_usd, status = 'recorded' WHERE model_calls.status = 'pending'`)
         .run(c.model, c.costUsd, c.generationId, "recorded", now, c.keyId);
+      requireInserted(c);
     },
     /** A call whose cost did not arrive; the keeper resolves it through OpenRouter's generation lookup. */
     recordPendingModelCall(c: { keyId: string; model: string; generationId: string }, now: number = Date.now()): void {
       requireKey(c.keyId);
       db.prepare(`${MODEL_CALL_INSERT} ON CONFLICT(generation_id) DO NOTHING`)
         .run(c.model, null, c.generationId, "pending", now, c.keyId);
+      requireInserted(c);
     },
     /**
      * Resolves a pending call once its cost is known. If the vault has already moved past the call's period
@@ -290,6 +310,17 @@ export function openStore(path: string) {
     totalModelCost(vault: string): number {
       const r: any = db.prepare("SELECT COALESCE(SUM(cost_usd), 0) AS c FROM model_calls WHERE vault = ? AND status = 'recorded'").get(lc(vault));
       return round6(Number(r.c));
+    },
+    /** Every settlement recorded for the vault, in USD: what the chain has billed so far, for the daily check. */
+    settledUsageUsd(vault: string): number {
+      const r: any = db.prepare("SELECT COALESCE(SUM(CAST(usage_micro AS REAL)), 0) AS u FROM settlements WHERE vault = ?").get(lc(vault));
+      return round6(Number(r.u) / 1e6);
+    },
+    /** The vault's tool spend in periods before `period`, the tool part of what its settlements billed. */
+    toolSpendBeforePeriod(vault: string, period: number): number {
+      const r: any = db.prepare(`SELECT COALESCE(SUM(t.price), 0) AS p FROM tool_calls t JOIN keys k ON k.id = t.key_id
+        WHERE k.vault = ? AND t.period < ?`).get(lc(vault), period);
+      return round6(Number(r.p));
     },
     /** Opens the next period. Spend is per period, so a bump is all it takes. */
     startNewPeriod(vault: string): void {

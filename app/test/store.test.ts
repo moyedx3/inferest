@@ -35,7 +35,8 @@ function writeOldDb(path: string, version: "1" | "2") {
   `);
   if (version === "2") {
     db.exec(`CREATE TABLE pending_settlements (vault TEXT PRIMARY KEY, usage_micro TEXT NOT NULL, baselines TEXT NOT NULL,
-      tx TEXT NOT NULL, created_at INTEGER NOT NULL);`);
+      tx TEXT NOT NULL, created_at INTEGER NOT NULL);
+      INSERT INTO pending_settlements VALUES ('0xaa', '9', '[]', '0xpending2', 1);`);
   }
   db.close();
 }
@@ -145,6 +146,22 @@ test("model and tool calls reject an unknown key", () => {
   assert.throws(() => s.recordPendingModelCall({ keyId: "nope", model: "m", generationId: "g" }), /unknown key/);
 });
 
+test("a model call on a key whose vault row is missing is refused", () => {
+  const path = join(tmpdir(), `inferest-test-orphan-${process.pid}-${Date.now()}.db`);
+  try {
+    openStore(path).close();
+    const db = new DatabaseSync(path, { enableForeignKeyConstraints: false });
+    db.exec("INSERT INTO keys (id, vault, name, weight, secret_sha256, created_at) VALUES ('ko', '0xnovault', 'orphan', 1, 'so', 1)");
+    db.close();
+    const s = openStore(path);
+    assert.throws(() => s.recordModelCall({ keyId: "ko", model: "m", costUsd: 1, generationId: "g1" }), /unknown vault for key ko/);
+    assert.throws(() => s.recordPendingModelCall({ keyId: "ko", model: "m", generationId: "g2" }), /unknown vault for key ko/);
+    s.close();
+  } finally {
+    rmSync(path, { force: true });
+  }
+});
+
 test("a new period is a bump: this period's spend starts at zero, history stays", () => {
   const s = fresh();
   s.recordModelCall({ keyId: "k1", model: "m", costUsd: 3.5, generationId: "g1" });
@@ -160,6 +177,26 @@ test("a new period is a bump: this period's spend starts at zero, history stays"
   assert.equal(s.totalModelCost(V), 4.5);
 });
 
+test("settled usage sums the vault's settlements in USD", () => {
+  const s = fresh();
+  assert.equal(s.settledUsageUsd(V), 0);
+  s.recordSettlement(V, 1_500_000n, "0x1");
+  s.recordSettlement(V, 500_000n, "0x2");
+  s.recordSettlement("0x00000000000000000000000000000000000000bb", 9_000_000n, "0x3");
+  assert.equal(s.settledUsageUsd(V), 2);
+});
+
+test("tool spend before a period sums the vault's tool calls in earlier periods", () => {
+  const s = fresh();
+  assert.equal(s.toolSpendBeforePeriod(V, 1), 0);
+  s.recordToolCall("k1", "a", "/b", 0.01);
+  s.recordToolCall("k2", "a", "/b", 0.02);
+  s.startNewPeriod(V);
+  s.recordToolCall("k1", "a", "/b", 0.05);
+  assert.equal(s.toolSpendBeforePeriod(V, 1), 0.03);
+  assert.equal(s.toolSpendBeforePeriod(V, 0), 0);
+});
+
 test("rotate replaces the secret on the same row; revoke keeps the row and its spend", () => {
   const s = fresh();
   s.recordModelCall({ keyId: "k1", model: "m", costUsd: 1, generationId: "g1" });
@@ -169,6 +206,8 @@ test("rotate replaces the secret on the same row; revoke keeps the row and its s
   assert.equal(s.revokeKey("k1"), true);
   assert.equal(s.revokeKey("nope"), false);
   assert.equal(s.rotateKey("nope", "x"), false);
+  assert.equal(s.rotateKey("k1", "x"), false); // a revoked row is never rotated
+  assert.equal(s.keyBySecret("x"), undefined);
   const k = s.keyBySecret("s1b")!;
   assert.equal(k.revoked, true);
   assert.equal(k.modelSpent, 1);
@@ -329,8 +368,15 @@ for (const version of ["1", "2"] as const) {
     const path = join(tmpdir(), `inferest-test-migrate${version}-${process.pid}-${Date.now()}.db`);
     try {
       writeOldDb(path, version);
-      const s = openStore(path);
+      const lines: string[] = [];
+      const s = openStore(path, { log: (m) => lines.push(m) });
       assert.equal(s.getMeta("schemaVersion"), "4");
+      assert.ok(lines.includes("migration: 1 keys and 0 tool call rows from version 2 dropped"), lines.join("\n"));
+      if (version === "2") {
+        assert.ok(lines.some((m) => m.includes("pending settlement 0xpending2 for 0xaa")), lines.join("\n"));
+      } else {
+        assert.equal(lines.length, 1);
+      }
       const v = s.vault("0xaa")!;
       assert.equal(v.period, 3);
       assert.equal(v.yieldUsd, 12.5);
@@ -357,6 +403,13 @@ test("an unsupported schema version is refused", () => {
     s.setMeta("schemaVersion", "99");
     s.close();
     assert.throws(() => openStore(path), /unsupported schema version 99/);
+    // the refused open released its handle: the file can be corrected and opened again
+    const db = new DatabaseSync(path);
+    db.exec("UPDATE meta SET v = '4' WHERE k = 'schemaVersion'");
+    db.close();
+    const s2 = openStore(path);
+    assert.equal(s2.getMeta("schemaVersion"), "4");
+    s2.close();
   } finally {
     rmSync(path, { force: true });
   }

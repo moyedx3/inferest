@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Params } from "../engine/ledger.ts";
 import type { Store, KeyRow } from "./store.ts";
-import { computeLimits } from "./limits.ts";
+import { computeLimits, DEFAULT_STALE_BUDGET_MS } from "./limits.ts";
 import { sha256 } from "./crypto.ts";
 
 export type ProxyDeps = {
@@ -32,8 +32,6 @@ export type Proxy = {
 
 export const MAX_BODY_BYTES = 4 * 1024 * 1024;
 export const DEFAULT_UPSTREAM = "https://openrouter.ai/api/v1";
-/** Ten keeper sync intervals: past this the vault's yield and backstop are too old to open credit against. */
-export const DEFAULT_STALE_BUDGET_MS = 10 * 60_000;
 /** Long enough for a slow generation; a provider that hangs past it is cut off. */
 export const DEFAULT_UPSTREAM_TIMEOUT_MS = 10 * 60_000;
 /** Upstream response headers relayed to the client; the rest, which name the provider, are dropped. */
