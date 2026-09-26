@@ -88,6 +88,26 @@ test("a successful sync records its time", async () => {
   assert.equal(store.syncedAt(V), OCT);
 });
 
+test("syncs of one vault run one after another, so a sync after a key change is never overwritten by a slower one", async () => {
+  const { d, store, events, spend } = setup();
+  let release = () => {};
+  const gate = new Promise<void>((r) => { release = r; });
+  let calls = 0;
+  d.or.getKey = async (h) => {
+    if (++calls === 1) await gate; // the first sync stalls at OpenRouter after it has already read the keys
+    return { hash: h, usage: 0, limit: null, disabled: false };
+  };
+  const slow = syncVault(d, V);
+  await new Promise((r) => setImmediate(r)); // let the slow sync reach the gate
+  spend("k1", 100); // the open credit is now 1,900, which the slow sync did not see
+  const fresh = syncVault(d, V);
+  await new Promise((r) => setImmediate(r)); // unqueued, the fresh sync would finish here and the slow one would land last
+  release();
+  await Promise.all([slow, fresh]);
+  assert.equal(lastLimit(events), `limit:${OR}:1900`);
+  assert.equal(store.vault(V)!.orLimit, 1900);
+});
+
 test("the backstop is held flat while a model call is pending", async () => {
   const { d, store, events, logs } = setup({ orUsage: [0, 10, 10, 10] });
   await syncVault(d, V);
