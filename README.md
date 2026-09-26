@@ -46,7 +46,7 @@ cp .env.example .env                      # then fill it in
 # which DEPLOYMENTS in .env points at
 (cd contracts && forge script script/Deploy.s.sol --rpc-url $RPC_URL --private-key $DEPLOYER_PRIVATE_KEY --broadcast --slow)
 npm run serve                             # builds the dashboard bundle, then dashboard, API, chat at /v1, MCP at /mcp
-node --env-file=.env demo/treasury.ts     # or demo/agent.ts
+npm run demo:treasury                     # or demo:agent
 ```
 
 **Use a key.** Point any OpenAI-compatible client at `http://localhost:8787/v1` with an Inferest key as the API key (model ids are OpenRouter's); the dashboard's Use a key section (`http://localhost:8787/setup` redirects there) has copyable snippets, and works without signing in. The same key authenticates to the MCP tools server at `/mcp`. Set `KEY_ENCRYPTION_KEY` (`openssl rand -hex 32`) before the first start.
@@ -55,7 +55,7 @@ node --env-file=.env demo/treasury.ts     # or demo/agent.ts
 
 `forge test` prints diagnostics from an upstream Foundry lint bug before its results; read the `Suite result` lines.
 
-The demos run against a Tenderly Virtual TestNet or a local anvil fork of the target chain; the demo helpers support both. A virtual testnet must keep chain id 42161: the deploy script names its file after `block.chainid`, and that name has to match `config/arbitrum-one.json`. A fork over Arbitrum's public RPC can only fetch state for about thirty minutes after its fork block; the first settlement to touch a storage slot nobody has read yet then fails with `missing trie node`. Start the fork right before the run and run `demo/treasury.ts` once so anvil caches the slots a settlement needs, or fork from an archive RPC.
+Every `npm run` command loads `.env` and then `.env.local` when that file exists, so a local fork's RPC, keeper key, faucet flag and public RPC can live in `.env.local` (git-ignored) while `.env` keeps the real chain's values. The demos run against a Tenderly Virtual TestNet or a local anvil fork of the target chain; the demo helpers support both. A virtual testnet must keep chain id 42161: the deploy script names its file after `block.chainid`, and that name has to match `config/arbitrum-one.json`. A fork over Arbitrum's public RPC can only fetch state for about thirty minutes after its fork block; the first settlement to touch a storage slot nobody has read yet then fails with `missing trie node`. Start the fork right before the run and run `demo/treasury.ts` once so anvil caches the slots a settlement needs, or fork from an archive RPC.
 
 ### Background
 
