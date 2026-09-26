@@ -7,6 +7,8 @@ export type Config = {
   rpcUrl: string; chainId: number; usdc: Hex; target: Hex; factory: Hex; splitter: Hex;
   keeperKey: Hex; openRouterKey: string; orthogonalKey: string; toolWalletKey?: Hex;
   adminToken: string; keyEncryptionKey: string; publicUrl: string; dbPath: string; port: number; params: Params;
+  /** Allowlisted ERC-4626 yield sources, the first one being `target`, the default the Treasury page creates over. */
+  targets: { address: Hex; name: string }[];
   /** Dynamic environment whose logins the server accepts; login is off when unset. */
   dynamicEnvironmentId?: string;
   /** Browser-facing RPC for the dashboard's wallet; never the keeper's rpcUrl. */
@@ -32,6 +34,12 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   if (String(dep.target).toLowerCase() !== String(chain.target).toLowerCase()) {
     throw new Error(`target mismatch: deployments ${dep.target} vs chain config ${chain.target}`);
   }
+  const targets: { address: Hex; name: string }[] = Array.isArray(chain.targets) && chain.targets.length
+    ? chain.targets.map((t: { address: string; name?: string }) => ({ address: t.address as Hex, name: String(t.name ?? "yield source") }))
+    : [{ address: chain.target as Hex, name: String(chain.targetName ?? "yield source") }];
+  if (targets[0].address.toLowerCase() !== String(chain.target).toLowerCase()) throw new Error("the first of targets must be target");
+  const allowlisted = new Set((Array.isArray(dep.targets) ? dep.targets : [dep.target]).map((a: string) => String(a).toLowerCase()));
+  for (const t of targets) if (!allowlisted.has(t.address.toLowerCase())) throw new Error(`target ${t.address} is not allowlisted in the deployment`);
   const railFee = Number(env.RAIL_FEE ?? "0");
   if (!(railFee >= 0 && railFee < 1)) throw new Error("RAIL_FEE must be in [0, 1)");
   const keyEncryptionKey = need("KEY_ENCRYPTION_KEY");
@@ -44,6 +52,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     target: dep.target,
     factory: dep.factory,
     splitter: dep.splitter,
+    targets,
     keeperKey: need("KEEPER_PRIVATE_KEY") as Hex,
     openRouterKey: need("OPENROUTER_MANAGEMENT_KEY"),
     orthogonalKey: env.ORTHOGONAL_API_KEY ?? "",

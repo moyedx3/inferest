@@ -38,6 +38,7 @@ async function start(customer = "0x00000000000000000000000000000000000000cc", op
       prepareSettle: async () => ({ hash: "0x", send: async () => {} }), sendSettle: async () => "0x",
       settleStatus: async () => "success" as const, transactionKnown: async () => true,
       customerOf: async (v) => (v === V ? customer : ZERO),
+      targetOf: async () => "0x",
     },
     gateway: { search: async () => [], details: async () => ({}), run: async () => ({}) } as unknown as ToolGateway,
     params: HACKATHON_PARAMS,

@@ -49,6 +49,7 @@ async function start(
       yieldOf: async () => 0n, lossPending: async () => false, report: async () => "0x", settle: async () => "0x",
       totalAssets: async () => 0n, prepareSettle: async () => ({ hash: "0x", send: async () => {} }), sendSettle: async () => "0x",
       settleStatus: async () => "success" as const, transactionKnown: async () => true, customerOf: async () => "0x",
+      targetOf: async () => "0x",
     },
     gateway: {} as unknown as ToolGateway,
     params: HACKATHON_PARAMS, adminToken: "admin", publicConfig: {},

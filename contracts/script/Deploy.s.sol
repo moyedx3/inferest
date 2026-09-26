@@ -16,6 +16,21 @@ contract Deploy is Script {
         address target = vm.envAddress("TARGET_VAULT");
         uint16 feeBps = uint16(vm.envOr("FEE_BPS", uint256(1_000)));
 
+        // TARGET_VAULTS is an optional comma-separated allowlist of extra yield sources beyond TARGET_VAULT;
+        // when unset, the allowlist is just [TARGET_VAULT].
+        string memory targetVaultsRaw = vm.envOr("TARGET_VAULTS", string(""));
+        address[] memory targets;
+        if (bytes(targetVaultsRaw).length == 0) {
+            targets = new address[](1);
+            targets[0] = target;
+        } else {
+            string[] memory parts = vm.split(targetVaultsRaw, ",");
+            targets = new address[](parts.length);
+            for (uint256 i = 0; i < parts.length; i++) {
+                targets[i] = vm.parseAddress(parts[i]);
+            }
+        }
+
         vm.startBroadcast();
         (, address deployer,) = vm.readCallers();
         YieldDonatingTokenizedStrategy impl = new YieldDonatingTokenizedStrategy();
@@ -23,7 +38,9 @@ contract Deploy is Script {
         Splitter splitter = new Splitter(predicted, keeper, floatAddress, feeAddress, feeBps);
         VaultFactory factory = new VaultFactory(deployer, address(splitter), address(impl), keeper, emergencyAdmin);
         require(address(factory) == predicted, "factory address mismatch");
-        factory.setAllowedTarget(target, true);
+        for (uint256 i = 0; i < targets.length; i++) {
+            factory.setAllowedTarget(targets[i], true);
+        }
         vm.stopBroadcast();
 
         string memory o = "deployment";
@@ -31,7 +48,8 @@ contract Deploy is Script {
         vm.serializeAddress(o, "implementation", address(impl));
         vm.serializeAddress(o, "splitter", address(splitter));
         vm.serializeAddress(o, "factory", address(factory));
-        string memory json = vm.serializeAddress(o, "target", target);
+        vm.serializeAddress(o, "target", target);
+        string memory json = vm.serializeAddress(o, "targets", targets);
         string memory path = string.concat("deployments/", vm.toString(block.chainid), ".json");
         vm.writeJson(json, path);
         console2.log("wrote", path);
