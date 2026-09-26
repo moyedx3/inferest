@@ -262,6 +262,11 @@ export function openStore(path: string) {
     listPendingModelCalls(): ModelCallRow[] {
       return db.prepare("SELECT * FROM model_calls WHERE status = 'pending' ORDER BY at, id").all().map(toModelCall);
     },
+    /** How many of the vault's model calls are still pending a cost from the keeper's generation lookup. */
+    pendingModelCalls(vault: string): number {
+      const r: any = db.prepare("SELECT COUNT(*) AS c FROM model_calls WHERE vault = ? AND status = 'pending'").get(lc(vault));
+      return Number(r.c);
+    },
     modelCall(generationId: string): ModelCallRow | undefined {
       const r = db.prepare("SELECT * FROM model_calls WHERE generation_id = ?").get(generationId);
       return r ? toModelCall(r) : undefined;
