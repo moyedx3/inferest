@@ -134,7 +134,9 @@ Replace the test `serves the setup page and exposes the public URL in state` wit
 
 ### Task 2: The Treasury page (branch `treasury-page`)
 
-**Files:** `app/dashboard/index.html`, `app/dashboard/styles.css`, `app/dashboard/app.js`.
+**Files:** `app/dashboard/index.html`, `app/dashboard/styles.css`, `app/dashboard/app.js`, `app/server.ts`, `app/test/server.test.ts`, delete `app/dashboard/setup.html`.
+
+_Moved here from Task 1 after its review: the `/setup` redirect (302 to `/#use-a-key`, with its test replacing `serves the setup page`) and the deletion of `setup.html`, so `/setup` never points at a section that does not exist yet._
 
 The mockup PNGs are the reference for spacing, type and color; the spec's Visual system gives the tokens. Build section by section and compare each against the PNG.
 

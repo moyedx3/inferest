@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Inferest setup</title>
+  <style>
+    body { font: 15px/1.5 system-ui, sans-serif; max-width: 880px; margin: 0 auto; padding: 16px; color: #111; background: #fff; }
+    h1 { margin: 0 0 4px; } .muted { color: #666; } .card { border: 1px solid #ddd; border-radius: 8px; padding: 12px 16px; margin: 12px 0; }
+    pre { background: #f6f6f6; padding: 8px; overflow-x: auto; white-space: pre-wrap; } button { padding: 4px 10px; cursor: pointer; }
+    .tabs button.on { font-weight: bold; }
+  </style>
+</head>
+<body>
+  <h1>Inferest setup</h1>
+  <p class="muted">Use your Inferest key (<code>sk-inf-...</code>) in place of an OpenRouter key. Replace the placeholder below with the key your admin gave you.</p>
+  <div class="card">
+    <div class="tabs" id="tabs"></div>
+    <pre id="snippet"></pre>
+    <button id="copy">Copy</button>
+  </div>
+  <div class="card"><ul id="notes"></ul></div>
+  <script type="module">
+    import { snippets, NOTES } from "/snippets.js";
+    const PLACEHOLDER = "sk-inf-YOUR-KEY";
+    const state = await (await fetch("/api/state")).json();
+    const list = snippets(state.config.publicUrl ?? location.origin, PLACEHOLDER);
+    const tabs = document.getElementById("tabs");
+    const pre = document.getElementById("snippet");
+    let current = 0;
+    const show = (i) => {
+      current = i;
+      pre.textContent = list[i].text;
+      for (const [j, b] of [...tabs.children].entries()) b.classList.toggle("on", j === i);
+    };
+    for (const [i, s] of list.entries()) {
+      const b = document.createElement("button");
+      b.textContent = s.name;
+      b.onclick = () => show(i);
+      tabs.appendChild(b);
+    }
+    show(0);
+    document.getElementById("copy").onclick = () => navigator.clipboard.writeText(list[current].text);
+    for (const n of NOTES) {
+      const li = document.createElement("li");
+      li.textContent = n;
+      document.getElementById("notes").appendChild(li);
+    }
+  </script>
+</body>
+</html>
