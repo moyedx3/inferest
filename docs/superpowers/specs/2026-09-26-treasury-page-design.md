@@ -24,7 +24,7 @@ The demo works but looks like a debug console. A judge or a treasury lead should
 
 **Treasury.** Tag "Treasury · period N" plus `frozen: loss pending` or `settling` chips when set. Two-line serif headline: "Your $X stays put." / "Only the interest it earns pays for inference." A yield card and a side column:
 
-- Yield card: "Yield earned this period", `yieldUsd` large, with a lime `live` chip. Vault name and short address (explorer link) at the right. A segmented bar: Used (sum of key `spent`, blue) and Open credit (`yieldUsd × (1 − railFee) − used`, zero when frozen, soft blue), with Used's width proportional and a minimum width so its label fits. Under it a hatched Principal bar labelled "Principal · never spent" with the amount. A breakdown row: Models, Tools, Provider backstop (`orUsage / orLimit`, or "no provider key yet"), Shares.
+- Yield card: "Yield earned this period", `yieldUsd` large, with a lime `live` chip. Vault name and short address (explorer link) at the right. A segmented bar: Used (sum of key `spent`, blue) and Open credit (`credit − used`, soft blue), with Used's width proportional and a minimum width so its label fits. Under it a hatched Principal bar labelled "Principal · never spent" with the amount. A breakdown row: Models, Tools, Provider backstop (`orUsage / orLimit`, or "no provider key yet"), Shares.
 - Deposit card "Add to principal": amount input in USDC, black "Deposit" button, wallet USDC balance, "Withdraw all" in red, and the lime "Get demo funds" chip on faucet chains.
 - Settle card "If you settle now", period N → N+1: Usage to the provider float, Inferest fee (10% of unused yield), Stays in your vault (lime). Outline "Settle now" button; Report yield and Sync limits as quiet links under it.
 
@@ -42,7 +42,7 @@ The demo works but looks like a debug console. A judge or a treasury lead should
 |---|---|
 | Principal, Shares | The browser, signed in with a wallet: `balanceOf(wallet)` on the vault and `convertToAssets` of it. The Splitter holds the yield shares, so this is principal by the contract's definition. Hidden in operator mode. |
 | Wallet USDC balance | The browser: `balanceOf(wallet)` on USDC. |
-| Settle preview | `ourFee` and `railFee` added to `publicConfig`. usage = Σ modelSpent / (1 − railFee) + Σ toolSpent; leftover = max(0, yield − usage); fee = ourFee × leftover; stays = leftover − fee. Labelled as a preview; the settle response is what counts. |
+| Settle preview, open credit | Computed on the server, in `/api/state`, so the browser does no ledger math (build rule ②). Each vault gains `credit` (what its yield opens: `yieldUsd × (1 − railFee)`, 0 when frozen) and `preview: { usage, fee, returned }` from the kernel's own `settle()` over the same keys `usageMicro` bills. The page shows open credit as `credit − Σ spent`. Labelled as a preview: the Splitter's `feeBps` and the chain's yield at settle time are what count. |
 
 No other server or contract changes.
 
@@ -55,15 +55,15 @@ Warm off-white `#F4F2EE` page, white cards with `#E4E0D8` hairlines and 16px cor
 - `app/dashboard/index.html`: new markup, one section per block above, with `id`s kept where `app.js` uses them. `data-state="out|novault|vault"` on `<body>` drives which blocks show.
 - `app/dashboard/styles.css`: all CSS. `serveStatic` sends `text/css` for `.css`.
 - `app/dashboard/app.js`: render functions per section (treasury, keys, use a key, activity) driven by one `/api/state` read plus the wallet reads; `log()` becomes `activity(event)`. No framework, no build step beyond the existing Dynamic bundle.
-- `app/dashboard/figures.js`: settle preview and open credit, pure.
 - `app/dashboard/snippets.js`: unchanged.
-- `app/server.ts`: `/setup` redirect, CSS content type. `app/cli.ts`: `ourFee`, `railFee` in `publicConfig`.
+- `app/limits.ts`: `settlePreview(yieldUsd, keys, params)` over `engine/ledger.ts`'s `settle`.
+- `app/server.ts`: `credit` and `preview` per vault in state, `/setup` redirect, CSS content type.
 - `docs/07-walkthrough.md` and the README: new labels.
 
 ## Testing
 
-- `server.test.ts`: `/setup` redirects to `/#use-a-key`; `.css` is served as `text/css`; state carries `ourFee` and `railFee`. The old setup-page test is replaced.
-- The settle preview and open-credit arithmetic live in `app/dashboard/figures.js`, a pure module with no imports (app.js pulls viem from esm.sh, so Node cannot import it), unit tested against the deck's numbers ($2,225 yield, $500 used → $172.50 fee, $1,552.50 stays) and a frozen vault (no open credit).
+- `limits.test.ts`: `settlePreview` against the deck's numbers ($2,225 yield, $500 used → $172.50 fee, $1,552.50 returned), a nonzero rail fee, and spend above yield (leftover floors at 0).
+- `server.test.ts`: state carries `credit` (0 when frozen) and `preview`; `/setup` redirects to `/#use-a-key`; `.css` is served as `text/css`. The old setup-page test is replaced.
 - `npm test` green. Then the full `docs/07-walkthrough.md` path in a browser on an anvil fork, checking each state and a screenshot of each against the mockups.
 
 ## Out of scope
