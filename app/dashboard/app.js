@@ -40,16 +40,33 @@ async function loadConfig() {
 
 /** Loads the Dynamic bundle when the server has a login environment; says so when the bundle was not built. */
 async function loadDynamic() {
-  if (!cfg.dynamicEnvironmentId) { show("operatorhint", true); return; }
+  if (!cfg.dynamicEnvironmentId) { loginOff(null); return; }
   try {
     dyn = await import("/dynamic.bundle.js");
   } catch {
-    $("nologin").textContent = "dashboard bundle missing: run npm run build:dashboard";
-    show("loggedin", true); show("loggedout", false);
+    loginOff("dashboard bundle missing: run npm run build:dashboard");
     return;
   }
-  session = await dyn.initDynamic(cfg);
+  try {
+    session = await dyn.initDynamic(cfg);
+  } catch (e) {
+    const msg = `login unavailable: ${e.message ?? e}`;
+    $("nologin").textContent = msg;
+    loginOff(msg);
+    return;
+  }
   renderSession();
+}
+
+/** No login on this page: hide the sign-in controls, say why, and open the operator section. */
+function loginOff(msg) {
+  dyn = null;
+  session = null;
+  if (msg) $("operatorhint").textContent = msg;
+  show("operatorhint", true);
+  show("loggedout", false);
+  show("loggedin", false);
+  $("operator").open = true;
 }
 
 function renderSession() {
@@ -68,21 +85,34 @@ $("sendcode").onclick = async () => {
   try { await dyn.sendEmailCode($("email").value.trim()); show("codebox", true); } catch (e) { alert(String(e.message ?? e)); }
 };
 $("verify").onclick = async () => {
-  try { session = await dyn.verifyEmailCode($("code").value.trim()); renderSession(); await render(); } catch (e) { alert(String(e.message ?? e)); }
+  try { session = await dyn.verifyEmailCode($("code").value.trim()); myVault = undefined; renderSession(); await render(); } catch (e) { alert(String(e.message ?? e)); }
 };
-$("connectwallet").onclick = () => {
-  $("providers").innerHTML = "";
+/** Lists the browser's wallets as buttons in `container`; one connects (signed out) or links (signed in). */
+function renderProviders(container) {
+  container.innerHTML = "";
   for (const p of dyn.listWalletProviders()) {
     const b = document.createElement("button");
     b.textContent = p.name;
     b.onclick = async () => {
-      try { session = await dyn.connectWallet(p.key); renderSession(); await render(); } catch (e) { alert(String(e.message ?? e)); }
+      try {
+        await dyn.connectWallet(p.key);
+        session = dyn.currentSession();
+        myVault = undefined;
+        renderSession();
+        await render();
+      } catch (e) { alert(String(e.message ?? e)); }
     };
-    $("providers").appendChild(b);
+    container.appendChild(b);
   }
-  if (!$("providers").children.length) $("providers").textContent = "no wallet found in this browser";
+  if (!container.children.length) container.textContent = "no wallet found in this browser";
+}
+$("connectwallet").onclick = () => renderProviders($("providers"));
+$("linkwallet").onclick = () => renderProviders($("linkproviders"));
+$("signout").onclick = async () => {
+  try { await dyn.signOut(); } catch (e) { log(String(e.message ?? e)); }
+  session = null; myVault = undefined; renderSession();
+  try { await render(); } catch (e) { log(String(e.message ?? e)); }
 };
-$("signout").onclick = async () => { await dyn.signOut(); session = null; myVault = undefined; renderSession(); await render(); };
 
 $("fund").onclick = async () => {
   try {
@@ -99,6 +129,7 @@ async function tx(wallet, pub, address, abi, functionName, args) {
 }
 
 $("open").onclick = async () => {
+  $("open").disabled = true;
   try {
     const wallet = await dyn.walletClient();
     const pub = dyn.publicClient();
@@ -112,7 +143,7 @@ $("open").onclick = async () => {
     await tx(wallet, pub, myVault, vaultAbi, "deposit", [amount, session.address]);
     await api("/api/vaults", { vault: myVault, label: "Treasury" });
     await render();
-  } catch (e) { log(String(e.message ?? e)); }
+  } catch (e) { log(String(e.message ?? e)); } finally { $("open").disabled = false; }
 };
 
 $("withdraw").onclick = async () => {
@@ -125,14 +156,20 @@ $("withdraw").onclick = async () => {
   } catch (e) { log(String(e.message ?? e)); }
 };
 
-$("sync").onclick = async () => { await api("/api/admin/sync", myVault ? { vault: myVault } : {}); await render(); };
-$("report").onclick = async () => { await api("/api/admin/report", myVault ? { vault: myVault } : {}); await render(); };
+$("sync").onclick = async () => {
+  try { await api("/api/admin/sync", myVault ? { vault: myVault } : {}); await render(); } catch (e) { log(String(e.message ?? e)); }
+};
+$("report").onclick = async () => {
+  try { await api("/api/admin/report", myVault ? { vault: myVault } : {}); await render(); } catch (e) { log(String(e.message ?? e)); }
+};
 $("addkey").onclick = async () => {
-  const vault = myVault ?? (await api("/api/state")).vaults[0]?.vault;
-  if (!vault) { alert("no vault yet"); return; }
-  const r = await api("/api/keys", { vault, name: $("keyname").value, weight: Number($("weight").value) });
-  showKey(`New key: ${$("keyname").value}`, r.key);
-  await render();
+  try {
+    const vault = myVault ?? (await api("/api/state")).vaults[0]?.vault;
+    if (!vault) { alert("no vault yet"); return; }
+    const r = await api("/api/keys", { vault, name: $("keyname").value, weight: Number($("weight").value) });
+    showKey(`New key: ${$("keyname").value}`, r.key);
+    await render();
+  } catch (e) { log(String(e.message ?? e)); }
 };
 
 let panelList = [];
@@ -189,7 +226,12 @@ async function render() {
           <button class="revoke" data-id="${esc(k.id)}" data-name="${esc(k.name)}">Revoke</button>`}</td></tr>`).join("")}
       </table>
       <button class="settle" data-vault="${esc(v.vault)}">Settle now</button>
-    </div>`).join("") || `<p class="muted">${session || $("token").value ? "No vault yet." : "Sign in to see your vaults."}</p>`;
+    </div>`).join("") || `<p class="muted">${emptyText()}</p>`;
+}
+/** What the empty vault list says, by who is looking. */
+function emptyText() {
+  if (session || $("token").value) return "No vault yet.";
+  return cfg.dynamicEnvironmentId ? "Sign in to see your vaults." : "Type the operator token to see vaults.";
 }
 $("vaults").addEventListener("click", async (e) => {
   const b = e.target.closest("button");

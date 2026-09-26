@@ -89,7 +89,11 @@ export function currentSession() {
 export async function walletClient() {
   const primary = getPrimaryWalletAccount();
   if (!primary) throw new Error("no wallet in this session");
-  if (network) await switchActiveNetwork({ networkId: network.networkId, walletAccount: primary }).catch(() => {});
+  if (network) {
+    await switchActiveNetwork({ networkId: network.networkId, walletAccount: primary }).catch(() => {
+      throw new Error(`switch your wallet to ${network.displayName} (chain ${network.networkId}) and try again`);
+    });
+  }
   return createWalletClientForWalletAccount({ walletAccount: primary });
 }
 

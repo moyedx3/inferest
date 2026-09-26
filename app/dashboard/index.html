@@ -33,6 +33,7 @@
     </div>
     <div id="loggedin" style="display:none">
       <p>Signed in as <b id="who"></b> &middot; wallet <code id="address"></code> <button id="signout">Sign out</button></p>
+      <button id="linkwallet">Connect treasury wallet</button> <div id="linkproviders"></div>
       <p id="nologin" class="muted"></p>
     </div>
     <p id="operatorhint" class="muted" style="display:none">Login is off on this server (no Dynamic environment). Use the operator token below.</p>
@@ -46,7 +47,6 @@
       <button id="open">Create vault and deposit</button>
       <button id="withdraw">Withdraw everything</button>
     </div>
-    <pre id="log"></pre>
   </div>
 
   <div class="card">
@@ -72,6 +72,7 @@
     <input id="token" type="password" placeholder="admin token" /> <span class="muted">used by the keeper's owner and the scripted demos</span>
   </details>
 
+  <pre id="log"></pre>
   <div id="vaults"></div>
   <script type="module" src="/app.js"></script>
 </body>
