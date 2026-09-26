@@ -4,77 +4,187 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Inferest</title>
-  <style>
-    body { font: 15px/1.5 system-ui, sans-serif; max-width: 880px; margin: 0 auto; padding: 16px; color: #111; background: #fff; }
-    h1 { margin: 0 0 4px; } .muted { color: #666; } .card { border: 1px solid #ddd; border-radius: 8px; padding: 12px 16px; margin: 12px 0; }
-    table { width: 100%; border-collapse: collapse; } td, th { text-align: left; padding: 4px 6px; border-bottom: 1px solid #eee; }
-    button { padding: 6px 12px; margin: 4px 4px 4px 0; cursor: pointer; } input { padding: 5px; }
-    pre { background: #f6f6f6; padding: 8px; overflow-x: auto; }
-    tr.revoked td { color: #999; text-decoration: line-through; }
-    #panel { display: none; border: 2px solid #111; }
-    #panel.open { display: block; }
-    .tabs button.on { font-weight: bold; }
-    button.pick { padding: 2px 6px; margin: 0 2px; font-size: 12px; } button.pick.on { font-weight: bold; }
-    details summary { cursor: pointer; }
-    #secret { font-family: ui-monospace, monospace; word-break: break-all; background: #fff7d6; padding: 8px; }
-  </style>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500&family=Geist+Mono&family=Newsreader:opsz@6..72&display=swap" />
+  <link rel="stylesheet" href="/styles.css" />
 </head>
-<body>
-  <h1>Inferest</h1>
-  <p class="muted">Your interest, now inference.</p>
-
-  <div class="card" id="signin">
-    <h3>Sign in</h3>
-    <div id="loggedout">
-      <div><input id="email" type="email" placeholder="finance lead's email" /> <button id="sendcode">Send code</button></div>
-      <div id="codebox" style="display:none"><input id="code" placeholder="6-digit code" /> <button id="verify">Verify</button></div>
-      <p class="muted">or</p>
-      <button id="connectwallet">Connect treasury wallet</button>
-      <div id="providers"></div>
+<body data-state="out">
+  <header class="topbar">
+    <div class="wrap">
+      <a class="brand" href="/">Inferest</a>
+      <div class="account">
+        <span class="chip"><i class="dot"></i><span id="network"></span></span>
+        <span class="chip in-only" id="whochip"><span id="who"></span><span class="mono faint" id="address"></span></span>
+        <span class="in-only" id="walletlist"></span>
+        <button class="linkbtn in-only" id="linkwallet" hidden>Connect treasury wallet</button>
+        <button class="linkbtn in-only" id="signout" hidden>Sign out</button>
+      </div>
     </div>
-    <div id="loggedin" style="display:none">
-      <p>Signed in as <b id="who"></b> &middot; wallet <code id="address"></code><span id="walletlist"></span> <button id="signout">Sign out</button></p>
-      <button id="linkwallet">Connect treasury wallet</button> <div id="linkproviders"></div>
-      <p id="nologin" class="muted"></p>
+    <div class="wrap providers" id="linkproviders"></div>
+  </header>
+
+  <section class="hero out-only">
+    <div class="wrap">
+      <div class="pitch">
+        <h1>Your interest,<span class="second">now inference.</span></h1>
+        <p>Deposit USDC into a yield vault that stays in your wallet. Only the interest it earns becomes LLM credit, issued as spend limits on keys for your developers and agents.</p>
+        <div class="facts">
+          <div><b>Principal never moves</b><span>Shares stay in your wallet.</span></div>
+          <div><b>Limits follow yield</b><span>Never ahead of what's earned.</span></div>
+          <div><b>Unused yield returns</b><span>Less a 10% fee.</span></div>
+        </div>
+      </div>
+      <div class="card signin">
+        <div>
+          <h3>Sign in to your treasury</h3>
+          <p>Finance lead's email, or the wallet that holds the treasury.</p>
+        </div>
+        <div id="loggedout">
+          <div style="display:flex;flex-direction:column;gap:12px">
+            <label class="field"><input id="email" type="email" placeholder="finance@company.com" autocomplete="email" /></label>
+            <button class="btn btn-primary btn-block" id="sendcode">Send code</button>
+            <div id="codebox" hidden style="display:flex;flex-direction:column;gap:12px">
+              <label class="field"><input id="code" inputmode="numeric" placeholder="6-digit code" autocomplete="one-time-code" /></label>
+              <button class="btn btn-primary btn-block" id="verify">Verify</button>
+            </div>
+            <div class="or">or</div>
+            <button class="btn btn-block" id="connectwallet">Connect treasury wallet</button>
+            <div class="providers" id="providers"></div>
+          </div>
+        </div>
+        <p class="fine" id="operatorhint" hidden>Login is off on this server (no Dynamic environment). Use the operator token.</p>
+        <div id="operatorslot"></div>
+        <p class="fine" id="nologin"></p>
+        <p class="fine" id="loginfine">First sign-in creates an embedded wallet for you. A treasury in MetaMask, a Ledger or a custody console connects directly.</p>
+      </div>
     </div>
-    <p id="operatorhint" class="muted" style="display:none">Login is off on this server (no Dynamic environment). Use the operator token below.</p>
-  </div>
+  </section>
 
-  <div class="card" id="depositcard" style="display:none">
-    <h3>Treasury</h3>
-    <button id="fund" style="display:none">Get demo funds</button>
-    <div>
-      <input id="amount" type="number" value="100000" /> USDC
-      <button id="open">Create vault and deposit</button>
-      <button id="withdraw">Withdraw everything</button>
+  <section class="treasury in-only" id="treasury">
+    <div class="wrap">
+      <div class="head">
+        <div><span class="tag" id="treasurytag">Treasury</span></div>
+        <h1 id="headline"></h1>
+      </div>
+      <div class="grid">
+        <div class="card yieldcard vault-only">
+          <div class="yieldhead">
+            <div>
+              <div class="label">Yield earned this period</div>
+              <div class="figure"><b id="yield">$0.00</b><span class="live">live</span></div>
+            </div>
+            <div class="vaultmeta"><span id="vaultname"></span><a id="vaultlink" target="_blank" rel="noopener"></a></div>
+          </div>
+          <div class="bars">
+            <div class="yieldbar">
+              <div class="seg used" id="barused"><small>Used</small><span id="usedamt"></span></div>
+              <div class="seg open"><small>Open credit</small><span id="openamt"></span></div>
+            </div>
+            <div class="principal hatch" id="principalbar"><div><small>Principal · never spent</small><span id="principal"></span></div></div>
+          </div>
+          <div class="breakdown">
+            <div><small>Models</small><span id="models"></span><em id="modelsnote"></em></div>
+            <div><small>Tools</small><span id="tools"></span><em>paid MCP calls</em></div>
+            <div><small>Provider backstop</small><span id="backstop"></span><em id="backstopnote"></em></div>
+            <div id="sharescell"><small>Shares</small><span id="shares"></span><em id="sharesnote"></em></div>
+          </div>
+        </div>
+        <div class="card yieldcard novault-only">
+          <div class="steps">
+            <div class="step" id="stepfunds"><span class="num">1</span><div><b>Get demo funds</b><p>Gas and 100,000 USDC on the demo fork. One click.</p></div></div>
+            <div class="step now"><span class="num">2</span><div><b>Create vault and deposit</b><p>Four signatures from your wallet: create, accept, approve, deposit. The shares stay in your wallet.</p></div></div>
+            <div class="step"><span class="num">3</span><div><b>Yield accrues, keys open</b><p>The keeper books yield; each key's limit rises with it, never ahead.</p></div></div>
+            <div class="step"><span class="num">4</span><div><b>Settle each period</b><p>Usage pays the provider. Unused yield stays yours, less 10%.</p></div></div>
+          </div>
+        </div>
+        <div class="side">
+          <div class="card" id="depositcard">
+            <div class="cardhead"><h3 id="deposittitle">Add to principal</h3><button class="btn btn-lime" id="fund" hidden>Get demo funds</button></div>
+            <label class="field amountfield"><input id="amount" type="number" min="0" value="100000" /><span class="faint">USDC</span></label>
+            <button class="btn btn-primary btn-block" id="open">Deposit</button>
+            <div class="foot"><span id="walletbalance"></span><button class="linkbtn vault-only" id="withdraw">Withdraw all</button></div>
+            <div class="fine novault-only">Your wallet will ask for 4 signatures.</div>
+          </div>
+          <div class="card vault-only">
+            <div class="cardhead"><h3>If you settle now</h3><span class="mono faint" id="pvperiod"></span></div>
+            <div class="preview">
+              <div><p style="margin:0">Usage<small>to the provider float</small></p><span id="pvusage"></span></div>
+              <div><p style="margin:0">Inferest fee<small>10% of unused yield</small></p><span id="pvfee"></span></div>
+              <div class="yours"><p style="margin:0"><b>Stays in your vault</b><small>becomes principal</small></p><span id="pvreturned"></span></div>
+            </div>
+            <button class="btn btn-block" id="settle">Settle now</button>
+            <div class="keeper"><button class="linkbtn" id="report">↻ Report yield</button><button class="linkbtn" id="sync">⇄ Sync limits</button></div>
+          </div>
+        </div>
+      </div>
     </div>
-  </div>
+  </section>
 
-  <div class="card">
-    <h3>Keys</h3>
-    <div><input id="keyname" placeholder="key name" value="dev-1" /> weight <input id="weight" type="number" value="1" style="width:60px" />
-      <button id="addkey">Create key</button> <a href="/setup" class="muted">setup page for developers</a></div>
-    <button id="sync">Sync limits</button><button id="report">Report yield</button>
-  </div>
+  <section class="in-only" id="keys">
+    <div class="wrap">
+      <div class="head row">
+        <div class="head" style="margin:0">
+          <div><span class="tag">Keys</span></div>
+          <h2 id="keyshead"></h2>
+        </div>
+        <div class="account">
+          <span class="pillfield"><label for="keyname">name</label><input id="keyname" value="dev-1" /></span>
+          <span class="pillfield"><label for="weight">weight</label><input id="weight" type="number" min="1" value="1" /></span>
+          <button class="btn btn-primary" id="addkey">+ Create key</button>
+        </div>
+      </div>
+      <div class="card keytable">
+        <table>
+          <thead><tr><th>Key</th><th>Weight</th><th>Budget</th><th>Spend this period</th><th>Left</th><th></th></tr></thead>
+          <tbody id="keyrows"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
 
-  <div id="panel" class="card">
-    <h3 id="paneltitle">Your new key</h3>
-    <p>Copy it now. It is shown once and stored only as a hash.</p>
-    <div id="secret"></div>
-    <button id="copysecret">Copy key</button>
-    <p class="muted">Base URL <code id="baseurl"></code>, path <code>/v1</code>. Model ids are OpenRouter's. A 402 means the key's yield budget is used up.</p>
-    <div class="tabs" id="tabs"></div>
-    <pre id="snippet"></pre>
-    <button id="copysnippet">Copy snippet</button> <button id="closepanel">Close</button>
-  </div>
+  <section id="use-a-key">
+    <div class="wrap split">
+      <div class="explain">
+        <div><span class="tag" id="usetag">Use a key</span></div>
+        <h2>Change the base URL.<span class="second">Keep your client, your models, your agent.</span></h2>
+        <ul class="notes" id="notes"></ul>
+      </div>
+      <div class="codeside">
+        <div class="newkey" id="panel" hidden>
+          <div class="cardhead"><b id="paneltitle">New key</b><span>Copy it now. It is shown once and stored only as a hash.</span><button class="linkbtn" id="closepanel" aria-label="Close">✕</button></div>
+          <div class="secretrow"><div class="secret" id="secret"></div><button class="btn btn-primary" id="copysecret">Copy key</button></div>
+        </div>
+        <div class="card window">
+          <div class="windowbar"><span class="dots"><i></i><i></i><i></i></span><div class="tabs" id="tabs"></div><button class="linkbtn" id="copysnippet">Copy</button></div>
+          <pre id="snippet"></pre>
+        </div>
+      </div>
+    </div>
+  </section>
 
-  <details class="card" id="operator">
-    <summary>Operator</summary>
-    <input id="token" type="password" placeholder="admin token" /> <span class="muted">used by the keeper's owner and the scripted demos</span>
-  </details>
+  <section class="in-only">
+    <div class="wrap split">
+      <div class="explain">
+        <div><span class="tag">Activity</span></div>
+        <h2>Every move, on-chain.<span class="second">Your wallet signs deposits. The keeper books yield and settles.</span></h2>
+      </div>
+      <ul class="feed" id="activity"><li class="none">Nothing yet in this session.</li></ul>
+    </div>
+  </section>
 
-  <pre id="log"></pre>
-  <div id="vaults"></div>
+  <footer>
+    <div class="wrap">
+      <div style="display:flex;align-items:center"><a class="brand" href="/">Inferest</a><span class="tagline">Your interest, now inference.</span></div>
+      <div class="contracts">
+        <span id="contracts"></span>
+        <details class="operator" id="operator">
+          <summary>🔒 Operator</summary>
+          <span class="pillfield operatorfield" id="operatorfield"><input id="token" type="password" placeholder="admin token" /></span>
+        </details>
+      </div>
+    </div>
+  </footer>
   <script type="module" src="/app.js"></script>
 </body>
 </html>

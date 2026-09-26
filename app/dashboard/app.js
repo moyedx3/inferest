@@ -1,5 +1,5 @@
-import { parseAbi, parseEventLogs, parseUnits } from "https://esm.sh/viem@2.56.9";
-import { snippets } from "/snippets.js";
+import { parseAbi, parseEventLogs, parseUnits, formatUnits } from "https://esm.sh/viem@2.56.9";
+import { snippets, NOTES } from "/snippets.js";
 
 const factoryAbi = parseAbi([
   "function createVault(address target, string name, string symbol) returns (address)",
@@ -10,14 +10,40 @@ const vaultAbi = parseAbi([
   "function deposit(uint256 assets, address receiver) returns (uint256)",
   "function redeem(uint256 shares, address receiver, address owner) returns (uint256)",
   "function balanceOf(address) view returns (uint256)",
+  "function convertToAssets(uint256 shares) view returns (uint256)",
+  "function decimals() view returns (uint8)",
 ]);
-const erc20Abi = parseAbi(["function approve(address spender, uint256 amount) returns (bool)"]);
+const erc20Abi = parseAbi([
+  "function approve(address spender, uint256 amount) returns (bool)",
+  "function balanceOf(address) view returns (uint256)",
+]);
+
+const PLACEHOLDER = "sk-inf-YOUR-KEY";
+const KEY_ICON = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/></svg>`;
+const TAB_NAMES = { "OpenAI SDK (Python)": "Python", "OpenAI SDK (Node)": "Node", "MCP tools (same key)": "MCP" };
 
 const $ = (id) => document.getElementById(id);
-const log = (m) => { $("log").textContent += m + "\n"; };
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-const show = (id, on) => { $(id).style.display = on ? "" : "none"; };
+const show = (id, on) => { $(id).hidden = !on; };
+const short = (a) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : "");
+const usd = (n, digits = 2) => `$${Number(n).toLocaleString("en-US", { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
+const sum = (xs, f) => xs.reduce((s, x) => s + f(x), 0);
+
 let cfg, dyn = null, session = null, myVault;
+let lastState = null;
+/** What the chosen wallet holds, read from the chain: { vault, principal, shares, sharesDecimals, usdc }. */
+let wallet = null;
+let newKeyId = null;
+let loginIsOff = false;
+const events = [];
+
+/** One row in the Activity list, newest first. Replaces the old raw log; secrets never go here. */
+function activity({ icon = "•", title, detail = "", tx = "", error = false }) {
+  events.unshift({ at: Date.now(), icon: error ? "!" : icon, title, detail, tx, error });
+  if (error && document.body.dataset.state === "out") $("nologin").textContent = `${title}: ${detail}`; // the feed is hidden until sign-in
+  renderActivity();
+}
+const fail = (title) => (e) => activity({ title, detail: String(e?.message ?? e), error: true });
 
 /**
  * Takes the SDK's live session, whose token Dynamic refreshes on its own. Returns false (and signs the page out)
@@ -29,8 +55,9 @@ function syncSession() {
   if (live === null) {
     session = null;
     myVault = undefined;
+    wallet = null;
     renderSession();
-    log("session expired, sign in again");
+    activity({ title: "Session expired", detail: "sign in again", error: true });
     return false;
   }
   session = live;
@@ -55,6 +82,9 @@ async function api(path, body) {
 
 async function loadConfig() {
   cfg = (await api("/api/state")).config;
+  $("network").textContent = `${cfg.chainName ?? `chain ${cfg.chainId}`}${cfg.demoFaucet ? " · demo fork" : ""}`;
+  $("contracts").innerHTML = [["Factory", cfg.factory], ["Splitter", cfg.splitter], ["USDC", cfg.usdc]]
+    .filter(([, a]) => a).map(([k, a]) => `<span>${k}<b>${esc(short(a))}</b></span>`).join(" ");
 }
 
 /** Loads the Dynamic bundle when the server has a login environment; says so when the bundle was not built. */
@@ -77,231 +107,428 @@ async function loadDynamic() {
   renderSession();
 }
 
-/** No login on this page: hide the sign-in controls, say why, and open the operator section. */
+/** No login on this page: the sign-in card holds the operator token instead of email and wallet. */
 function loginOff(msg) {
   dyn = null;
   session = null;
   if (msg) $("operatorhint").textContent = msg;
   show("operatorhint", true);
   show("loggedout", false);
-  show("loggedin", false);
-  $("operator").open = true;
+  show("loginfine", false);
+  loginIsOff = true;
+  placeOperatorField();
+}
+
+/**
+ * With login off the token field lives in the sign-in card while the page is signed out, and in the open
+ * footer section once a token is typed, so a mistyped token can always be corrected without a reload.
+ */
+function placeOperatorField() {
+  if (!loginIsOff) return;
+  const out = document.body.dataset.state === "out";
+  const home = out ? $("operatorslot") : $("operator");
+  if ($("operatorfield").parentElement === home) return;
+  home.appendChild($("operatorfield"));
+  show("operator", !out);
+  $("operator").open = !out; // opened once, when the field arrives; the user may close it after that
 }
 
 function renderSession() {
   const on = session !== null;
-  show("loggedout", !on);
-  show("loggedin", on);
+  show("whochip", on);
+  show("signout", on);
+  show("linkwallet", on);
+  show("fund", on && Boolean(cfg.demoFaucet));
   show("depositcard", on && Boolean(cfg.publicRpcUrl));
-  show("fund", on && cfg.demoFaucet);
   if (on) {
-    $("who").textContent = session.email ?? session.address ?? "";
-    $("address").textContent = session.address ?? "(no wallet yet)";
+    $("who").textContent = session.email ?? "";
+    $("address").textContent = session.address ? short(session.address) : "(no wallet yet)";
     const active = (session.address ?? "").toLowerCase();
-    $("walletlist").innerHTML = (session.wallets ?? []).map((w) => {
-      const on = w.toLowerCase() === active;
-      return `<button class="pick${on ? " on" : ""}" data-address="${esc(w)}">${esc(w.slice(0, 6) + "..." + w.slice(-4))}${on ? " (active)" : ""}</button>`;
-    }).join(" ");
+    const wallets = session.wallets ?? [];
+    $("walletlist").innerHTML = wallets.length > 1 ? wallets.map((w) => {
+      const sel = w.toLowerCase() === active;
+      return `<button class="pick${sel ? " on" : ""}" data-address="${esc(w)}">${esc(short(w))}</button>`;
+    }).join(" ") : "";
+  } else {
+    $("walletlist").innerHTML = "";
+    $("linkproviders").innerHTML = "";
   }
+  setPageState();
+}
+
+/** out: nobody to show vaults to; novault: a caller with no vault yet; vault: a caller looking at a vault. */
+function setPageState() {
+  const caller = session !== null || $("token").value !== "";
+  document.body.dataset.state = !caller ? "out" : currentVault() ? "vault" : "novault";
+  placeOperatorField();
+}
+
+/** The vault the page shows: the one this login just created or picked, else the first the caller may see. */
+function currentVault() {
+  const vaults = lastState?.vaults ?? [];
+  return vaults.find((v) => v.vault === myVault?.toLowerCase()) ?? vaults[0];
 }
 
 $("sendcode").onclick = async () => {
-  try { await dyn.sendEmailCode($("email").value.trim()); show("codebox", true); } catch (e) { alert(String(e.message ?? e)); }
+  try { await dyn.sendEmailCode($("email").value.trim()); show("codebox", true); $("code").focus(); } catch (e) { fail("Sign-in code not sent")(e); }
 };
 $("verify").onclick = async () => {
-  try { session = await dyn.verifyEmailCode($("code").value.trim()); myVault = undefined; renderSession(); await render(); } catch (e) { alert(String(e.message ?? e)); }
+  try { session = await dyn.verifyEmailCode($("code").value.trim()); myVault = undefined; wallet = null; renderSession(); await render(); } catch (e) { fail("Code not accepted")(e); }
 };
 /** Lists the browser's wallets as buttons in `container`; one connects (signed out) or links (signed in). */
 function renderProviders(container) {
   container.innerHTML = "";
   for (const p of dyn.listWalletProviders()) {
     const b = document.createElement("button");
+    b.className = "btn btn-small";
     b.textContent = p.name;
     b.onclick = async () => {
       try {
         await dyn.connectWallet(p.key);
         if (session) { if (!syncSession()) return; } else { session = dyn.currentSession(); }
         myVault = undefined;
+        wallet = null;
+        container.innerHTML = "";
         renderSession();
         await render();
-      } catch (e) { alert(String(e.message ?? e)); }
+      } catch (e) { fail("Wallet not connected")(e); }
     };
     container.appendChild(b);
   }
-  if (!container.children.length) container.textContent = "no wallet found in this browser";
+  if (!container.children.length) container.textContent = "No wallet found in this browser.";
 }
 $("connectwallet").onclick = () => renderProviders($("providers"));
 $("linkwallet").onclick = () => renderProviders($("linkproviders"));
-/** A wallet button under "Signed in as" makes that wallet the one that signs. */
-$("loggedin").addEventListener("click", async (e) => {
+/** A wallet button in the top bar makes that wallet the one that signs. */
+$("walletlist").addEventListener("click", async (e) => {
   const b = e.target.closest("button.pick");
   if (!b) return;
   try {
     if (!syncSession()) return;
     session = await dyn.chooseWallet(b.dataset.address);
+    wallet = null;
     renderSession();
-  } catch (err) { log(String(err.message ?? err)); }
+    await render();
+  } catch (err) { fail("Wallet not switched")(err); }
 });
 $("signout").onclick = async () => {
-  try { await dyn.signOut(); } catch (e) { log(String(e.message ?? e)); }
-  session = null; myVault = undefined; renderSession();
-  try { await render(); } catch (e) { log(String(e.message ?? e)); }
+  try { await dyn.signOut(); } catch (e) { fail("Sign out")(e); }
+  session = null; myVault = undefined; wallet = null; renderSession();
+  try { await render(); } catch (e) { fail("Refresh failed")(e); }
 };
 
 $("fund").onclick = async () => {
   if (!syncSession()) return;
   try {
     const r = await api("/api/demo/fund", { address: session.address });
-    log(`funded ${session.address}: ${r.usdc / 1e6} USDC and gas`);
-  } catch (e) { log(String(e)); }
+    activity({ icon: "◇", title: "Demo funds received", detail: `${(r.usdc / 1e6).toLocaleString("en-US")} USDC and gas to ${short(session.address)}` });
+    await readWallet();
+  } catch (e) { fail("Demo funds")(e); }
 };
 
-async function tx(wallet, pub, address, abi, functionName, args) {
+const TX_TITLES = { acceptManagement: "Management accepted", approve: "USDC approved", deposit: "Deposited", redeem: "Withdrew everything" };
+async function tx(wallet, pub, address, abi, functionName, args, detail = "") {
   const hash = await wallet.writeContract({ address, abi, functionName, args });
   await pub.waitForTransactionReceipt({ hash });
-  log(`${functionName}: ${hash}`);
+  activity({ icon: functionName === "redeem" ? "↑" : "↓", title: TX_TITLES[functionName] ?? functionName, detail, tx: hash });
   return hash;
 }
 
+/** With a vault: approve and deposit into it. Without: create the vault, accept management, approve, deposit. */
 $("open").onclick = async () => {
   if (!syncSession()) return;
   $("open").disabled = true;
   try {
-    const wallet = await dyn.walletClient();
+    const w = await dyn.walletClient();
     const pub = dyn.publicClient();
-    const code = await wallet.request({ method: "eth_getCode", params: [cfg.factory, "latest"] });
+    const code = await w.request({ method: "eth_getCode", params: [cfg.factory, "latest"] });
     if (!code || code === "0x") {
-      log(`your wallet is not on the demo chain: point ${cfg.chainName} (chain ${cfg.chainId}) at ${cfg.publicRpcUrl} in your wallet and try again`);
+      activity({ title: "Wrong chain", detail: `point ${cfg.chainName} (chain ${cfg.chainId}) at ${cfg.publicRpcUrl} in your wallet and try again`, error: true });
       return;
     }
     const amount = parseUnits($("amount").value, 6);
-    const hash = await wallet.writeContract({ address: cfg.factory, abi: factoryAbi, functionName: "createVault", args: [cfg.target, "Inferest Vault", "infVAULT"] });
-    const receipt = await pub.waitForTransactionReceipt({ hash });
-    myVault = parseEventLogs({ abi: factoryAbi, logs: receipt.logs })[0].args.vault;
-    log(`vault: ${myVault}`);
-    await tx(wallet, pub, myVault, vaultAbi, "acceptManagement", []);
-    await tx(wallet, pub, cfg.usdc, erc20Abi, "approve", [myVault, amount]);
-    await tx(wallet, pub, myVault, vaultAbi, "deposit", [amount, session.address]);
-    await api("/api/vaults", { vault: myVault, label: "Treasury" });
+    const amountText = `${Number($("amount").value).toLocaleString("en-US")} USDC`;
+    let vault = currentVault()?.vault;
+    if (!vault) {
+      const hash = await w.writeContract({ address: cfg.factory, abi: factoryAbi, functionName: "createVault", args: [cfg.target, "Inferest Vault", "infVAULT"] });
+      const receipt = await pub.waitForTransactionReceipt({ hash });
+      vault = parseEventLogs({ abi: factoryAbi, logs: receipt.logs })[0].args.vault;
+      myVault = vault;
+      activity({ icon: "◆", title: "Vault created", detail: short(vault), tx: hash });
+      await tx(w, pub, vault, vaultAbi, "acceptManagement", []);
+      await tx(w, pub, cfg.usdc, erc20Abi, "approve", [vault, amount]);
+      await tx(w, pub, vault, vaultAbi, "deposit", [amount, session.address], `${amountText} from ${short(session.address)}`);
+      await api("/api/vaults", { vault, label: "Treasury" });
+    } else {
+      await tx(w, pub, cfg.usdc, erc20Abi, "approve", [vault, amount]);
+      await tx(w, pub, vault, vaultAbi, "deposit", [amount, session.address], `${amountText} from ${short(session.address)}`);
+    }
+    wallet = null;
     await render();
-  } catch (e) { log(String(e.message ?? e)); } finally { $("open").disabled = false; }
+  } catch (e) { fail("Deposit failed")(e); } finally { $("open").disabled = false; }
 };
 
 $("withdraw").onclick = async () => {
   if (!syncSession()) return;
   try {
-    const wallet = await dyn.walletClient();
+    const w = await dyn.walletClient();
     const pub = dyn.publicClient();
-    const vault = myVault ?? (await api("/api/state")).vaults[0]?.vault;
+    const vault = currentVault()?.vault;
     const shares = await pub.readContract({ address: vault, abi: vaultAbi, functionName: "balanceOf", args: [session.address] });
-    await tx(wallet, pub, vault, vaultAbi, "redeem", [shares, session.address, session.address]);
-  } catch (e) { log(String(e.message ?? e)); }
+    await tx(w, pub, vault, vaultAbi, "redeem", [shares, session.address, session.address], `all shares to ${short(session.address)}`);
+    wallet = null;
+    await render();
+  } catch (e) { fail("Withdraw failed")(e); }
 };
 
-/** Signed in, sync and report act on this login's vault; in operator mode they act on every vault. */
-const scope = () => (session && myVault ? { vault: myVault } : {});
+/** Signed in, sync and report act on the shown vault; in operator mode they act on every vault. */
+const scope = () => (session && currentVault() ? { vault: currentVault().vault } : {});
 $("sync").onclick = async () => {
   if (!syncSession()) return;
-  try { await api("/api/admin/sync", scope()); await render(); } catch (e) { log(String(e.message ?? e)); }
+  try {
+    await api("/api/admin/sync", scope());
+    await render();
+    const v = currentVault();
+    activity({ icon: "⇄", title: "Limits synced", detail: v ? `backstop ${usd(v.orLimit)}, used ${usd(v.orUsage)}` : "" });
+  } catch (e) { fail("Sync failed")(e); }
 };
 $("report").onclick = async () => {
   if (!syncSession()) return;
-  try { await api("/api/admin/report", scope()); await render(); } catch (e) { log(String(e.message ?? e)); }
+  try {
+    await api("/api/admin/report", scope());
+    await render();
+    const v = currentVault();
+    activity({ icon: "↻", title: "Yield reported", detail: v ? `${usd(v.yieldUsd)} in the Splitter` : "" });
+  } catch (e) { fail("Report failed")(e); }
+};
+$("settle").onclick = async () => {
+  const v = currentVault();
+  if (!v || !syncSession()) return;
+  try {
+    const r = await api("/api/admin/settle", { vault: v.vault });
+    if (r.usageMicro === null) activity({ icon: "✓", title: "Nothing to settle", detail: `period ${v.period} had no settlement to send` });
+    else activity({ icon: "✓", title: r.pending ? "Settlement sent" : `Settled period ${v.period}`, detail: `usage ${usd(Number(r.usageMicro) / 1e6)} to float${r.pending ? ", waiting for its receipt" : ""}`, tx: r.tx ?? "" });
+    await render();
+  } catch (e) { fail("Settle failed")(e); }
 };
 $("addkey").onclick = async () => {
   if (!syncSession()) return;
   try {
-    const vault = myVault ?? (await api("/api/state")).vaults[0]?.vault;
-    if (!vault) { alert("no vault yet"); return; }
-    const r = await api("/api/keys", { vault, name: $("keyname").value, weight: Number($("weight").value) });
-    showKey(`New key: ${$("keyname").value}`, r.key);
+    const vault = currentVault()?.vault;
+    if (!vault) return;
+    const name = $("keyname").value;
+    const r = await api("/api/keys", { vault, name, weight: Number($("weight").value) });
+    newKeyId = r.id;
+    showKey(`New key: ${name}`, r.key);
+    activity({ icon: "+", title: "Key created", detail: `${name}, weight ${$("weight").value}` });
     await render();
-  } catch (e) { log(String(e.message ?? e)); }
+  } catch (e) { fail("Key not created")(e); }
 };
 
-let panelList = [];
+let panelSecret = null;
 let panelIndex = 0;
-/** Opens the setup panel with a secret that is shown once. */
+/** Opens the banner with a secret that is shown once; the snippets use it until the banner is closed. */
 function showKey(title, secret) {
-  const base = cfg.publicUrl ?? location.origin;
-  panelList = snippets(base, secret);
+  panelSecret = secret;
   $("paneltitle").textContent = title;
   $("secret").textContent = secret;
-  $("baseurl").textContent = base;
+  show("panel", true);
+  renderSnippets();
+  $("use-a-key").scrollIntoView({ behavior: "smooth" });
+}
+/** The six client setups, with the shown secret or the placeholder. */
+function renderSnippets() {
+  const list = snippets(cfg.publicUrl ?? location.origin, panelSecret ?? PLACEHOLDER);
   $("tabs").innerHTML = "";
-  for (const [i, s] of panelList.entries()) {
+  for (const [i, s] of list.entries()) {
     const b = document.createElement("button");
-    b.textContent = s.name;
-    b.onclick = () => showTab(i);
+    b.textContent = TAB_NAMES[s.name] ?? s.name.replace(/ \(.*\)$/, "");
+    b.title = s.name;
+    b.className = i === panelIndex ? "on" : "";
+    b.onclick = () => { panelIndex = i; renderSnippets(); };
     $("tabs").appendChild(b);
   }
-  showTab(0);
-  $("panel").classList.add("open");
-  $("panel").scrollIntoView({ behavior: "smooth" });
+  $("snippet").textContent = list[panelIndex].text;
 }
-function showTab(i) {
-  panelIndex = i;
-  $("snippet").textContent = panelList[i].text;
-  for (const [j, b] of [...$("tabs").children].entries()) b.classList.toggle("on", j === i);
-}
-$("copysecret").onclick = () => { const s = $("secret").textContent; if (s) navigator.clipboard.writeText(s); };
-$("copysnippet").onclick = () => { if (panelList[panelIndex]) navigator.clipboard.writeText(panelList[panelIndex].text); };
+$("copysecret").onclick = () => { if (panelSecret) navigator.clipboard.writeText(panelSecret); };
+$("copysnippet").onclick = () => navigator.clipboard.writeText($("snippet").textContent);
 $("closepanel").onclick = () => {
-  $("panel").classList.remove("open");
+  panelSecret = null;
   $("secret").textContent = "";
-  $("snippet").textContent = "";
-  $("tabs").innerHTML = "";
-  panelList = [];
-  panelIndex = 0;
+  show("panel", false);
+  renderSnippets();
 };
 
-async function render() {
-  const s = await api("/api/state");
-  cfg = s.config;
-  if (!myVault && s.vaults.length) myVault = s.vaults[0].vault;
-  $("vaults").innerHTML = s.vaults.map((v) => `
-    <div class="card">
-      <h3>${esc(v.label)} <span class="muted">${esc(v.vault)}</span></h3>
-      <p>Yield in Splitter: <b>$${v.yieldUsd.toFixed(2)}</b>
-        ${v.frozen ? "<b>(frozen: loss pending)</b>" : ""} ${v.settling ? "<b>(settling)</b>" : ""}
-        &middot; period ${esc(v.period)}
-        &middot; provider backstop: limit $${v.orLimit.toFixed(2)}, used $${v.orUsage.toFixed(2)}${v.hasOpenRouterKey ? "" : " (no provider key yet)"}</p>
-      <table><tr><th>Key</th><th>Weight</th><th>Budget</th><th>Models</th><th>Tools</th><th>Left</th><th></th></tr>
-      ${v.keys.map((k) => `<tr class="${k.revoked ? "revoked" : ""}"><td>${esc(k.name)}${k.revoked ? " (revoked)" : ""}</td><td>${k.weight}</td>
-        <td>$${k.budget.toFixed(2)}</td><td>$${k.modelSpent.toFixed(4)}</td><td>$${k.toolSpent.toFixed(4)}</td><td>$${k.remaining.toFixed(2)}</td>
-        <td>${k.revoked ? "" : `<button class="rotate" data-id="${esc(k.id)}" data-name="${esc(k.name)}">Rotate</button>
-          <button class="revoke" data-id="${esc(k.id)}" data-name="${esc(k.name)}">Revoke</button>`}</td></tr>`).join("")}
-      </table>
-      <button class="settle" data-vault="${esc(v.vault)}">Settle now</button>
-    </div>`).join("") || `<p class="muted">${emptyText()}</p>`;
+function renderNotes() {
+  $("notes").innerHTML = NOTES.map((n) => `<li><span>${esc(n)}</span></li>`).join("");
 }
-/** What the empty vault list says, by who is looking. */
-function emptyText() {
-  if (session || $("token").value) return "No vault yet.";
-  return cfg.dynamicEnvironmentId ? "Sign in to see your vaults." : "Type the operator token to see vaults.";
+
+/** Reads principal, shares and the USDC balance for the chosen wallet. Needs a wallet session and the browser RPC. */
+async function readWallet() {
+  const v = currentVault();
+  if (!dyn || !session?.address || !cfg.publicRpcUrl) { wallet = null; return; }
+  try {
+    const pub = dyn.publicClient();
+    const read = (address, abi, functionName, args = []) => pub.readContract({ address, abi, functionName, args });
+    const usdc = await read(cfg.usdc, erc20Abi, "balanceOf", [session.address]);
+    let principal = null, shares = null, sharesDecimals = 6;
+    if (v) {
+      shares = await read(v.vault, vaultAbi, "balanceOf", [session.address]);
+      sharesDecimals = Number(await read(v.vault, vaultAbi, "decimals"));
+      principal = await read(v.vault, vaultAbi, "convertToAssets", [shares]);
+    }
+    wallet = { vault: v?.vault, usdc, principal, shares, sharesDecimals };
+  } catch {
+    wallet = null; // an unreachable RPC only hides the wallet figures
+  }
+  renderTreasury();
 }
-$("vaults").addEventListener("click", async (e) => {
+
+function renderTreasury() {
+  const v = currentVault();
+  const s = lastState;
+  const w = wallet && wallet.vault === v?.vault ? wallet : null;
+  const principal = w?.principal != null ? Number(formatUnits(w.principal, 6)) : null;
+
+  // tag: period and flags, or a picker when the caller sees several vaults
+  if (s && s.vaults.length > 1) {
+    $("treasurytag").innerHTML = `Treasury · <select id="vaultpick">${s.vaults.map((x) =>
+      `<option value="${esc(x.vault)}"${x.vault === v?.vault ? " selected" : ""}>${esc(x.label)} ${esc(short(x.vault))} · period ${x.period}</option>`).join("")}</select>`;
+    $("vaultpick").onchange = (e) => { myVault = e.target.value; wallet = null; render().catch(fail("Refresh failed")); };
+  } else {
+    $("treasurytag").innerHTML = v ? `Treasury · period ${esc(v.period)}` : "Treasury · no vault yet";
+  }
+  if (v?.frozen) $("treasurytag").insertAdjacentHTML("beforeend", ` <span class="flag">frozen: loss pending</span>`);
+  if (v?.settling) $("treasurytag").insertAdjacentHTML("beforeend", ` <span class="flag">settling</span>`);
+
+  $("headline").innerHTML = !v
+    ? `Put idle USDC to work.<span class="second">Deposit once. Your keys open as the interest comes in.</span>`
+    : principal !== null
+      ? `Your ${esc(usd(principal, 0))} stays put.<span class="second">Only the interest it earns pays for inference.</span>`
+      : `Your principal stays put.<span class="second">Only the interest it earns pays for inference.</span>`;
+
+  // deposit card
+  $("deposittitle").textContent = v ? "Add to principal" : "Create your vault";
+  $("open").textContent = v ? "Deposit" : "Create vault and deposit";
+  $("walletbalance").textContent = w ? `Wallet balance ${Number(formatUnits(w.usdc, 6)).toLocaleString("en-US")} USDC` : "";
+  $("stepfunds").className = `step${w && w.usdc > 0n ? " done" : ""}`;
+  $("stepfunds").querySelector(".num").textContent = w && w.usdc > 0n ? "✓" : "1";
+
+  if (!v) return;
+  const keys = v.keys;
+  const used = sum(keys, (k) => k.spent);
+  const open = Math.max(0, v.credit - used);
+  $("yield").textContent = usd(v.yieldUsd);
+  $("vaultname").textContent = `${v.label} vault`;
+  $("vaultlink").textContent = `${short(v.vault)} ↗`;
+  if (cfg.explorer) $("vaultlink").href = `${cfg.explorer}/address/${v.vault}`; else $("vaultlink").removeAttribute("href");
+  $("usedamt").textContent = usd(used);
+  $("openamt").textContent = usd(open);
+  const share = v.credit > 0 ? used / v.credit : 0;
+  $("barused").hidden = used <= 0;
+  $("barused").style.flex = `0 0 ${Math.min(100, Math.max(12, share * 100))}%`;
+  $("principalbar").hidden = principal === null;
+  $("principal").textContent = principal !== null ? usd(principal) : "";
+  $("models").textContent = usd(sum(keys, (k) => k.modelSpent));
+  const live = keys.filter((k) => !k.revoked).length;
+  $("modelsnote").textContent = `through the proxy, ${live} key${live === 1 ? "" : "s"}`;
+  $("tools").textContent = usd(sum(keys, (k) => k.toolSpent));
+  $("backstop").textContent = v.hasOpenRouterKey ? `${usd(v.orUsage)} / ${usd(v.orLimit)}` : "none";
+  $("backstopnote").textContent = v.hasOpenRouterKey ? "OpenRouter key, synced" : "no provider key yet";
+  $("sharescell").hidden = w?.shares == null;
+  if (w?.shares != null) {
+    $("shares").textContent = `${Number(formatUnits(w.shares, w.sharesDecimals)).toLocaleString("en-US", { maximumFractionDigits: 1 })} infVAULT`;
+    $("sharesnote").textContent = `in ${short(session?.address)}`;
+  }
+  $("pvperiod").textContent = `period ${v.period} → ${v.period + 1}`;
+  $("pvusage").textContent = usd(v.preview.usage);
+  $("pvfee").textContent = usd(v.preview.fee);
+  $("pvreturned").textContent = usd(v.preview.returned);
+}
+
+function renderKeys() {
+  const v = currentVault();
+  $("keyshead").innerHTML = `${v ? "Every key spends only yield." : "Keys come after the vault."}<span class="second">Split by weight. Unused yield comes back, less 10%.</span>`;
+  $("addkey").disabled = !v;
+  const keys = v?.keys ?? [];
+  if (!keys.length) {
+    $("keyrows").innerHTML = `<tr><td colspan="6" class="empty"><b>No keys yet</b>${v
+      ? "Create one above. It spends from this period's yield."
+      : "Create one after your first deposit. It opens as soon as the vault has earned yield."}</td></tr>`;
+    return;
+  }
+  $("keyrows").innerHTML = keys.map((k) => {
+    const pct = (x) => (k.budget > 0 && x > 0 ? Math.max(1, Math.min(100, (x / k.budget) * 100)) : 0);
+    const bar = `${pct(k.modelSpent) ? `<i style="width:${pct(k.modelSpent)}%"></i>` : ""}${pct(k.toolSpent) ? `<i style="width:${pct(k.toolSpent)}%"></i>` : ""}`;
+    const created = new Date(k.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+    return `<tr class="${k.revoked ? "revoked" : ""}">
+      <td><div class="keyname"><span class="glyph">${KEY_ICON}</span><div><b>${esc(k.name)}</b>${k.id === newKeyId && !k.revoked ? `<span class="badge new">new</span>` : ""}${k.revoked ? `<span class="badge revoked">revoked</span>` : ""}
+        <small>${k.revoked ? "Revoked" : `Created ${esc(created)}`}</small></div></div></td>
+      <td class="amt faint">×${esc(k.weight)}</td>
+      <td class="amt">${usd(k.budget)}</td>
+      <td class="spend"><div class="nums"><span class="amt">${usd(k.spent)}</span><small>${k.revoked ? "" : `models ${usd(k.modelSpent)} · tools ${usd(k.toolSpent)}`}</small></div><div class="spendbar">${bar}</div></td>
+      <td class="amt"><b style="font-weight:500">${k.revoked ? "—" : usd(k.remaining)}</b></td>
+      <td class="actions">${k.revoked ? "" : `<button class="btn btn-small rotate" data-id="${esc(k.id)}" data-name="${esc(k.name)}">Rotate</button><button class="btn btn-small btn-danger revoke" data-id="${esc(k.id)}" data-name="${esc(k.name)}">Revoke</button>`}</td>
+    </tr>`;
+  }).join("");
+}
+$("keyrows").addEventListener("click", async (e) => {
   const b = e.target.closest("button");
   if (!b) return;
   try {
-    if (b.classList.contains("settle")) {
-      const r = await api("/api/admin/settle", { vault: b.dataset.vault });
-      log(`settle: ${JSON.stringify(r)}`);
-    } else if (b.classList.contains("revoke")) {
+    if (b.classList.contains("revoke")) {
       if (!confirm(`Revoke key ${b.dataset.name}? Its next request gets 401.`)) return;
       await api(`/api/keys/${b.dataset.id}/revoke`, {});
-      log(`revoked ${b.dataset.name}`);
+      activity({ icon: "✕", title: "Key revoked", detail: b.dataset.name });
     } else if (b.classList.contains("rotate")) {
       const r = await api(`/api/keys/${b.dataset.id}/rotate`, {});
       showKey(`Rotated key: ${b.dataset.name}`, r.key);
+      activity({ icon: "↺", title: "Key rotated", detail: `${b.dataset.name}, same budget` });
     } else {
       return;
     }
     await render();
-  } catch (err) {
-    log(String(err));
-  }
+  } catch (err) { fail("Key action failed")(err); }
 });
-$("token").addEventListener("change", () => { render().catch((e) => log(String(e))); });
 
-loadConfig().then(loadDynamic).then(render).catch((e) => log(String(e)));
+/** Session events, then the shown vault's settlements from the server that the session has not already listed. */
+function renderActivity() {
+  const v = currentVault();
+  const seen = new Set(events.map((e) => e.tx).filter(Boolean));
+  const settled = (lastState?.settlements ?? []).filter((s) => s.vault === v?.vault && !seen.has(s.tx))
+    .map((s) => ({ at: s.at, icon: "✓", title: "Settled", detail: `usage ${usd(Number(s.usageMicro) / 1e6)} to float`, tx: s.tx }));
+  const rows = [...events, ...settled].sort((a, b) => b.at - a.at);
+  const when = (at) => {
+    const d = new Date(at);
+    return d.toDateString() === new Date().toDateString()
+      ? d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false })
+      : d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  };
+  const link = (tx) => (!tx ? "" : cfg?.explorer
+    ? `<a href="${esc(cfg.explorer)}/tx/${esc(tx)}" target="_blank" rel="noopener">${esc(short(tx))} ↗</a>`
+    : `<span class="mono faint">${esc(short(tx))}</span>`);
+  $("activity").innerHTML = rows.length ? rows.map((r) => `<li class="${r.error ? "error" : ""}">
+      <time>${esc(when(r.at))}</time><span class="glyph">${esc(r.icon)}</span>
+      <div class="what"><b>${esc(r.title)}</b><span>${esc(r.detail)}</span></div>${link(r.tx)}</li>`).join("")
+    : `<li class="none">Nothing yet in this session.</li>`;
+}
+
+async function render() {
+  const s = await api("/api/state");
+  cfg = s.config;
+  lastState = s;
+  if (myVault && !s.vaults.some((v) => v.vault === myVault.toLowerCase())) myVault = undefined;
+  setPageState();
+  renderTreasury();
+  renderKeys();
+  renderActivity();
+  if (session && (!wallet || wallet.vault !== currentVault()?.vault)) await readWallet();
+}
+
+$("token").addEventListener("change", () => { render().catch(fail("Refresh failed")); });
+
+renderNotes();
+loadConfig()
+  .then(() => { renderSnippets(); return loadDynamic(); })
+  .then(() => { renderSession(); return render(); })
+  .catch(fail("Page failed to load"));

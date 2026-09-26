@@ -390,12 +390,13 @@ test("state exposes the public URL", async () => {
   server.close();
 });
 
-test("serves the setup page", async () => {
+test("/setup sends developers to the page's snippets", async () => {
   const { base, server } = await start();
-  const r = await fetch(base + "/setup");
-  assert.equal(r.status, 200);
-  assert.match(r.headers.get("content-type") ?? "", /text\/html/);
-  assert.match(await r.text(), /snippets\.js/);
+  const r = await fetch(base + "/setup", { redirect: "manual" });
+  assert.equal(r.status, 302);
+  assert.equal(r.headers.get("location"), "/#use-a-key");
+  const page = await (await fetch(base + "/")).text();
+  assert.match(page, /id="use-a-key"/);
   server.close();
 });
 
