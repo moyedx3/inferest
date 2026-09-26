@@ -11,6 +11,6 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["engine", "app", "demo"],
+  "include": ["engine", "app", "agent", "demo"],
   "exclude": ["app/dashboard"]
 }

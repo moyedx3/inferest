@@ -259,10 +259,10 @@ export function openStore(path: string, opts: { log?: (msg: string) => void } = 
       const r = db.prepare(`${KEY_SELECT} WHERE k.secret_sha256 = ?`).get(sha256);
       return r ? toKey(r) : undefined;
     },
-    recordToolCall(keyId: string, api: string, path: string, priceUsd: number): void {
+    recordToolCall(keyId: string, api: string, path: string, priceUsd: number, now: number = Date.now()): void {
       const r = db.prepare(`INSERT INTO tool_calls (key_id, api, path, price, period, at)
         SELECT ?, ?, ?, ?, v.period, ? FROM keys k JOIN vaults v ON v.vault = k.vault WHERE k.id = ?`)
-        .run(keyId, api, path, priceUsd, Date.now(), keyId);
+        .run(keyId, api, path, priceUsd, now, keyId);
       if (Number(r.changes) === 0) throw new Error(`unknown key ${keyId}`);
     },
     /** Records a metered call. Idempotent on generation id: a repeat is ignored, a pending row is upgraded. */
@@ -315,6 +315,14 @@ export function openStore(path: string, opts: { log?: (msg: string) => void } = 
         modelUsd: round6(keys.reduce((s, k) => s + k.modelSpent, 0)),
         toolUsd: round6(keys.reduce((s, k) => s + k.toolSpent, 0)),
       };
+    },
+    /** Model and tool spend of the given keys with `at` in [from, to]. Pending model calls (cost unknown) count as calls, not dollars. */
+    spendInWindow(keyIds: string[], from: number, to: number): { modelUsd: number; toolUsd: number; modelCalls: number; toolCalls: number } {
+      if (!keyIds.length) return { modelUsd: 0, toolUsd: 0, modelCalls: 0, toolCalls: 0 };
+      const marks = keyIds.map(() => "?").join(",");
+      const m = db.prepare(`SELECT COALESCE(SUM(cost_usd), 0) AS usd, COUNT(*) AS n FROM model_calls WHERE key_id IN (${marks}) AND at BETWEEN ? AND ?`).get(...keyIds, from, to) as { usd: number; n: number };
+      const t = db.prepare(`SELECT COALESCE(SUM(price), 0) AS usd, COUNT(*) AS n FROM tool_calls WHERE key_id IN (${marks}) AND at BETWEEN ? AND ?`).get(...keyIds, from, to) as { usd: number; n: number };
+      return { modelUsd: m.usd, toolUsd: t.usd, modelCalls: m.n, toolCalls: t.n };
     },
     /** Every recorded model cost for the vault across all periods, for the daily drift check. */
     totalModelCost(vault: string): number {

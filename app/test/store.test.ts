@@ -417,3 +417,16 @@ test("an unsupported schema version is refused", () => {
     rmSync(path, { force: true });
   }
 });
+
+test("spendInWindow sums the given keys' model and tool rows inside the window only", () => {
+  const store = openStore(":memory:");
+  store.addVault("0xv", "0xc", "T");
+  store.addKey({ id: "k1", vault: "0xv", name: "a", weight: 1, secretSha256: "s1" });
+  store.addKey({ id: "k2", vault: "0xv", name: "b", weight: 1, secretSha256: "s2" });
+  store.recordModelCall({ keyId: "k1", model: "m", costUsd: 0.5, generationId: "g1" }, 1_000);
+  store.recordModelCall({ keyId: "k1", model: "m", costUsd: 0.25, generationId: "g2" }, 5_000);
+  store.recordToolCall("k1", "search", "/s", 0.1, 9_000); // outside the first window, inside the second
+  store.recordModelCall({ keyId: "k2", model: "m", costUsd: 9, generationId: "g3" }, 1_500);
+  assert.deepEqual(store.spendInWindow(["k1"], 900, 2_000), { modelUsd: 0.5, toolUsd: 0, modelCalls: 1, toolCalls: 0 });
+  assert.deepEqual(store.spendInWindow(["k1", "k2"], 0, 10_000), { modelUsd: 9.75, toolUsd: 0.1, modelCalls: 3, toolCalls: 1 });
+});

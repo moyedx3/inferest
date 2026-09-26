@@ -640,3 +640,34 @@ test("the faucet funds a session's own wallet and refuses a foreign address", as
   assert.equal((await fetch(base + "/api/demo/fund", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ address: OWNER }) })).status, 401);
   server.close();
 });
+
+import { openAgentLog } from "../../agent/log.ts";
+
+test("GET /api/agent is 404 without a runner and public with one", async () => {
+  const { base, server, store, d } = await start();
+  assert.equal((await fetch(base + "/api/agent")).status, 404);
+  const log = openAgentLog(":memory:");
+  d.agentLog = log;
+  assert.equal((await fetch(base + "/api/agent")).status, 404); // tables exist, no vault registered yet
+  await post(base, "/api/vaults", { vault: V, label: "Agent" });
+  const { id: keyId } = await (await post(base, "/api/keys", { vault: V, name: "agent", weight: 1 })).json();
+  log.setMeta("address", "0x00000000000000000000000000000000000000cc");
+  log.setMeta("vault", V);
+  log.setMeta("keys", JSON.stringify([keyId]));
+  const run = log.startRun({ clockAt: 1_700_000_000, bookBefore: { walletUsdc: 500 } }, 1_000);
+  store.recordModelCall({ keyId, model: "m", costUsd: 0.002, generationId: "g1" }, 1_500);
+  log.addAction(run, { kind: "deposit", detail: { amountUsdc: 50 }, tx: "0xdead" });
+  log.finishRun(run, { status: "done", note: "parked 50", decision: { split: { action: "deposit", amountUsdc: 50 } }, bookAfter: { walletUsdc: 450 } }, 2_000);
+  const r = await fetch(base + "/api/agent");
+  assert.equal(r.status, 200);
+  const body: any = await r.json();
+  assert.equal(body.agent.vault, V);
+  assert.equal(body.agent.runCount, 1);
+  assert.equal(body.budget.vault, V);
+  assert.deepEqual(body.runs[0].cost, { models: 0.002, tools: 0 });
+  assert.equal(body.runs[0].actions[0].tx, "0xdead");
+  assert.equal(body.book.floor, 200);
+  assert.ok(Array.isArray(body.sources));
+  assert.ok(!JSON.stringify(body).includes("secret"));
+  server.close();
+});
