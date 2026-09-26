@@ -7,6 +7,7 @@ import { toolGateway, x402PayingFetch, type PayingFetchFactory } from "./tools.t
 import { syncAll, reportAll, settleVault, tick, toolBudgetFor, type KeeperDeps } from "./keeper.ts";
 import { createApp } from "./server.ts";
 import { createProxy } from "./proxy.ts";
+import { settleThroughServer, describeSettle } from "./remote.ts";
 
 const cfg = loadConfig();
 const store = openStore(cfg.dbPath, { log: (m) => console.log(new Date().toISOString(), m) });
@@ -45,14 +46,22 @@ switch (cmd) {
   }
   case "sync": await syncAll(keeper); break;
   case "report": await reportAll(keeper); break;
-  case "settle":
+  case "settle": {
     if (!store.vault(String(arg))) {
       console.log("unknown vault");
       process.exitCode = 1;
       break;
     }
-    console.log(await settleVault(keeper, String(arg)));
+    const remote = await settleThroughServer(cfg.publicUrl, cfg.adminToken, String(arg));
+    if (remote) {
+      console.log(`settled through the server at ${cfg.publicUrl}: ${describeSettle(remote)}`);
+    } else {
+      console.log(`no server at ${cfg.publicUrl}, settling in this process`);
+      const result = await settleVault(keeper, String(arg));
+      console.log(describeSettle(result));
+    }
     break;
+  }
   default:
     console.log("usage: node app/cli.ts serve | sync | report | settle <vault>");
     process.exitCode = 1;
