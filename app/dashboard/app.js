@@ -126,9 +126,11 @@ function loginOff(msg) {
 function placeOperatorField() {
   if (!loginIsOff) return;
   const out = document.body.dataset.state === "out";
-  (out ? $("operatorslot") : $("operator")).appendChild($("operatorfield"));
+  const home = out ? $("operatorslot") : $("operator");
+  if ($("operatorfield").parentElement === home) return;
+  home.appendChild($("operatorfield"));
   show("operator", !out);
-  $("operator").open = !out;
+  $("operator").open = !out; // opened once, when the field arrives; the user may close it after that
 }
 
 function renderSession() {
