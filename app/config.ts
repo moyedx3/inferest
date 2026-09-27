@@ -44,6 +44,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   if (!(railFee >= 0 && railFee < 1)) throw new Error("RAIL_FEE must be in [0, 1)");
   const keyEncryptionKey = need("KEY_ENCRYPTION_KEY");
   if (!/^[0-9a-f]{64}$/i.test(keyEncryptionKey)) throw new Error("KEY_ENCRYPTION_KEY must be 32 bytes as 64 hex characters");
+  const adminToken = need("ADMIN_TOKEN");
+  if (adminToken.length < 32) console.warn("ADMIN_TOKEN is under 32 characters; use openssl rand -hex 32");
   const port = Number(env.PORT ?? 8787);
   return {
     rpcUrl: need("RPC_URL"),
@@ -57,7 +59,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     openRouterKey: need("OPENROUTER_MANAGEMENT_KEY"),
     orthogonalKey: env.ORTHOGONAL_API_KEY ?? "",
     toolWalletKey: env.TOOL_WALLET_PRIVATE_KEY ? (env.TOOL_WALLET_PRIVATE_KEY as Hex) : undefined,
-    adminToken: need("ADMIN_TOKEN"),
+    adminToken,
     keyEncryptionKey,
     publicUrl: (env.PUBLIC_URL ?? `http://localhost:${port}`).replace(/\/+$/, ""),
     dbPath: env.DB_PATH ?? "inferest.db",

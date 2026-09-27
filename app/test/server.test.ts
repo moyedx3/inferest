@@ -209,6 +209,14 @@ test("negative weights are rejected", async () => {
   server.close();
 });
 
+test("a JSON body over the cap answers 413", async () => {
+  const { base, server } = await start();
+  const r = await post(base, "/api/keys", { vault: V, name: "x".repeat(1_200_000), weight: 1 });
+  assert.equal(r.status, 413);
+  assert.deepEqual(await r.json(), { error: "request too large" });
+  server.close();
+});
+
 test("MCP rejects an unknown key", async () => {
   const { base, server } = await start();
   assert.equal((await mcpList(base, "nope")).status, 401);

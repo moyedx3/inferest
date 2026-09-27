@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { sha256, encryptSecret, decryptSecret, newInferestKey, secretBox } from "../crypto.ts";
+import { sha256, encryptSecret, decryptSecret, newInferestKey, secretBox, sameSecret } from "../crypto.ts";
 
 const KEY = "00".repeat(31) + "01";
 
@@ -46,4 +46,11 @@ test("newInferestKey makes an sk-inf secret and a separate id", () => {
 test("secretBox binds the key", () => {
   const box = secretBox(KEY);
   assert.equal(box.decrypt(box.encrypt("hello")), "hello");
+});
+
+test("sameSecret matches equal strings only, and a missing header never", () => {
+  assert.equal(sameSecret("admin-token", "admin-token"), true);
+  assert.equal(sameSecret("admin-tokeX", "admin-token"), false);
+  assert.equal(sameSecret("admin", "admin-token"), false);
+  assert.equal(sameSecret(undefined, "admin-token"), false);
 });

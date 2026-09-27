@@ -28,3 +28,7 @@ contracts/broadcast/
 inferest.db*
 app/dashboard/dynamic.bundle.js
 !.env.example
+
+# editor state and fork deployments
+.obsidian/
+contracts/deployments/*.json

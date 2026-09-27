@@ -173,7 +173,7 @@ Settled 2026-09-24. Where they depart from the source notes in [`sources/`](sour
 | 1 | Treasuries will turn this on | **zero conversations** |
 | 2 | Yield covers a meaningful share of spend | only at treasury scale: $56K principal per $200/month developer |
 | 3 | A rail will let us resell credit | **OpenRouter's standard terms forbid it**; enterprise terms allow it |
-| 4 | A CFO will deposit into a per-customer YDS vault we deploy | structure checked, not built |
+| 4 | A CFO will deposit into a per-customer YDS vault we deploy | built: one Octant vault per customer, shares in the customer's wallet; no customer has deposited yet |
 | 5 | Fee on leftover yield is enough revenue | heavy users pay nothing. See `docs/04` |
 
 > **A working demo proves none of the five.** It is worth building anyway. The two should not be confused.

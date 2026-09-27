@@ -41,7 +41,7 @@ const KEY_LIMIT = /key limit exceeded/i;
 /** Past this much buffered stream text without an event boundary, the proxy stops parsing and only relays. */
 export const MAX_SSE_BUFFER = 1024 * 1024;
 
-class BodyTooLarge extends Error {}
+export class BodyTooLarge extends Error {}
 
 /** Every error the proxy makes itself is in the OpenAI shape, so SDKs surface the message. */
 export function fail(res: ServerResponse, status: number, type: string, message: string, headers: Record<string, string> = {}): void {
@@ -55,7 +55,7 @@ function bearer(req: IncomingMessage): string {
 }
 
 /** Reads the body up to the cap. Past it, rejects at once and keeps draining, so the 413 can still be delivered. */
-function readBody(req: IncomingMessage, max: number): Promise<string> {
+export function readBody(req: IncomingMessage, max: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
