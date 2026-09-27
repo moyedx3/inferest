@@ -26,5 +26,7 @@ contracts/cache/
 contracts/broadcast/
 # app
 inferest.db
+inferest.db-shm
+inferest.db-wal
 app/dashboard/dynamic.bundle.js
 !.env.example

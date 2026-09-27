@@ -13,3 +13,17 @@ _The path a customer or a reviewer follows on a running Inferest dashboard. Ten 
 9. **Sign out**: the page goes back to the sign-in view. Sign in again with the same email (or the same wallet) and your vault is back.
 
 What you did not do: hand anyone a key, top up a card, or trust the operator with your principal.
+
+## Agents
+
+Open **`/agents`**; no sign-in. The page shows the hosted agent from `GET /api/agent` and polls it every ten seconds.
+
+- **The head** names the run count and the vault's period; the headline gives the book's total.
+- **The book** splits it: the blue part is parked in the agent's Inferest vault at the named source and rate, the soft blue part works in its wallet as USDC and paper positions. The thin line marks the floor the vault never goes under. Open positions list entry, mark and the change so far.
+- **The thinking budget** is the Treasury page's yield card over the agent's vault: the yield earned this period, what the models and paid tools used, the provider backstop, and what a settlement now would do.
+- **Runs** lists every run, newest first: the chain date, the status (thinking, done, out of budget, failed), the note, what it did (deposits, moves between sources, paper trades, and anything the fence refused), the tool calls and what the run cost.
+- **Yield sources** lists the allowlisted vaults with their rates; the one it is parked in says "here".
+- **Activity** lists the settlements and the runs' transactions.
+- **Your own agent** has the agent config and MCP setups with a placeholder key, and a link to get a real key on Treasury.
+
+A new run appears every `AGENT_INTERVAL_MS`. On a fork with `AGENT_DEMO_DAYS` set, the chain clock moves forward before each run, so the run dates jump by days and yield accrues between them. When the period's yield is used up, the proxy answers the agent with 402 `insufficient_quota`, and the run shows "out of budget" until the vault earns more.
