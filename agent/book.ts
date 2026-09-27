@@ -30,7 +30,7 @@ export async function readBook(d: { pub: ReturnType<typeof publicClient>; addres
   }
   const samples = [];
   for (const t of d.targets) {
-    const sharePrice = await d.pub.readContract({ address: t, abi: erc4626Abi, functionName: "convertToAssets", args: [1_000_000n] });
+    const sharePrice = await d.pub.readContract({ address: t, abi: erc4626Abi, functionName: "convertToAssets", args: [10n ** 18n] });
     d.log.addSample(t, sharePrice, clockAt);
     samples.push({ target: t.toLowerCase(), sharePrice, at: clockAt });
   }

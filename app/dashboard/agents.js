@@ -130,6 +130,7 @@ function renderRuns(runs) {
         <div class="runhead"><span class="status ${cls}">${esc(label)}</span><b>Run ${esc(r.id)}</b>${r.note ? `<span>${esc(r.note)}</span>` : ""}</div>
         ${r.actions.length ? `<ul class="acts">${r.actions.map((a) => `<li class="${a.kind === "refused" ? "refused" : ""}">${actionLine(a)}</li>`).join("")}</ul>` : ""}
         <div class="runfoot">${calls.length} tool call${calls.length === 1 ? "" : "s"}, ${paid} paid · models ${esc(spent(r.cost.models))} · tools ${esc(spent(r.cost.tools))}</div>
+        ${calls.length ? `<div class="runfoot">${esc(calls.map((c) => c.name).join(", "))}</div>` : ""}
       </div></li>`;
   }).join("");
 }

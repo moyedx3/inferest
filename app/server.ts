@@ -189,13 +189,15 @@ async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse): Pro
       return { target: t.address, name: t.name, rate: rateFrom(s), current: t.address.toLowerCase() === (log.getMeta("source") ?? "").toLowerCase() };
     });
     const book = JSON.parse(log.getMeta("book") ?? "{}");
+    // a source move leaves settlements on the agent's older vaults: keep every vault it has used
+    const agentVaults = new Set([vault, ...Object.values(JSON.parse(log.getMeta("vaultsByTarget") ?? "{}") as Record<string, string>).map((v) => v.toLowerCase())]);
     return send(res, 200, {
       agent: { address: log.getMeta("address") ?? null, vault, source: sources.find((s) => s.current) ?? null, period: row.period, runCount: log.latestRun()?.id ?? 0 },
       book: { walletUsdc: book.walletUsdc ?? null, vaultValue: book.vaultValue ?? null, floor: Number(log.getMeta("floor") ?? 200), positions: log.openPositions() },
       budget: vaultEntry(d, row),
       sources,
       runs,
-      settlements: d.store.listSettlements().filter((s) => s.vault === vault),
+      settlements: d.store.listSettlements().filter((s) => agentVaults.has(s.vault)),
     });
   }
 

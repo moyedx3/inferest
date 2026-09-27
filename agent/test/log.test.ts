@@ -39,3 +39,27 @@ test("positions open and close", () => {
   log.closePosition(id, run, 4_050);
   assert.equal(log.openPositions().length, 0);
 });
+
+test("a run left running is closed as failed on start, and finished runs are untouched", () => {
+  const log = openAgentLog(":memory:");
+  const done = log.startRun({ clockAt: 1, bookBefore: {} }, 1_000);
+  log.finishRun(done, { status: "done", note: "", decision: null, bookAfter: {} }, 1_500);
+  const stale = log.startRun({ clockAt: 2, bookBefore: {} }, 2_000);
+  assert.equal(log.failStaleRuns(9_000), 1);
+  const [s, d] = log.listRuns(10);
+  assert.equal(s.id, stale);
+  assert.equal(s.status, "failed");
+  assert.equal(s.finishedAt, 2_000);
+  assert.equal(s.error, "runner stopped");
+  assert.equal(d.status, "done");
+  assert.equal(d.finishedAt, 1_500);
+  assert.equal(log.failStaleRuns(9_000), 0);
+});
+
+test("a second sample at the same time does not hide a known rate", () => {
+  const log = openAgentLog(":memory:");
+  log.addSample("0xT", 1_000_000n, 100);
+  log.addSample("0xT", 1_001_000n, 200);
+  log.addSample("0xT", 1_001_000n, 200);
+  assert.deepEqual(log.lastSamples("0xT").map((s) => s.at), [100, 200]);
+});

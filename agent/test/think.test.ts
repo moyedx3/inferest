@@ -6,7 +6,7 @@ const mcp: Mcp = {
   listTools: async () => [{ name: "search_tools", description: "find a tool", inputSchema: { type: "object" } }],
   callTool: async (name, args) => ({ content: [{ type: "text", text: `result of ${name} ${JSON.stringify(args)}` }] }),
 };
-const prompt = { walletUsdc: 500, vaultValue: 500, floorUsdc: 200, currentTarget: "0xa", targets: [{ address: "0xa", name: "A", rate: 0.04 }, { address: "0xb", name: "B", rate: null }], positions: [] };
+const prompt = { walletUsdc: 500, vaultValue: 500, floorUsdc: 200, currentTarget: "0xa", tradeCapBps: 1500, targets: [{ address: "0xa", name: "A", rate: 0.04 }, { address: "0xb", name: "B", rate: null }], positions: [] };
 const decision = { note: "hold", split: { action: "hold", amountUsdc: 0 }, source: { action: "stay", target: null }, trades: [] };
 const reply = (message: unknown) => new Response(JSON.stringify({ choices: [{ message }] }), { status: 200, headers: { "content-type": "application/json" } });
 
@@ -23,6 +23,7 @@ test("the loop calls a paid tool, then decides", async () => {
   assert.deepEqual(r.toolCalls, [{ name: "search_tools", args: { query: "eth price" } }]);
   assert.equal(r.turns, 2);
   assert.equal(bodies[0].messages[0].role, "system");
+  assert.match(bodies[0].messages[0].content, /a buy at most 15% of the working half; a sell at most the open position; at most 3 trades\./);
   assert.ok(bodies[0].tools.some((t: any) => t.function.name === "decide"));
   assert.equal(bodies[1].messages.at(-1).role, "tool");
 });

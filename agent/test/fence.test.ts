@@ -4,7 +4,7 @@ import { applyFence, type Decision, type FenceContext, type Trade } from "../fen
 
 const ctx: FenceContext = {
   walletUsdc: 500, vaultValue: 500, floorUsdc: 200, currentTarget: "0xa", targets: ["0xa", "0xb"],
-  tradeCapBps: 2000, positions: [{ asset: "ETH", sizeUsdc: 60 }],
+  tradeCapBps: 2000, positions: [{ asset: "ETH", sizeUsdc: 60 }], unrated: [],
 };
 const base = (over: Partial<Decision> = {}): Decision => ({ note: "n", split: { action: "hold", amountUsdc: 0 }, source: { action: "stay", target: null }, trades: [], ...over });
 
@@ -49,4 +49,9 @@ test("a deposit above the wallet, a sell above the position, a fourth trade, a z
   assert.equal(accepted.source.action, "stay");
   assert.equal(accepted.trades.length, 3); // the three legal ARB buys; the fourth is over the per-run count
   assert.equal(refused.filter((r) => r.what.startsWith("trade")).length, 3);
+});
+test("a move to a source whose rate is unknown is refused", () => {
+  const { accepted, refused } = applyFence(base({ source: { action: "move", target: "0xB" } }), { ...ctx, unrated: ["0xb"] });
+  assert.equal(accepted.source.action, "stay");
+  assert.deepEqual(refused, [{ what: "source", reason: "rate unknown yet" }]);
 });

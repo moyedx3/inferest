@@ -1,11 +1,11 @@
-import type { Decision } from "./fence.ts";
+import { MAX_TRADES, type Decision } from "./fence.ts";
 
 export type Mcp = {
   listTools(): Promise<{ name: string; description?: string; inputSchema: unknown }[]>;
   callTool(name: string, args: unknown): Promise<unknown>;
 };
 export type PromptBook = {
-  walletUsdc: number; vaultValue: number; floorUsdc: number; currentTarget: string | null;
+  walletUsdc: number; vaultValue: number; floorUsdc: number; currentTarget: string | null; tradeCapBps: number;
   targets: { address: string; name: string; rate: number | null }[];
   positions: { asset: string; side: string; sizeUsdc: number; entryPrice: number; markPrice: number }[];
 };
@@ -36,7 +36,7 @@ export function systemPrompt(b: PromptBook): string {
     `Book: ${b.walletUsdc.toFixed(2)} USDC working, ${b.vaultValue.toFixed(2)} USDC parked in the vault (floor ${b.floorUsdc} USDC). Current yield source: ${b.currentTarget ?? "none"}.`,
     `Allowed yield sources: ${b.targets.map((t) => `${t.name} ${t.address} at ${pct(t.rate)}`).join("; ")}.`,
     `Open paper positions: ${b.positions.length ? b.positions.map((p) => `${p.side} ${p.asset} ${p.sizeUsdc} USDC at ${p.entryPrice}, marked ${p.markPrice}`).join("; ") : "none"}.`,
-    "Rules you must respect: the vault never goes below the floor; one split move and one source move per run at most; only ETH, BTC or ARB against USDC; a buy at most 20% of the working half; a sell at most the open position; at most three trades.",
+    `Rules you must respect: the vault never goes below the floor; one split move and one source move per run at most; only ETH, BTC or ARB against USDC; a buy at most ${b.tradeCapBps / 100}% of the working half; a sell at most the open position; at most ${MAX_TRADES} trades.`,
     "Research with the tools: search_tools finds a paid web search, price or news tool, tool_details shows its parameters, run_tool calls it. Only run_tool costs money, from your budget, so run only what you need. Then call decide exactly once.",
   ].join("\n");
 }
@@ -58,7 +58,7 @@ const PAID = "run_tool";
  * the paid-tool cap; discovery is free. At the paid-tool cap or on the last allowed turn, one call offers only
  * `decide` and forces it. Never throws on a 402: it reports it.
  */
-export async function think(i: { key: string; model: string; api: string; mcp: Mcp; book: PromptBook; maxTurns: number; maxToolCalls: number; fetchFn?: typeof fetch }): Promise<ThinkResult> {
+export async function think(i: { key: string; model: string; api: string; mcp: Mcp; book: PromptBook; maxTurns: number; maxToolCalls: number; fetchFn?: typeof fetch; timeoutMs?: number }): Promise<ThinkResult> {
   const fetchFn = i.fetchFn ?? fetch;
   const mcpTools = await i.mcp.listTools();
   const tools = [...mcpTools.map((t) => ({ type: "function", function: { name: t.name, description: t.description ?? "", parameters: t.inputSchema } })), DECIDE];
@@ -76,6 +76,8 @@ export async function think(i: { key: string; model: string; api: string; mcp: M
     const r = await fetchFn(`${i.api}/v1/chat/completions`, {
       method: "POST", headers: { Authorization: `Bearer ${i.key}`, "Content-Type": "application/json" },
       body: JSON.stringify({ model: i.model, messages, ...body }),
+      // a hung proxy call throws a TimeoutError, which the runner records as the run's error
+      signal: AbortSignal.timeout(i.timeoutMs ?? 180_000),
     });
     if (r.status === 402) return { end: done({ outOfBudget: true }) };
     if (!r.ok) return { end: done({ error: `proxy answered ${r.status}` }) };

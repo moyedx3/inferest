@@ -654,6 +654,11 @@ test("GET /api/agent is 404 without a runner and public with one", async () => {
   log.setMeta("address", "0x00000000000000000000000000000000000000cc");
   log.setMeta("vault", V);
   log.setMeta("keys", JSON.stringify([keyId]));
+  const OLD = "0x00000000000000000000000000000000000000ab";
+  log.setMeta("vaultsByTarget", JSON.stringify({ "0x00000000000000000000000000000000000000c1": OLD.toUpperCase().replace("0X", "0x"), "0x00000000000000000000000000000000000000c2": V }));
+  store.recordSettlement(OLD, 7n, "0xold");
+  store.recordSettlement(V, 9n, "0xnew");
+  store.recordSettlement("0x00000000000000000000000000000000000000ee", 3n, "0xother");
   const run = log.startRun({ clockAt: 1_700_000_000, bookBefore: { walletUsdc: 500 } }, 1_000);
   store.recordModelCall({ keyId, model: "m", costUsd: 0.002, generationId: "g1" }, 1_500);
   log.addAction(run, { kind: "deposit", detail: { amountUsdc: 50 }, tx: "0xdead" });
@@ -668,6 +673,7 @@ test("GET /api/agent is 404 without a runner and public with one", async () => {
   assert.equal(body.runs[0].actions[0].tx, "0xdead");
   assert.equal(body.book.floor, 200);
   assert.ok(Array.isArray(body.sources));
+  assert.deepEqual(body.settlements.map((x: any) => x.tx).sort(), ["0xnew", "0xold"]); // the older agent vault's settlement survives the move
   assert.ok(!JSON.stringify(body).includes("secret"));
   server.close();
 });

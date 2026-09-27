@@ -44,8 +44,18 @@ export function openAgentLog(path: string) {
       db.prepare("INSERT INTO agent_samples (target, share_price, at) VALUES (?, ?, ?)").run(target.toLowerCase(), sharePrice.toString(), at);
     },
     lastSamples(target: string): { sharePrice: bigint; at: number }[] {
-      return (db.prepare("SELECT share_price, at FROM agent_samples WHERE target = ? ORDER BY at DESC, id DESC LIMIT 2").all(target.toLowerCase()) as { share_price: string; at: number }[])
+      // the latest row at each of the last two distinct times, so a second sample in one fork block cannot hide the rate
+      return (db.prepare(`SELECT s.share_price, s.at FROM agent_samples s
+        WHERE s.target = ? AND s.id = (SELECT MAX(id) FROM agent_samples WHERE target = s.target AND at = s.at)
+        ORDER BY s.at DESC LIMIT 2`).all(target.toLowerCase()) as { share_price: string; at: number }[])
         .map((r) => ({ sharePrice: BigInt(r.share_price), at: r.at })).reverse();
+    },
+    /**
+     * Every run started by `now` and left `running` by a stopped process is closed as failed. Its start stands as its
+     * finish, so no run appears to last across the downtime. The runner calls this first on start.
+     */
+    failStaleRuns(now: number = Date.now()): number {
+      return Number(db.prepare("UPDATE agent_runs SET status = 'failed', finished_at = started_at, error = 'runner stopped' WHERE status = 'running' AND started_at <= ?").run(now).changes);
     },
     startRun(r: { clockAt: number; bookBefore: unknown }, now: number = Date.now()): number {
       return Number(db.prepare("INSERT INTO agent_runs (started_at, clock_at, status, book_before) VALUES (?, ?, 'running', ?)").run(now, r.clockAt, j(r.bookBefore)).lastInsertRowid);
