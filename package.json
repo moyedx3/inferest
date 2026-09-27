@@ -1,5 +1,6 @@
 {
   "name": "inferest",
+  "license": "MIT",
   "private": true,
   "type": "module",
   "scripts": {
