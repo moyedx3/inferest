@@ -677,3 +677,14 @@ test("GET /api/agent is 404 without a runner and public with one", async () => {
   assert.ok(!JSON.stringify(body).includes("secret"));
   server.close();
 });
+
+test("the logo files are served as SVG images", async () => {
+  const { base, server } = await start();
+  for (const path of ["/inferest-icon.svg", "/favicon.svg"]) {
+    const r = await fetch(base + path);
+    assert.equal(r.status, 200, path);
+    assert.equal(r.headers.get("content-type"), "image/svg+xml", path);
+    assert.ok((await r.text()).includes("<svg"), path);
+  }
+  server.close();
+});

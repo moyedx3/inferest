@@ -117,12 +117,13 @@ function state(d: AppDeps, caller: Caller) {
 
 async function serveStatic(res: ServerResponse, pathname: string): Promise<void> {
   const PAGES: Record<string, string> = { "/": "home.html", "/treasury": "treasury.html", "/agents": "agents.html" };
+  const TYPES: Record<string, string> = { js: "text/javascript", css: "text/css", svg: "image/svg+xml", html: "text/html" };
   const file = PAGES[pathname] ?? pathname.slice(1);
   if (file === "index.html" || file.endsWith(".html") && !Object.values(PAGES).includes(file)) return send(res, 404, { error: "not found" });
   if (!/^[a-z0-9.-]+$/i.test(file)) return send(res, 404, { error: "not found" });
   try {
     const body = await readFile(DASHBOARD + file);
-    res.writeHead(200, { "Content-Type": file.endsWith(".js") ? "text/javascript" : file.endsWith(".css") ? "text/css" : "text/html" });
+    res.writeHead(200, { "Content-Type": TYPES[file.split(".").pop() ?? ""] ?? "text/html" });
     res.end(body);
   } catch {
     send(res, 404, { error: "not found" });
