@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Inferest · How it works (animated)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz@6..72&family=Geist:wght@400;500&family=Geist+Mono:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root { --bg:#F4F2EE; --surface:#FFFFFF; --surface-2:#FAF9F6; --ink:#151513; --ink-2:#5F5B54; --ink-3:#A19C93; --line:#E4E0D8; --lime:#E3F25A; --blue:#4E6AF0; --blue-soft:#D9E0FC; --tag:#E9E6DF;
+  --serif:"Newsreader",Georgia,serif; --sans:"Geist",system-ui,sans-serif; --mono:"Geist Mono",ui-monospace,monospace; }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.5 var(--sans); -webkit-font-smoothing:antialiased; }
+.label { background:var(--ink); color:#ffffffb3; padding:18px 120px; display:flex; gap:16px; font-size:13px; }
+.label b { font:14px var(--mono); color:var(--lime); font-weight:400; }
+section { padding:72px 120px 80px; }
+.tag { display:inline-block; background:var(--tag); border-left:2px solid var(--ink-3); padding:4px 10px; font-size:12px; color:var(--ink-2); }
+h2 { font:40px/1.12 var(--serif); letter-spacing:-.8px; margin:20px 0 40px; font-weight:400; }
+h2 span { display:block; color:var(--ink-3); }
+
+/* A: cards with moving dots */
+.lane { display:flex; align-items:stretch; }
+.node { flex:1; background:var(--surface); border:1px solid var(--line); border-radius:14px; padding:20px; display:flex; flex-direction:column; gap:14px; }
+.node.dark { background:var(--ink); border-color:var(--ink); color:#fff; }
+.node .top { display:flex; justify-content:space-between; font:12px var(--mono); color:var(--ink-3); }
+.node h4 { margin:0; font:500 15px var(--sans); }
+.node p { margin:4px 0 0; font-size:12px; color:var(--ink-2); flex:1; }
+.node.dark p { color:#ffffff99; }
+.chip { align-self:flex-start; font:12px var(--mono); padding:3px 8px; border-radius:6px; background:var(--surface-2); border:1px solid var(--line); }
+.node.dark .chip { background:var(--lime); border-color:var(--lime); color:var(--ink); }
+.link { width:64px; display:flex; flex-direction:column; justify-content:center; align-items:center; gap:6px; padding:0 6px; font:11px var(--mono); color:var(--ink-3); }
+.wire { position:relative; width:100%; height:12px; }
+.wire::before { content:""; position:absolute; left:0; right:4px; top:5.5px; height:1.5px; background:var(--ink); }
+.wire::after { content:""; position:absolute; right:0; top:2px; border:4px solid transparent; border-left:6px solid var(--ink); border-right:0; }
+.wire i { position:absolute; top:1px; left:0; width:10px; height:10px; border-radius:50%; background:var(--blue); animation:travel 2.4s cubic-bezier(.5,0,.5,1) infinite; animation-delay:var(--d); opacity:0; }
+@keyframes travel { 0%{left:0;opacity:0} 10%{opacity:1} 80%{opacity:1} 100%{left:calc(100% - 10px);opacity:0} }
+.node.pulse { animation:pulse 2.4s ease-in-out infinite; animation-delay:var(--d); }
+@keyframes pulse { 0%,60%,100%{box-shadow:0 0 0 0 #4E6AF000} 70%{box-shadow:0 0 0 4px #4E6AF033} }
+.ret { margin-top:24px; background:var(--surface-2); border:1px solid var(--line); border-radius:14px; padding:18px 24px; display:flex; align-items:center; gap:24px; font-size:13px; color:var(--ink-2); }
+.ret b { color:var(--ink); font-weight:500; }
+.ret .back { flex:1; position:relative; height:12px; }
+.ret .back::before { content:""; position:absolute; left:0; right:0; top:5.5px; border-top:1.5px dashed var(--ink-3); }
+.ret .back i { position:absolute; top:1px; width:10px; height:10px; border-radius:50%; border:1.5px solid var(--blue); background:var(--surface-2); animation:back 3.6s linear infinite; }
+@keyframes back { 0%{right:0;opacity:0} 10%{opacity:1} 90%{opacity:1} 100%{right:calc(100% - 10px);opacity:0} }
+.head { display:flex; justify-content:space-between; align-items:flex-end; gap:64px; margin:20px 0 40px; } .head h2 { margin:0; } .aside { width:400px; margin:0; font-size:15px; color:var(--ink-2); }
+.pill { font:12px var(--mono); padding:3px 6px; border-radius:4px; }
+
+/* B: step-through */
+.sim { background:var(--surface); border:1px solid var(--ink); font-family:var(--mono); }
+.bar { display:flex; align-items:center; border-bottom:1px solid var(--ink); }
+.bar button { background:var(--blue); color:#fff; border:0; font:13px var(--mono); padding:10px 16px; cursor:pointer; }
+.bar .title { flex:1; padding:0 16px; font-weight:700; }
+.dots { display:flex; gap:6px; padding:0 16px; }
+.dots span { width:9px; height:9px; border-radius:50%; background:var(--line); cursor:pointer; }
+.dots span.on { background:var(--blue); }
+.caption { padding:14px 16px; border-bottom:1px solid var(--ink); color:var(--ink-2); font-size:13px; min-height:72px; }
+.panels { display:grid; grid-template-columns:1fr 300px 320px; border-bottom:1px solid var(--ink); height:300px; }
+.panel { padding:16px; display:flex; flex-direction:column; gap:10px; }
+.panel + .panel { border-left:1px solid var(--ink); }
+.panel h5 { margin:0; font:700 13px var(--mono); }
+svg text { font:12px var(--mono); }
+.legend { font-size:11px; color:var(--ink-2); }
+.legend i { display:inline-block; width:8px; height:8px; margin-right:6px; }
+.chart { flex:1; display:flex; align-items:flex-end; justify-content:center; gap:12px; }
+.col { flex:1; display:flex; flex-direction:column; align-items:center; gap:4px; font-size:11px; }
+.col .v { font-size:10px; color:var(--ink-2); }
+.col .b { width:40px; background:var(--line); transition:height .8s cubic-bezier(.3,0,.2,1), background .4s; }
+.col.open .b { background:var(--blue); } .col.open .v { color:var(--blue); }
+.col.spent .b { background:var(--ink); }
+.rows { font-size:12px; }
+.row { display:flex; gap:10px; padding:8px; border-bottom:1px solid var(--line); animation:in .5s ease both; }
+.row .i { color:var(--ink-3); font-size:11px; } .row .op { flex:1; } .row.new { background:var(--blue-soft); } .row.off { color:var(--ink-3); }
+@keyframes in { from{opacity:0; transform:translateY(-4px)} }
+.wallet { padding:16px; display:flex; gap:10px; align-items:center; font-size:13px; }
+.box { border:1px solid var(--ink); padding:8px 12px; display:flex; gap:10px; }
+.box small { color:var(--ink-3); font-size:10px; align-self:center; }
+.wallet .note { flex:1; text-align:right; color:var(--ink-3); font-size:11px; }
+.fine { font-size:10px; color:var(--ink-3); }
+</style>
+</head>
+<body>
+
+<section>
+  <span class="tag">How it works</span>
+  <div class="head"><h2>Principal stays put.<span>Only the interest moves.</span></h2><p class="aside">Every step is a contract call or a metered request you can check. Nothing leaves your wallet but the yield.</p></div>
+  <div class="sim">
+    <div class="bar"><button id="prev">‹ prev</button><div class="title" id="title"></div><div class="dots" id="dots"></div><button id="next">next ›</button></div>
+    <div class="caption" id="caption"></div>
+    <div class="panels">
+      <div class="panel"><h5>network</h5><svg id="net" viewBox="0 0 548 240" width="100%" height="100%"></svg></div>
+      <div class="panel"><h5>balances</h5>
+        <div class="legend"><i style="background:var(--line)"></i>at rest<br><i style="background:var(--blue)"></i>open credit (in flight)</div>
+        <div class="chart" id="chart"></div><div class="fine">* principal not to scale</div></div>
+      <div class="panel"><h5>ledger (on-chain)</h5><div class="rows" id="ledger"></div></div>
+    </div>
+    <div class="wallet"><b style="margin-right:6px">your wallet</b>
+      <div class="box"><small>infVAULT</small><span id="shares">100,000.00</span></div>
+      <div class="box"><small>USDC</small><span>0.00</span></div>
+      <span style="color:var(--blue)">principal spent: 0.00</span>
+      <span class="note" id="wnote"></span></div>
+  </div>
+</section>
+
+<script>
+const NODES = { wallet:[0,"you"], vault:[119,"ERC-4626"], splitter:[238,"yield shares"], keys:[357,"3 keys"], models:[476,"/v1 · mcp"] };
+const W = 72, H = 34, Y = 96, cx = (n) => NODES[n][0] + W / 2;
+const PATHS = {
+  deposit: `M${NODES.wallet[0] + W} ${Y + 17} H${NODES.vault[0]}`,
+  report: `M${NODES.vault[0] + W} ${Y + 17} H${NODES.splitter[0]}`,
+  sync: `M307 34 L${cx("keys")} ${Y}`,
+  sync2: `M287 34 L${cx("splitter")} ${Y}`,
+  calls: `M${NODES.keys[0] + W} ${Y + 17} H${NODES.models[0]}`,
+  usage: `M${cx("splitter")} ${Y + H + 22} V214 H${cx("models")} V${Y + H + 22}`,
+  back: `M${cx("splitter")} ${Y + H + 22} V196 H${cx("vault")} V${Y + H + 22}`,
+};
+const STEPS = [
+  { title: "Deposit", caption: "Your wallet deposits 100,000 USDC into its own Inferest vault and gets 100,000 principal shares back. The solid dot is money moving on-chain.",
+    active: ["wallet", "vault"], flows: [["deposit", false]], bars: { principal: 100000, yield: 0, open: 0, spent: 0 },
+    ledger: [["deposit", "100,000.00", "new"]], note: "the shares are yours. nothing else can move them." },
+  { title: "Yield accrues", caption: "The vault lends the USDC out through Fluid and earns. Your shares don't grow: the month's 375.00 is counted apart, as yield no one has claimed yet.",
+    active: ["vault"], flows: [], bars: { principal: 100000, yield: 375, open: 0, spent: 0 },
+    ledger: [["deposit", "100,000.00"], ["accruing (no tx)", "375.00", "off"]], note: "shares never grow. the yield is counted apart." },
+  { title: "Credit opens", caption: "The keeper calls report(). The vault mints the yield as shares to the Splitter, never to you, and each key's limit opens up to its share. Hollow dots on dashed lines are limit updates.",
+    active: ["splitter", "keys"], flows: [["report", false], ["sync", true], ["sync2", true]], bars: { principal: 100000, yield: 375, open: 356.25, spent: 0 },
+    ledger: [["deposit", "100,000.00"], ["report()", "+375.00", "new"], ["sync limits", "356.25", "new"]], note: "the yield sits with the splitter until month end." },
+  { title: "Calls spend", caption: "Developers and agents call models through /v1 and paid tools through MCP. Every call is metered on its key, and a key stops at its limit with a 402.",
+    active: ["keys", "models"], flows: [["calls", false], ["calls", false, .33], ["calls", false, .66]], bars: { principal: 100000, yield: 375, open: 178.12, spent: 178.13 },
+    ledger: [["deposit", "100,000.00"], ["report()", "+375.00"], ["sync limits", "356.25"], ["metered calls (off-chain)", "178.13", "off"]], note: "half the credit used this month." },
+  { title: "Month end", caption: "The Splitter settles: it redeems only usage plus the fee. 187.50 pays the provider, 18.75 is Inferest's 10%, and 168.75 goes back into your vault as principal.",
+    active: ["splitter", "vault", "models"], flows: [["usage", false], ["back", true]], bars: { principal: 100168.75, yield: 0, open: 0, spent: 187.5 },
+    ledger: [["report()", "+375.00"], ["settle(): usage", "187.50", "new"], ["settle(): fee", "18.75", "new"], ["settle(): back", "168.75", "new"]], note: "your principal grew by what you didn't use.", shares: "100,168.75" },
+];
+let step = 0, timer, flows = [];
+const $ = (id) => document.getElementById(id);
+const dots = STEPS.map((s, i) => { const d = document.createElement("span"); d.title = s.title; d.onclick = () => go(i, true); $("dots").append(d); return d; });
+
+function drawNet(s) {
+  const dashed = (d) => `<path d="${d}" fill="none" stroke="#A19C93" stroke-dasharray="5 4"/>`;
+  let g = dashed(PATHS.sync) + dashed(PATHS.sync2) + dashed(PATHS.back) + dashed(PATHS.usage);
+  g += `<rect x="${297 - 36}" y="6" width="72" height="28" fill="#fff" stroke="#A19C93"/><text x="297" y="24" text-anchor="middle" fill="#5F5B54" font-size="11">keeper</text>`;
+  const names = Object.keys(NODES);
+  names.forEach((n, i) => {
+    if (i < names.length - 1) { const x1 = NODES[n][0] + W, x2 = NODES[names[i + 1]][0]; g += `<line x1="${x1}" y1="${Y + 17}" x2="${x2}" y2="${Y + 17}" stroke="#151513"/>`; }
+  });
+  names.forEach((n) => {
+    const on = s.active.includes(n), [x, sub] = NODES[n];
+    g += `<rect x="${x}" y="${Y}" width="${W}" height="${H}" fill="#fff" stroke="${on ? "#4E6AF0" : "#151513"}" stroke-width="${on ? 2 : 1}"/>`;
+    g += `<text x="${x + W / 2}" y="${Y + 21}" text-anchor="middle" fill="${on ? "#4E6AF0" : "#151513"}">${n}</text>`;
+    g += `<text x="${x + W / 2}" y="${Y + H + 16}" text-anchor="middle" fill="#A19C93" font-size="10">${sub}</text>`;
+  });
+  g += `<text x="${cx("vault") + 8}" y="232" fill="#A19C93" font-size="10">dashed: settle at month end, usage out, the rest back</text>`;
+  g += `<g id="movers"></g>`;
+  $("net").innerHTML = g;
+  const ns = "http://www.w3.org/2000/svg";
+  flows = s.flows.map(([key, hollow, phase = 0]) => {
+    const p = document.createElementNS(ns, "path"); p.setAttribute("d", PATHS[key]); p.setAttribute("fill", "none");
+    const c = document.createElementNS(ns, "circle"); c.setAttribute("r", hollow ? 4.5 : 5.5);
+    c.setAttribute("fill", hollow ? "#fff" : "#4E6AF0"); c.setAttribute("stroke", "#4E6AF0"); c.setAttribute("stroke-width", hollow ? 1.5 : 0);
+    $("movers").append(p, c);
+    return { p, c, len: p.getTotalLength(), phase };
+  });
+}
+
+const fmt = (v) => v.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const chart = ["principal", "yield", "open", "spent"].map((k) => {
+  const col = document.createElement("div"); col.className = "col " + k;
+  col.innerHTML = `<span class="v"></span><div class="b"></div><span>${k}</span>`; $("chart").append(col); return col;
+});
+function drawBars(b) {
+  chart.forEach((col) => {
+    const k = col.classList[1], v = b[k];
+    col.querySelector(".v").textContent = k === "principal" ? fmt(v) + "*" : fmt(v);
+    col.querySelector(".b").style.height = (k === "principal" ? 108 : Math.max(1, v / 375 * 52)) + "px";
+  });
+}
+
+function go(i, manual) {
+  step = (i + STEPS.length) % STEPS.length; const s = STEPS[step];
+  $("title").textContent = `${step + 1}. ${s.title}`;
+  $("caption").textContent = s.caption;
+  dots.forEach((d, j) => d.classList.toggle("on", j === step));
+  drawNet(s); drawBars(s.bars);
+  $("ledger").innerHTML = s.ledger.map(([op, amt, cls], j) => `<div class="row ${cls || ""}" style="animation-delay:${cls ? j * 0.25 : 0}s"><span class="i">${j + 1}</span><span class="op">${op}</span><span>${amt}</span></div>`).join("");
+  $("shares").textContent = s.shares || "100,000.00";
+  $("wnote").textContent = s.note;
+  clearInterval(timer);
+  if (!manual) timer = setInterval(() => go(step + 1), 4200);
+}
+$("prev").onclick = () => go(step - 1, true);
+$("next").onclick = () => go(step + 1, true);
+
+function frame(t) {
+  flows.forEach((f) => {
+    const u = ((t / 1600) + f.phase) % 1, e = u < .5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2;
+    const pt = f.p.getPointAtLength(e * f.len);
+    f.c.setAttribute("cx", pt.x); f.c.setAttribute("cy", pt.y);
+    f.c.setAttribute("opacity", Math.min(1, u * 10, (1 - u) * 10));
+  });
+  requestAnimationFrame(frame);
+}
+go(0); requestAnimationFrame(frame);
+</script>
+</body>
+</html>
