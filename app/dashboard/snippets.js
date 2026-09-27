@@ -22,10 +22,12 @@ import { generateText } from "ai";
 const inferest = createOpenAI({ baseURL: "${base}/v1", apiKey: "${key}" });
 const { text } = await generateText({ model: inferest.chat("moonshotai/kimi-k2.6"), prompt: "Say hi" });
 console.log(text);` },
-    { name: "Agent config (OpenClaw, Hermes, any OpenRouter-compatible agent)", text: `# The proxy speaks OpenRouter's chat completions API, so point the agent's OpenRouter settings at Inferest:
+    { name: "Agent config (OpenClaw, Hermes, any OpenRouter-compatible agent)", text: `# The proxy speaks OpenRouter's chat completions API, so the agent's OpenRouter settings point at Inferest.
+# The key below is your Inferest key: the agent never holds a real OpenRouter key.
 OPENROUTER_API_KEY=${key}
 OPENROUTER_BASE_URL=${base}/v1` },
-    { name: "MCP tools (same key)", text: `# Streamable HTTP MCP server with paid web tools, billed from the same yield budget
+    { name: "MCP tools (same key)", text: `# Streamable HTTP MCP server with paid web tools, billed from the same yield budget as the model calls.
+# The same Inferest key authorizes it.
 URL:    ${base}/mcp
 Header: Authorization: Bearer ${key}` },
   ];
