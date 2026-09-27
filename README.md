@@ -33,12 +33,13 @@ Inferest removes both:
 | | |
 |---|---|
 | **[`engine/ledger.ts`](engine/ledger.ts)** | **The ledger kernel.** Pure functions: accrued yield, credit limit, settlement, required principal. Source of truth for every number in these docs |
-| [`hackathon/PLAN.md`](hackathon/PLAN.md) | Build plan, task list, 3-minute demo script, open questions |
+| [`hackathon/PLAN.md`](hackathon/PLAN.md) | The original build plan and what comes after the first build |
 | [`deck/outline.md`](deck/outline.md) | Pitch deck content spec |
 
 ```bash
 npm install
-npm test                                  # ledger kernel + app, no network
+npm test                                  # ledger kernel, app, agent; no network
+npm run typecheck                         # tsc over the TypeScript
 cd contracts && forge test                # Splitter, factory, lifecycle
 cp .env.example .env                      # then fill it in
 # deploy: export RPC_URL, DEPLOYER_PRIVATE_KEY, KEEPER, FLOAT_ADDRESS, FEE_ADDRESS, EMERGENCY_ADMIN,
@@ -47,9 +48,12 @@ cp .env.example .env                      # then fill it in
 (cd contracts && forge script script/Deploy.s.sol --rpc-url $RPC_URL --private-key $DEPLOYER_PRIVATE_KEY --broadcast --slow)
 npm run serve                             # builds the dashboard bundle, then Home, Treasury and Agents, API, chat at /v1, MCP at /mcp
 npm run demo:treasury                     # or demo:agent
+npm run agent -- --once                   # one run of the hosted agent (needs AGENT_PRIVATE_KEY; AGENT_DEMO_DAYS=7 on a fork)
 ```
 
 **Deployment.** `TARGET_VAULTS` (comma-separated) allowlists extra ERC-4626 yield sources beyond `TARGET_VAULT`, which stays the default the Treasury page creates over and must match `config/arbitrum-one.json`'s `targets` list.
+
+**The pages.** `/` is Home: the calculator (`app/dashboard/calc.js`, tested against `docs/04`), the two use cases with a live glimpse of the agent, and the How it works step-through; it loads no chain state. `/treasury` is the finance lead's page. `/agents` is public and shows the hosted agent. The pen.dev design source and its PNG exports are in `design/`, the logo files in `design/logo/`.
 
 **Use a key.** Point any OpenAI-compatible client at `http://localhost:8787/v1` with an Inferest key as the API key (model ids are OpenRouter's); the dashboard's Use a key section (`http://localhost:8787/setup` redirects there) has copyable snippets, and works without signing in. The same key authenticates to the MCP tools server at `/mcp`. Set `KEY_ENCRYPTION_KEY` (`openssl rand -hex 32`) before the first start.
 
@@ -116,14 +120,16 @@ customer wallet ──deposit──▶ ERC-4626 vault (shares stay in the custom
 
 ## Scope
 
-**Build (hackathon)**
-- Deposit and withdraw against an ERC-4626 USDC vault (Fluid USDC on Arbitrum One) on a mainnet fork
-- Ledger, a proxy that meters every model call against the key's yield budget, and a worker that keeps the provider backstop in step and settles each period
-- One dashboard: deposit, yield counter, issued keys
-- Time-warp demo script
-- A live model call from an IDE and an OpenClaw agent on issued keys
+**Built**
+- One Octant ERC-4626 vault per customer over an allowlisted yield source (Fluid USDC and Aave's static USDC wrapper on Arbitrum One), the Splitter, the factory, tests, a deploy script
+- The ledger kernel, a proxy that meters every model call against the key's yield budget, paid tools over MCP, and a keeper that reports daily, keeps the provider backstop in step and settles each period
+- Three pages: Home, Treasury (sign in with Dynamic, deposit, keys, settle) and Agents (the hosted agent, public)
+- The hosted agent under `agent/`: its own wallet, half its book in a vault, a fence before every signature, paper trades, runs logged for the page
+- Demo scripts and a fork recipe that shows months of yield in minutes
 
-**Do not build (yet)**
+**Not built (yet)**
+- Real swaps for the agent; visitors' own agents on the page; more than one agent
+- A public deployment (Tenderly Virtual TestNet or a real Arbitrum One book); the runner has only run on forks
 - Our own vault or yield strategy. Use an audited one
 - Cross-chain positions (one deployment serves one chain), self-hosted models
 - A principal-drawing option. Spend stops at yield, always
@@ -179,9 +185,13 @@ Settled 2026-09-24. Where they depart from the source notes in [`sources/`](sour
 ```
 engine/       ledger kernel + tests (source of truth for the math)
 contracts/    Splitter, VaultFactory (Octant YDS per customer), tests, deploy script
-app/          keeper, inference proxy, Orthogonal tools over MCP, HTTP API, dashboard
+app/          keeper, inference proxy, Orthogonal tools over MCP, HTTP API, the three pages under app/dashboard
+agent/        the hosted financial agent: runner, fence, executor, log, tests
 demo/         treasury and agent scripts for a forked chain
-config/       per-chain addresses
-docs/         problem, landscape, architecture, economics, risks, workflow, plans
+config/       per-chain addresses and yield sources
+design/       pen.dev source, PNG exports, the logo, the How it works prototype
+deck/         pitch deck content spec
+docs/         problem, landscape, architecture, economics, risks, workflow, walkthrough; specs and plans under docs/superpowers
 sources/      original Korean notes, unedited
+private/      local-only notes, git-ignored
 ```
