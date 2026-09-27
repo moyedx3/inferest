@@ -45,13 +45,14 @@ const log = openAgentLog(cfg.dbPath);
 /** Operator calls, as demo/lib.ts makes them: a GET without a body, a POST with one. */
 async function api(path: string, body?: unknown): Promise<any> {
   const headers = { "Content-Type": "application/json", "x-admin-token": cfg.adminToken };
-  const r = await fetch(cfg.api + path, body === undefined ? { headers } : { method: "POST", headers, body: JSON.stringify(body) });
+  const signal = AbortSignal.timeout(60_000);
+  const r = await fetch(cfg.api + path, body === undefined ? { headers, signal } : { method: "POST", headers, body: JSON.stringify(body), signal });
   const j: any = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(`${path}: ${j.error ?? r.status}`);
   return j;
 }
 async function rpc(method: string, params: unknown[]): Promise<unknown> {
-  const r = await fetch(cfg.rpcUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
+  const r = await fetch(cfg.rpcUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: AbortSignal.timeout(60_000) });
   const j: any = await r.json();
   if (j.error) throw new Error(`${method}: ${j.error.message}`);
   return j.result;
@@ -108,18 +109,22 @@ async function ensureRegistered(): Promise<void> {
   await act(steps, deps(null));
 }
 
-/** On a fork or a Tenderly testnet, moves the chain clock so yield accrues between runs, then has the server read it. */
-async function advanceClock(): Promise<void> {
-  if (cfg.demoDays <= 0) return;
+/**
+ * On a fork or a Tenderly testnet, moves the chain clock so yield accrues between runs, then has the server read it.
+ * True only when this process moved the clock.
+ */
+async function advanceClock(): Promise<boolean> {
+  if (cfg.demoDays <= 0) return false;
   try {
     await rpc("evm_increaseTime", [toHex(Math.round(cfg.demoDays * 86_400))]);
     await rpc("evm_mine", []);
   } catch (e) {
     console.log(`clock not advanced: ${errorOf(e)}`);
-    return;
+    return false;
   }
   const vault = log.getMeta("vault");
   if (vault) await api("/api/admin/report", { vault }).catch((e) => console.log(`report after the clock move failed: ${errorOf(e)}`));
+  return true;
 }
 
 async function connectMcp(secret: string): Promise<{ mcp: Mcp; close(): Promise<void> }> {
@@ -135,7 +140,7 @@ async function connectMcp(secret: string): Promise<{ mcp: Mcp; close(): Promise<
   };
 }
 
-async function runOnce(): Promise<void> {
+async function runOnce(clockMoved: boolean): Promise<void> {
   const vault = (log.getMeta("vault") ?? null) as Hex | null;
   const book = await readBook({ pub, address, usdc, vault, targets: targets.map((t) => t.address), log });
   const runId = log.startRun({ clockAt: book.clockAt, bookBefore: { walletUsdc: usd(book.walletUsdc), vaultValue: usd(book.vaultValue), vault: book.vault && lower(book.vault), target: book.target } });
@@ -158,7 +163,7 @@ async function runOnce(): Promise<void> {
     }
     const positions = log.openPositions();
     const promptBook: PromptBook = {
-      walletUsdc: usd(walletUsdc), vaultValue: usd(book.vaultValue), floorUsdc: cfg.floorUsdc, currentTarget: book.target,
+      walletUsdc: usd(walletUsdc), vaultValue: usd(book.vaultValue), floorUsdc: cfg.floorUsdc, currentTarget: book.target, tradeCapBps: cfg.tradeCapBps,
       targets: targets.map((t) => ({ address: lower(t.address), name: t.name, rate: rateFrom(log.lastSamples(t.address)) })),
       positions: positions.map((p) => ({ asset: p.asset, side: p.side, sizeUsdc: p.sizeUsdc, entryPrice: p.entryPrice, markPrice: p.markPrice })),
     };
@@ -178,6 +183,7 @@ async function runOnce(): Promise<void> {
     const { accepted, refused } = applyFence(thought.decision, {
       walletUsdc: usd(walletUsdc), vaultValue: usd(book.vaultValue), floorUsdc: cfg.floorUsdc, currentTarget: book.target ?? "",
       targets: targets.map((t) => t.address), tradeCapBps: cfg.tradeCapBps, positions: positions.map((p) => ({ asset: p.asset, sizeUsdc: p.sizeUsdc })),
+      unrated: promptBook.targets.filter((t) => t.rate === null).map((t) => t.address),
     });
     for (const r of refused) log.addAction(runId, { kind: "refused", detail: r });
     const steps = planActions(accepted, { vault, currentTarget: book.target, vaultsByTarget: vaultsByTarget(), vaultShares: book.vaultShares, walletUsdc });
@@ -192,8 +198,8 @@ async function runOnce(): Promise<void> {
     const after = await holdings().catch(() => null);
     log.finishRun(runId, { status, note, decision, bookAfter: after ?? {}, error });
     if (after) log.setMeta("book", JSON.stringify(after));
-    // on a real chain the keeper settles; on a fork every fourth run stands in for a month end
-    const settled = cfg.demoDays > 0 && runId % 4 === 0 ? await monthEnd() : "";
+    // on a real chain the keeper settles; on a fork every fourth run stands in for a month end, only after this process moved the clock
+    const settled = clockMoved && cfg.demoDays > 0 && runId % 4 === 0 ? await monthEnd() : "";
     const cost = await api("/api/agent").then((j) => j.runs?.find((r: any) => r.id === runId)?.cost).catch(() => null);
     const money = (x: unknown) => (typeof x === "number" ? `$${x.toFixed(4)}` : "$?");
     console.log(`run ${runId} ${status} models ${money(cost?.models)} tools ${money(cost?.tools)}${settled}${error ? ` error: ${error}` : ""}`);
@@ -210,10 +216,12 @@ async function monthEnd(): Promise<string> {
 }
 
 try {
+  // a run a stopped process left open is closed first, before anything else reads or writes the log
+  log.failStaleRuns(Date.now());
   await ensureRegistered();
   for (;;) {
-    await advanceClock();
-    try { await runOnce(); } catch (e) { console.log(`run not started: ${errorOf(e)}`); }
+    const clockMoved = await advanceClock();
+    try { await runOnce(clockMoved); } catch (e) { console.log(`run not started: ${errorOf(e)}`); }
     if (once) break;
     await sleep(cfg.intervalMs);
   }

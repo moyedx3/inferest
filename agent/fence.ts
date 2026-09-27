@@ -8,6 +8,8 @@ export type Decision = {
 export type FenceContext = {
   walletUsdc: number; vaultValue: number; floorUsdc: number; currentTarget: string; targets: string[];
   tradeCapBps: number; positions: { asset: string; sizeUsdc: number }[];
+  /** allowlisted targets without a known rate yet; a move there is refused */
+  unrated: string[];
 };
 export const ASSETS = new Set(["ETH", "BTC", "ARB"]);
 export const MAX_TRADES = 3;
@@ -21,7 +23,8 @@ export function applyFence(d: Decision, c: FenceContext): { accepted: Decision; 
   else if (split.action === "withdraw" && !(split.amountUsdc > 0 && c.vaultValue - split.amountUsdc >= c.floorUsdc)) { refused.push({ what: "split", reason: `withdrawing ${split.amountUsdc} would leave the vault under the ${c.floorUsdc} USDC floor: no room to think` }); split = { action: "hold", amountUsdc: 0 }; }
   let source = d.source;
   if (source.action === "move") {
-    if (!c.targets.map(lc).includes(lc(source.target))) { refused.push({ what: "source", reason: `${source.target} is not in the allowlist` }); source = { action: "stay", target: null }; }
+    if (c.unrated.map(lc).includes(lc(source.target))) { refused.push({ what: "source", reason: "rate unknown yet" }); source = { action: "stay", target: null }; }
+    else if (!c.targets.map(lc).includes(lc(source.target))) { refused.push({ what: "source", reason: `${source.target} is not in the allowlist` }); source = { action: "stay", target: null }; }
     else if (lc(source.target) === lc(c.currentTarget)) { refused.push({ what: "source", reason: "already in that source" }); source = { action: "stay", target: null }; }
   }
   const trades: Trade[] = [];
