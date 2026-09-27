@@ -44,7 +44,7 @@ export function systemPrompt(b: PromptBook): string {
 function parseDecision(raw: string): Decision {
   const d = JSON.parse(raw);
   const ok = typeof d?.note === "string" && ["deposit", "withdraw", "hold"].includes(d?.split?.action) && typeof d?.split?.amountUsdc === "number"
-    && ["stay", "move"].includes(d?.source?.action) && Array.isArray(d?.trades)
+    && ["stay", "move"].includes(d?.source?.action) && (d?.source?.target === null || d?.source?.target === undefined || typeof d?.source?.target === "string") && Array.isArray(d?.trades)
     && d.trades.every((t: any) => ["buy", "sell"].includes(t?.side) && typeof t?.asset === "string" && typeof t?.sizeUsdc === "number" && typeof t?.price === "number" && typeof t?.reasoning === "string");
   if (!ok) throw new Error("the decision does not match the schema");
   return { note: d.note, split: { action: d.split.action, amountUsdc: d.split.amountUsdc }, source: { action: d.source.action, target: d.source.target ?? null }, trades: d.trades };

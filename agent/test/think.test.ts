@@ -40,6 +40,10 @@ test("a malformed decide call, the turn cap and the tool cap end the loop withou
   const r1 = await think({ key: "k", model: "m", api: "http://api.test", mcp, book: prompt, maxTurns: 10, maxToolCalls: 4, fetchFn: bad });
   assert.equal(r1.decision, null);
   assert.match(r1.error!, /decision/);
+  const badTarget = (async () => reply({ role: "assistant", content: null, tool_calls: [{ id: `c${++n}`, type: "function", function: { name: "decide", arguments: JSON.stringify({ ...decision, source: { action: "move", target: 123 } }) } }] })) as unknown as typeof fetch;
+  const r0 = await think({ key: "k", model: "m", api: "http://api.test", mcp, book: prompt, maxTurns: 10, maxToolCalls: 4, fetchFn: badTarget });
+  assert.equal(r0.decision, null);
+  assert.match(r0.error!, /decision/);
   const chatty = (async () => reply({ role: "assistant", content: "thinking" })) as unknown as typeof fetch;
   const r2 = await think({ key: "k", model: "m", api: "http://api.test", mcp, book: prompt, maxTurns: 2, maxToolCalls: 4, fetchFn: chatty });
   assert.equal(r2.turns, 2);
