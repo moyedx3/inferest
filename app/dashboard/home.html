@@ -86,10 +86,54 @@
     </div>
   </section>
 
-  <section class="doors">
+  <section class="usecases" id="usecases">
     <div class="wrap">
-      <a class="card door" href="/treasury"><span class="tag">For treasuries</span><h3>Put idle USDC to work.</h3><p>Deposit once. Issue keys to your developers. Only the interest pays.</p></a>
-      <a class="card door" href="/agents"><span class="tag">For agents</span><h3>An agent that pays for its own thinking.</h3><p>Watch our agent fund its model and tool calls from its own vault's yield.</p></a>
+      <span class="tag">Use cases</span>
+      <h2>One rail, two kinds of wallet.<span class="second">A treasury parking cash, or an agent that can't get a card.</span></h2>
+      <div class="doors">
+        <div class="card door">
+          <span class="tag">For treasuries</span>
+          <h3>Put idle USDC to work.</h3>
+          <p>Deposit once. Issue keys to your developers and agents. Only the interest pays for their inference.</p>
+          <div class="glimpse">
+            <div class="glimpsehead"><span>Yield this period</span><span class="examplechip">example</span></div>
+            <div class="glimpsebar"><div class="seg used" style="flex:0 0 29%"><small>Used</small></div><div class="seg open"><small>Open credit</small></div></div>
+            <div class="glimpseline"><span class="note">Settled: unused yield goes back to principal.</span></div>
+          </div>
+          <a class="doorlink" href="/treasury">Open the Treasury →</a>
+        </div>
+        <div class="card door dark">
+          <span class="tag">For agents</span>
+          <h3>An agent that pays for its own thinking.</h3>
+          <p>Watch our agent run a 1,000 USDC book and fund every model and tool call from its own vault's yield.</p>
+          <div class="glimpse" id="agentglimpse" hidden></div>
+          <a class="doorlink" href="/agents">Watch the agent →</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="how" id="how">
+    <div class="wrap">
+      <span class="tag">How it works</span>
+      <div class="head"><h2>Principal stays put.<span class="second">Only the interest moves.</span></h2><p class="aside">Every step is a contract call or a metered request you can check. Nothing leaves your wallet but the yield.</p></div>
+      <div class="sim">
+        <div class="bar"><button type="button" id="prev" aria-label="previous step">‹ prev</button><div class="title" id="title" aria-live="polite"></div><div class="dots" id="dots"></div><button type="button" id="next" aria-label="next step">next ›</button></div>
+        <div class="caption" id="caption"></div>
+        <div class="panels">
+          <div class="panel"><h5>network</h5><svg id="net" viewBox="0 0 548 240" width="100%" height="100%" role="img" aria-label="wallet, vault, splitter, keys and models, with the current step's flows"></svg></div>
+          <div class="panel"><h5>balances</h5>
+            <div class="legend"><i style="background:var(--line)"></i>at rest<br><i style="background:var(--blue)"></i>open credit (in flight)</div>
+            <div class="chart" id="chart"></div><div class="fine">* principal not to scale</div></div>
+          <div class="panel"><h5>ledger (on-chain)</h5><div class="rows" id="ledger"></div></div>
+        </div>
+        <div class="wallet"><b style="margin-right:6px">your wallet</b>
+          <div class="box"><small>infVAULT</small><span id="shares">100,000.00</span></div>
+          <div class="box"><small>USDC</small><span>0.00</span></div>
+          <span style="color:var(--blue)">principal spent: 0.00</span>
+          <span class="note" id="wnote"></span></div>
+      </div>
+      <div class="stepstrip" id="stepstrip"></div>
     </div>
   </section>
 

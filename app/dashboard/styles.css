@@ -244,16 +244,11 @@ details.operator[open] { display: flex; gap: 8px; align-items: center; }
 .result .status { padding: 2px 6px; border-radius: 4px; background: #DDF1E3; color: #1F6B3A; font: 12px var(--mono); }
 .result .status.wait { background: var(--tag); color: var(--ink-3); }
 
-/* nav, doors */
+/* nav */
 .topbar .left { display: flex; align-items: center; }
 .nav { display: flex; gap: 18px; margin-left: 28px; }
 .nav a { color: var(--ink-2); text-decoration: none; font-size: 14px; }
 .nav a[aria-current] { color: var(--ink); }
-.doors { padding: 40px 0 64px; }
-.doors .wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-.door { display: block; text-decoration: none; color: inherit; }
-.door h3 { font: 26px var(--serif); margin: 12px 0 6px; }
-@media (max-width: 900px) { .doors .wrap { grid-template-columns: 1fr; } }
 
 /* agents */
 .bookcard { padding: 32px; display: flex; flex-direction: column; gap: 28px; }
@@ -358,4 +353,107 @@ details.operator[open] { display: flex; gap: 8px; align-items: center; }
   .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .other .name { width: 110px; }
   .other .num { width: 56px; }
+}
+
+/* home: use cases, the two doors with their glimpses */
+.usecases, .how { padding: 72px 120px 80px; }
+.usecases h2 { margin: 20px 0 40px; font-size: 40px; letter-spacing: -.8px; line-height: 1.12; }
+.doors { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.door { padding: 36px; border-radius: 16px; display: flex; flex-direction: column; align-items: start; gap: 0; min-width: 0; }
+.door h3 { font: 400 32px/1.15 var(--serif); letter-spacing: -.6px; margin: 28px 0 14px; }
+.door > p { margin: 0 0 28px; font-size: 15px; color: var(--ink-2); }
+.door .doorlink { margin-top: auto; padding-top: 8px; font-size: 14px; font-weight: 500; text-decoration: none; }
+.door .doorlink:hover { text-decoration: underline; }
+.door.dark { background: var(--ink); border-color: var(--ink); color: #fff; }
+.door.dark .tag { background: #FFFFFF14; border-left-color: var(--lime); color: #FFFFFFCC; }
+.door.dark > p { color: #FFFFFFA6; }
+.door.dark .doorlink { color: var(--lime); }
+.glimpse { align-self: stretch; margin-bottom: 28px; padding: 18px 20px; border-radius: 12px; background: var(--surface-2); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 12px; font-size: 12px; color: var(--ink-3); }
+.glimpsehead { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.examplechip { padding: 1px 6px; border-radius: 4px; background: var(--tag); color: var(--ink-2); font: 11px var(--mono); }
+.glimpsebar { display: flex; gap: 3px; height: 44px; }
+.glimpsebar .seg { padding: 0 12px; }
+.glimpsebar .seg span { font-size: 12px; }
+.glimpsebar .seg:last-child { flex: 1; }
+.glimpseline { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: baseline; gap: 4px 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.glimpseline .note:first-child { grid-column: 1 / -1; }
+.glimpseline .when { color: var(--ink-3); }
+.glimpseline .note { min-width: 0; font-size: 13px; color: var(--ink); overflow-wrap: anywhere; }
+.glimpseline .cost { grid-column: 2; font-size: 12px; color: var(--ink); }
+.door.dark .glimpse { background: #FFFFFF0A; border-color: #FFFFFF1F; color: #FFFFFF80; }
+.door.dark .glimpseline { border-top-color: #FFFFFF1F; }
+.door.dark .glimpseline .when { color: #FFFFFF80; }
+.door.dark .glimpseline .note { color: #fff; }
+.door.dark .glimpseline .cost { color: var(--lime); }
+.door.dark .seg.working { color: var(--ink); }
+
+/* how it works: the step-through from design/prototypes/how-it-works.html, scoped under .how */
+.how .head { flex-direction: row; justify-content: space-between; align-items: flex-end; gap: 64px; margin: 20px 0 40px; }
+.how .head h2 { margin: 0; font-size: 40px; letter-spacing: -.8px; line-height: 1.12; }
+.how .aside { width: 400px; flex: none; margin: 0; font-size: 15px; color: var(--ink-2); }
+.how .sim { background: var(--surface); border: 1px solid var(--ink); font-family: var(--mono); }
+.how .bar { display: flex; align-items: center; border-bottom: 1px solid var(--ink); }
+.how .bar > button { background: var(--blue); color: #fff; border: 0; font: 13px var(--mono); padding: 10px 16px; cursor: pointer; white-space: nowrap; }
+.how .bar > button:focus-visible { outline: 2px solid var(--ink); outline-offset: -4px; }
+.how .bar .title { flex: 1; padding: 0 16px; font-weight: 700; }
+.how .dots { display: flex; gap: 6px; padding: 0 16px; }
+.how .dots .dot { width: 9px; height: 9px; padding: 0; border: 0; border-radius: 50%; background: var(--line); cursor: pointer; }
+.how .dots .dot.on { background: var(--blue); }
+.how .dots .dot:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.how .caption { padding: 14px 16px; border-bottom: 1px solid var(--ink); color: var(--ink-2); font-size: 13px; min-height: 72px; }
+.how .panels { display: grid; grid-template-columns: 1fr 300px 320px; border-bottom: 1px solid var(--ink); height: 300px; }
+.how .panel { padding: 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.how .panel + .panel { border-left: 1px solid var(--ink); }
+.how .panel h5 { margin: 0; font: 700 13px var(--mono); }
+.how svg text { font: 12px var(--mono); }
+.how .legend { font-size: 11px; color: var(--ink-2); }
+.how .legend i { display: inline-block; width: 8px; height: 8px; margin-right: 6px; }
+.how .chart { flex: 1; display: flex; align-items: flex-end; justify-content: center; gap: 12px; }
+.how .col { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 11px; }
+.how .col .v { font-size: 10px; color: var(--ink-2); }
+.how .col .b { width: 40px; background: var(--line); transition: height .8s cubic-bezier(.3,0,.2,1), background .4s; }
+.how .col.open .b { background: var(--blue); } .how .col.open .v { color: var(--blue); }
+.how .col.spent .b { background: var(--ink); }
+/* the chart's principal column shares a class name with the Treasury split bar's .principal; undo that rule here */
+.how .col.principal { height: auto; border: 0; border-radius: 0; padding: 0; }
+.how .col.principal .b { display: block; padding: 0; border-radius: 0; background: var(--line); }
+.how .col.principal > span { font: 11px var(--mono); line-height: 1.5; }
+.how .col.principal > .v { font-size: 10px; color: var(--ink-2); }
+.how .rows { font-size: 12px; }
+.how .row { display: flex; gap: 10px; padding: 8px; border-bottom: 1px solid var(--line); animation: how-in .5s ease both; }
+.how .row .i { color: var(--ink-3); font-size: 11px; } .how .row .op { flex: 1; } .how .row.new { background: var(--blue-soft); } .how .row.off { color: var(--ink-3); }
+@keyframes how-in { from { opacity: 0; transform: translateY(-4px); } }
+.how .wallet { padding: 16px; display: flex; gap: 10px; align-items: center; font-size: 13px; }
+.how .box { border: 1px solid var(--ink); padding: 8px 12px; display: flex; gap: 10px; }
+.how .box small { color: var(--ink-3); font-size: 10px; align-self: center; }
+.how .wallet .note { flex: 1; text-align: right; color: var(--ink-3); font-size: 11px; }
+.how .fine { font-size: 10px !important; color: var(--ink-3); }
+.how .stepstrip { display: grid; grid-template-columns: repeat(5, 1fr); border: 1px solid var(--ink); border-top: 0; background: var(--surface); }
+.how .stepstrip .cell { padding: 14px 16px 16px; border-top: 3px solid transparent; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.how .stepstrip .cell + .cell { border-left: 1px solid var(--line); }
+.how .stepstrip .cell b { font: 400 12px var(--mono); color: var(--ink); }
+.how .stepstrip .cell span { font-size: 12px; line-height: 1.45; color: var(--ink-2); }
+.how .stepstrip .cell.on { border-top-color: var(--blue); background: var(--blue-soft); }
+.how .stepstrip .cell.on b { color: var(--blue); }
+@media (prefers-reduced-motion: reduce) {
+  .how .row { animation: none; }
+  .how .col .b { transition: none; }
+}
+@media (max-width: 1200px) { .usecases, .how { padding-left: 24px; padding-right: 24px; } }
+@media (max-width: 900px) {
+  .doors { grid-template-columns: minmax(0, 1fr); }
+  .door { padding: 24px 20px; }
+  .usecases h2, .how .head h2 { font-size: 32px; }
+  .how .head { flex-direction: column; align-items: stretch; gap: 20px; }
+  .how .aside { width: auto; }
+  .how .sim { overflow-x: auto; }
+  .how .panels { grid-template-columns: minmax(0, 1fr); height: auto; }
+  .how .panel + .panel { border-left: 0; border-top: 1px solid var(--ink); }
+  .how .panel:first-child { height: 240px; }
+  .how .chart { min-height: 180px; }
+  .how .wallet { flex-wrap: wrap; }
+  .how .wallet .note { flex-basis: 100%; text-align: left; }
+  .how .stepstrip { grid-template-columns: minmax(0, 1fr); }
+  .how .stepstrip .cell + .cell { border-left: 0; border-top: 1px solid var(--line); }
+  .how .stepstrip .cell.on { border-top: 3px solid var(--blue); }
 }
