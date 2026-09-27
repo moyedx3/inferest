@@ -675,13 +675,16 @@ test("GET /api/agent is 404 without a runner and public with one", async () => {
   assert.ok(Array.isArray(body.sources));
   assert.deepEqual(body.settlements.map((x: any) => x.tx).sort(), ["0xnew", "0xold"]); // the older agent vault's settlement survives the move
   assert.ok(!JSON.stringify(body).includes("secret"));
+  assert.equal(body.agent.schedule, null);
   assert.deepEqual(body.fence, { floorUsdc: 200, tradeCapBps: 2000, maxToolCalls: 4, maxTurns: 10, maxTrades: 3, assets: ["ETH", "BTC", "ARB"], splitMovesPerRun: 1, sourceMovesPerRun: 1, fromRunner: false });
   log.setMeta("fence", JSON.stringify({ floorUsdc: 250, tradeCapBps: 1500, maxToolCalls: 2, maxTurns: 6 }));
+  log.setMeta("schedule", JSON.stringify({ intervalMs: 600000, demoDays: 7 }));
   const again: any = await (await fetch(base + "/api/agent")).json();
   assert.equal(again.fence.floorUsdc, 250);
   assert.equal(again.fence.maxToolCalls, 2);
   assert.equal(again.fence.maxTrades, 3);
   assert.equal(again.fence.fromRunner, true);
+  assert.deepEqual(again.agent.schedule, { intervalMs: 600000, demoDays: 7 });
   server.close();
 });
 
