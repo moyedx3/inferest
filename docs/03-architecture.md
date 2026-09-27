@@ -31,7 +31,7 @@ Arrows carry information as well as money. **The core loop: raise each key's lim
 4. **Credit router.** Decides which inference rail receives the usage USDC. For the hackathon, one OpenRouter float is enough.
 5. **Key manager.** Issues a key per developer or agent and syncs the ledger's yield balance to each key's spend limit.
 
-**Decided: keys are OpenRouter Management API keys, not our own proxy.** For the hackathon they do everything a proxy would: per-key limits, per-key usage, 400+ models. A proxy is less than a day of work, but it adds metering, streaming and failure handling that OpenRouter already does. Build it when supply moves to contracted providers and `base_url` changes anyway.
+**Decided 2026-09-25: keys are Inferest keys (`sk-inf-`) served by our own proxy at `/v1`.** The proxy checks the key's yield budget before each call and meters the cost after, and one OpenRouter key per vault sits behind it, its limit only a backstop (README decision 5). The earlier plan of handing out OpenRouter Management API keys directly was superseded because per-developer budgets, instant revoke and rotate, and one key for models and MCP tools needed the proxy.
 
 **Settled:** the limit only ever opens up to earned yield, and spend never draws from principal. `creditLimit` in the kernel and `computeLimits` in the app implement it. A loss after credits were spent is absorbed by unsettled yield first (the vault burns the Splitter's shares before touching principal), and the keeper freezes every key while a loss is unreported; see [`06-workflow.md`](06-workflow.md).
 

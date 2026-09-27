@@ -10,7 +10,7 @@
 |---|---|
 | Chain and vault | Any EVM chain with an audited ERC-4626 USDC vault, set in config. Fluid USDC on Arbitrum One, plain ERC-4626 calls otherwise |
 | Ledger and worker | Node cron worker reads vault share value, computes per-user accrued yield, syncs key limits, and settles each period. Math lives in [`../engine/ledger.ts`](../engine/ledger.ts) |
-| Keys | OpenRouter Management API keys under our account (decided: no proxy). The worker sets each key's limit and reads each key's usage |
+| Keys | Inferest keys (`sk-inf-`) issued by our proxy, one OpenRouter key per vault behind them as a backstop (README decision 5). The keeper keeps the backstop's limit in step and settles usage each period |
 | Custody | One Octant YDS vault per customer, shares in the customer's wallet, yield minted to our Splitter. `report()` and settlement by hand in the demo |
 | Frontend | One dashboard for the finance lead: deposit button, accrued yield, list of issued keys |
 | ICP2 | OpenClaw takes an OpenRouter key with one onboard command ([OpenRouter guide](https://openrouter.ai/docs/guides/guides/openclaw-integration)). Plug our key in as is; wrap it as a provider plugin if time allows |
