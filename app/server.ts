@@ -16,6 +16,7 @@ import { sha256, newInferestKey, type SecretBox } from "./crypto.ts";
 import { syncAll, syncVault, reportAll, reportVault, settleVault, markRegistered, isSettling, type KeeperDeps } from "./keeper.ts";
 import type { AgentLog } from "../agent/log.ts";
 import { rateFrom } from "../agent/rate.ts";
+import { ASSETS, MAX_TRADES } from "../agent/fence.ts";
 
 export { sha256 } from "./crypto.ts";
 
@@ -192,6 +193,12 @@ async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse): Pro
     const book = JSON.parse(log.getMeta("book") ?? "{}");
     // a source move leaves settlements on the agent's older vaults: keep every vault it has used
     const agentVaults = new Set([vault, ...Object.values(JSON.parse(log.getMeta("vaultsByTarget") ?? "{}") as Record<string, string>).map((v) => v.toLowerCase())]);
+    const fenceMeta = (() => { try { return JSON.parse(log.getMeta("fence") ?? "null"); } catch { return null; } })();
+    const fence = {
+      floorUsdc: Number(fenceMeta?.floorUsdc ?? log.getMeta("floor") ?? 200), tradeCapBps: Number(fenceMeta?.tradeCapBps ?? 2000),
+      maxToolCalls: Number(fenceMeta?.maxToolCalls ?? 4), maxTurns: Number(fenceMeta?.maxTurns ?? 10),
+      maxTrades: MAX_TRADES, assets: [...ASSETS], splitMovesPerRun: 1, sourceMovesPerRun: 1, fromRunner: fenceMeta !== null,
+    };
     return send(res, 200, {
       agent: { address: log.getMeta("address") ?? null, vault, source: sources.find((s) => s.current) ?? null, period: row.period, runCount: log.latestRun()?.id ?? 0 },
       book: { walletUsdc: book.walletUsdc ?? null, vaultValue: book.vaultValue ?? null, floor: Number(log.getMeta("floor") ?? 200), positions: log.openPositions() },
@@ -199,6 +206,7 @@ async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse): Pro
       sources,
       runs,
       settlements: d.store.listSettlements().filter((s) => agentVaults.has(s.vault)),
+      fence,
     });
   }
 
