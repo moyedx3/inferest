@@ -1,6 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { openAgentLog } from "../log.ts";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { openAgentLog, SAMPLES_KEPT } from "../log.ts";
 
 test("a run is opened, given actions, and finished; runs list newest first with their actions", () => {
   const log = openAgentLog(":memory:");
@@ -62,4 +66,21 @@ test("a second sample at the same time does not hide a known rate", () => {
   log.addSample("0xT", 1_001_000n, 200);
   log.addSample("0xT", 1_001_000n, 200);
   assert.deepEqual(log.lastSamples("0xT").map((s) => s.at), [100, 200]);
+});
+
+test("the samples table keeps the newest 200 rows per source", () => {
+  const dir = mkdtempSync(join(tmpdir(), "agent-log-"));
+  const path = join(dir, "log.db");
+  const log = openAgentLog(path);
+  for (let i = 1; i <= 205; i++) log.addSample("0xA", BigInt(1_000_000 + i), i * 10);
+  for (let i = 1; i <= 3; i++) log.addSample("0xB", BigInt(1_000_000 + i), i * 10);
+  const db = new DatabaseSync(path);
+  const count = (t: string) => Number((db.prepare("SELECT COUNT(*) AS n FROM agent_samples WHERE target = ?").get(t) as { n: number }).n);
+  assert.equal(SAMPLES_KEPT, 200);
+  assert.equal(count("0xa"), 200);
+  assert.equal(count("0xb"), 3);
+  assert.deepEqual(log.lastSamples("0xA").map((s) => s.at), [2_040, 2_050]);
+  db.close();
+  log.close();
+  rmSync(dir, { recursive: true, force: true });
 });

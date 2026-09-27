@@ -106,7 +106,8 @@ function actionLine(a) {
   switch (a.kind) {
     case "deposit": return `deposit ${amt(d.amountUsdc ?? 0)} ${txLink(a.tx, "↗")}`;
     case "withdraw": return `withdraw ${amt(d.amountUsdc ?? 0)} ${txLink(a.tx, "↗")}`;
-    case "move_source": return `moved to ${esc(d.name ?? short(d.target))} ${txLink(d.redeemTx, "redeem ↗")} ${txLink(d.depositTx ?? a.tx, "deposit ↗")}`;
+    case "move_source": if (d.failed) return `moved out of ${esc(short(d.from))}, deposit failed ${txLink(d.redeemTx, "redeem ↗")}`;
+      return `moved to ${esc(d.name ?? short(d.target))} ${txLink(d.redeemTx, "redeem ↗")} ${txLink(d.depositTx ?? a.tx, "deposit ↗")}`;
     case "paper_open": return `paper buy ${esc(d.asset)} ${amt(d.sizeUsdc)} at ${esc(num(d.price))}`;
     case "paper_close": return `paper sell ${esc(d.asset)} ${amt(d.sizeUsdc)} at ${esc(num(d.price))}`;
     case "sweep": return d.surplusUsdc != null
@@ -150,7 +151,8 @@ function renderActivity(data) {
   const settled = data.settlements.map((s) => ({ at: s.at, icon: "✓", title: "Settled", detail: `usage ${spent(Number(s.usageMicro) / 1e6)} to float`, tx: s.tx }));
   const moves = data.runs.flatMap((r) => r.actions.filter((a) => a.tx).map((a) => {
     const d = a.detail ?? {};
-    const detail = a.kind === "move_source" ? `to ${d.name ?? short(d.target)}, ${num(d.amountUsdc ?? 0)} USDC`
+    const detail = a.kind === "move_source" && d.failed ? `out of ${short(d.from)}, ${num(d.amountUsdc ?? 0)} USDC, deposit failed`
+      : a.kind === "move_source" ? `to ${d.name ?? short(d.target)}, ${num(d.amountUsdc ?? 0)} USDC`
       : a.kind === "sweep" && d.surplusUsdc != null ? `${num(d.surplusUsdc)} USDC surplus`
       : `${num(d.amountUsdc ?? 0)} USDC, run ${r.id}`;
     return { at: r.finishedAt ?? r.startedAt, icon: ACTION_ICONS[a.kind] ?? "•", title: ACTION_TITLES[a.kind] ?? a.kind, detail, tx: a.tx };

@@ -95,6 +95,7 @@ export async function act(steps: Step[], deps: ActDeps): Promise<void> {
   let newVault: string | null = null;
   let moveTarget: string | null = null;
   let redeemed: { amount: bigint; tx: string; from: string } | null = null;
+  let movedRecorded = false;
   const resolve = (v: string): Hex => {
     if (v === "new") { if (!newVault) throw new Error("no new vault was created"); return newVault as Hex; }
     // a split planned against the vault the run started in follows a source move to the new vault
@@ -148,6 +149,7 @@ export async function act(steps: Step[], deps: ActDeps): Promise<void> {
           const name = deps.targets.find((t) => lower(t.address) === target)?.name ?? target;
           if (redeemed) {
             record({ kind: "move_source", detail: { from: redeemed.from, to: lower(vault), target, name, amountUsdc: usdOf(amount), created: newVault !== null, redeemTx: redeemed.tx, depositTx: r.transactionHash }, tx: r.transactionHash });
+            movedRecorded = true;
           } else {
             record({ kind: "deposit", detail: { vault: lower(vault), target, name, amountUsdc: usdOf(amount), created: newVault !== null }, tx: r.transactionHash });
           }
@@ -198,6 +200,15 @@ export async function act(steps: Step[], deps: ActDeps): Promise<void> {
       }
     } catch (e) {
       const message = (deps.redact ?? errorText)(e);
+      // a move that redeemed but never deposited still records its redeem transaction
+      if (redeemed && !movedRecorded) {
+        const planned = moveDepositAt >= 0 ? (steps[moveDepositAt] as { vault: string }).vault : null;
+        let target = moveTarget;
+        if (!target && planned && planned !== "new") {
+          try { target = Object.entries(vaultsByTarget()).find(([, v]) => lower(v) === lower(planned))?.[0] ?? null; } catch { target = null; }
+        }
+        record({ kind: "move_source", detail: { from: redeemed.from, to: null, target, name: null, amountUsdc: usdOf(redeemed.amount), failed: true, redeemTx: redeemed.tx, depositTx: null }, tx: redeemed.tx });
+      }
       for (const rest of steps.slice(i + 1)) record({ kind: "refused", detail: { what: rest.kind, reason: `not attempted: ${message}` } });
       throw e;
     }
