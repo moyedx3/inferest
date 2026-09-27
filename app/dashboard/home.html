@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500&family=Geist+Mono&family=Newsreader:opsz@6..72&display=swap" />
   <link rel="stylesheet" href="/styles.css" />
 </head>
-<body>
+<body class="home">
   <header class="topbar">
     <div class="wrap">
       <div class="left"><a class="brand" href="/">Inferest</a><nav class="nav"><a href="/" aria-current="page">Home</a><a href="/treasury">Treasury</a><a href="/agents">Agents</a></nav></div>
@@ -20,12 +20,67 @@
   <section class="hero">
     <div class="wrap">
       <div class="pitch">
-        <h1>Your interest,<span class="second">now inference.</span></h1>
-        <p>Deposit USDC into a yield vault that stays in your wallet. Only the interest it earns becomes LLM credit, issued as spend limits on keys for your developers and agents.</p>
+        <div class="headline">
+          <h1>Your interest,<span class="second">now inference.</span></h1>
+          <p class="lede">Deposit USDC into a yield vault that stays in your wallet. Only the interest it earns becomes LLM credit, issued as spend limits on keys for your developers and agents.</p>
+        </div>
         <div class="facts">
           <div><b>Principal never moves</b><span>Shares stay in your wallet.</span></div>
           <div><b>Limits follow yield</b><span>Never ahead of what's earned.</span></div>
           <div><b>Unused yield returns</b><span>Less a 10% fee.</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="calc" id="calculator">
+    <div class="wrap">
+      <div class="head">
+        <span class="tag">Calculator</span>
+        <div class="headrow">
+          <h2>What your deposit buys.<span class="second">Counted in the models you actually call.</span></h2>
+          <p class="aside">Rule of thumb: interest covers a monthly budget when the deposit is about 281 times it. The principal is never spent.</p>
+        </div>
+      </div>
+      <div class="presets"><span class="fine">Try a preset</span><span id="presets" class="presetlist"></span></div>
+      <div class="card calc-card">
+        <div class="inputs">
+          <div class="group">
+            <label class="label" for="deposit">Deposit</label>
+            <div class="field amountfield big"><input id="deposit" inputmode="numeric" autocomplete="off" value="100,000" /><span class="faint">USDC</span></div>
+            <div class="logslider">
+              <input id="depositlog" type="range" min="0" max="1000" value="500" aria-label="Deposit, on a log scale" />
+              <div class="ticks mono"><span>$1K</span><span>$10K</span><span>$100K</span><span>$1M</span><span>$10M</span></div>
+            </div>
+          </div>
+          <div class="group">
+            <div class="grouphead"><span class="label">Vault rate</span><span class="faint mono">Fluid USDC today</span></div>
+            <div class="segmented" id="rates" role="group" aria-label="Vault rate"></div>
+          </div>
+          <div class="group">
+            <div class="grouphead"><span class="label">Model</span><span class="faint mono">per 1M tokens, in / out</span></div>
+            <div class="models" id="models" role="radiogroup" aria-label="Model"></div>
+            <p class="fine">Any of OpenRouter's 400+ models. Streaming works.</p>
+          </div>
+          <a class="btn btn-primary btn-block" href="/treasury">Deposit in the Treasury →</a>
+        </div>
+        <div class="outputs">
+          <div>
+            <div class="label" id="outlabel">Kimi K2.6, every month, paid by interest</div>
+            <div class="figure huge"><b id="tokens">208M</b><span class="unit">tokens</span><span class="callschip" id="callschip">≈ 45,700 agent calls</span></div>
+            <p class="fine" id="sums">$356.25 of credit from $375.00 of monthly interest, after the 5% rail fee. Tokens counted at 3 in for every 1 out; a call is 4K in and 1K out.</p>
+          </div>
+          <div class="tiles">
+            <div id="tile-credit"><b>$356.25</b><span>credit a month</span></div>
+            <div id="tile-day"><b>1,520</b><span>calls a day</span></div>
+            <div id="tile-call"><b>$0.0078</b><span>per call</span></div>
+            <div id="tile-principal"><b>$0</b><span>drawn from principal</span></div>
+          </div>
+          <div class="others">
+            <div class="grouphead"><b id="otherslabel">The same $356.25 on other models</b><span class="faint">tokens a month</span></div>
+            <div id="others" class="otherrows"></div>
+          </div>
+          <p class="fine" id="pricesnote">OpenRouter list prices, September 2026. At a steady rate; real yield follows the vault, and limits only open up to what it has earned.</p>
         </div>
       </div>
     </div>
@@ -46,5 +101,6 @@
       </div>
     </div>
   </footer>
+  <script type="module" src="/home.js"></script>
 </body>
 </html>
