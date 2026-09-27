@@ -29,6 +29,14 @@ test("the interval reads in minutes, hours or days", () => {
   assert.equal(tail(7_200_000), "The runner wakes every 2 hours.");
   assert.equal(tail(86_400_000), "The runner wakes every 1 day.");
   assert.equal(tail(3 * 86_400_000), "The runner wakes every 3 days.");
+  assert.equal(tail(59.7 * 60_000), "The runner wakes every 1 hour.");
+  assert.equal(tail(23.8 * 3_600_000), "The runner wakes every 1 day.");
+});
+
+test("past fifty runs the line says it shows the latest ones", () => {
+  assert.equal(runsText(weekly, null, 123), "The latest 8 of 123 runs, from Oct 4 to Nov 22. " + MIDDLE);
+  assert.ok(runsText(weekly, { intervalMs: 600000, demoDays: 7 }, 123).startsWith("The latest 8 of 123 runs, from Oct 4 to Nov 22, one every 7 days of vault time. "));
+  assert.equal(runsText(weekly, null, 8), runsText(weekly, null));
 });
 
 test("one day of vault time is singular", () => {

@@ -181,6 +181,7 @@ function renderRuns(runs) {
   const shown = showAll ? sorted : sorted.slice(0, RUNS_SHOWN);
   const more = sorted.length > RUNS_SHOWN
     ? `<button type="button" class="preset more" data-more>${esc(showAll ? "Show fewer" : `Show all ${sorted.length} runs`)}</button>` : "";
+  const hadFocus = document.activeElement?.matches?.("[data-more]") ?? false; // the refresh replaces the button
   $("runlist").innerHTML = shown.map((r) => {
     const [label, cls] = STATUS[r.status] ?? [r.status, ""];
     const calls = r.decision?.toolCalls ?? [];
@@ -193,6 +194,7 @@ function renderRuns(runs) {
       <div class="runfoot">${ICONS.wrench}<span>${esc(toolText(calls))}</span></div>
     </article>`;
   }).join("") + more;
+  if (hadFocus) $("runlist").querySelector("[data-more]")?.focus();
 }
 
 // registered once: the list's HTML is replaced on every render, the listener on #runlist stays
@@ -268,7 +270,7 @@ function render(data) {
   renderFence(data.fence);
   renderBudget(data.budget);
   renderRuns(data.runs);
-  const how = runsText(data.runs, data.agent.schedule);
+  const how = runsText(data.runs, data.agent.schedule, data.agent.runCount);
   $("runshow").textContent = how;
   $("runshow").hidden = !how;
   renderSources(data.sources);
