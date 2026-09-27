@@ -14,12 +14,15 @@ const rateText = (r) => (r == null ? "rate unknown yet" : `${(r * 100).toFixed(2
 const TAB_NAMES = { "MCP tools (same key)": "MCP" };
 const STATUS = { running: ["thinking", "wait"], done: ["done", ""], out_of_budget: ["out of budget", "err"], failed: ["failed", "err"] };
 
-/** The block explorer's base URL from the server's public config, when it has one. Only used for links. */
+/** The block explorer's base URL from the server's public config, when it has one, used only for links; the same read fills the network chip. */
 let explorer = null;
 async function loadExplorer() {
   try {
     const r = await fetch("/api/state");
-    if (r.ok) explorer = (await r.json()).config?.explorer ?? null;
+    if (!r.ok) return;
+    const cfg = (await r.json()).config ?? {};
+    explorer = cfg.explorer ?? null;
+    $("network").textContent = `${cfg.chainName ?? `chain ${cfg.chainId}`}${cfg.demoFaucet ? " · demo fork" : ""}`;
   } catch { /* links fall back to plain hashes */ }
 }
 const txLink = (tx, label = `${short(tx)} ↗`) => (!tx ? "" : explorer
@@ -212,6 +215,11 @@ async function load() {
   }
 }
 
-renderOwn();
+$("copysnippet").onclick = () => navigator.clipboard?.writeText($("snippet").textContent).catch(() => {});
+try {
+  renderOwn();
+} catch (e) {
+  $("pagefine").textContent = `Could not show the setups: ${e?.message ?? e}.`;
+}
 loadExplorer().finally(load);
 setInterval(load, 10_000);
