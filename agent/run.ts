@@ -8,7 +8,7 @@ import { readBook, publicClient, usd } from "./book.ts";
 import { rateFrom } from "./rate.ts";
 import { applyFence } from "./fence.ts";
 import { think, type Mcp, type PromptBook } from "./think.ts";
-import { planActions, act, errorText, usdcAbi, vaultAbi, type ActDeps, type LoggedAction, type Step } from "./act.ts";
+import { planActions, act, errorText, sendTx, usdcAbi, vaultAbi, type ActDeps, type LoggedAction, type Step } from "./act.ts";
 import { createFaucet } from "../app/faucet.ts";
 
 // an empty value in an env file counts as unset, so `AGENT_MODEL=` falls back like a missing line
@@ -20,6 +20,11 @@ const cfg = {
   intervalMs: Number(env("AGENT_INTERVAL_MS", "600000")), demoDays: Number(env("AGENT_DEMO_DAYS", "0")), model: env("AGENT_MODEL", process.env.DEMO_MODEL || "moonshotai/kimi-k2.6"),
   maxTurns: Number(env("AGENT_MAX_TURNS", "10")), maxToolCalls: Number(env("AGENT_MAX_TOOL_CALLS", "4")), tradeCapBps: Number(env("AGENT_TRADE_CAP_BPS", "2000")),
 };
+const numeric: [string, number][] = [["AGENT_BOOK_USDC", cfg.bookUsdc], ["AGENT_FLOOR_USDC", cfg.floorUsdc], ["AGENT_INTERVAL_MS", cfg.intervalMs], ["AGENT_DEMO_DAYS", cfg.demoDays],
+  ["AGENT_MAX_TURNS", cfg.maxTurns], ["AGENT_MAX_TOOL_CALLS", cfg.maxToolCalls], ["AGENT_TRADE_CAP_BPS", cfg.tradeCapBps]];
+for (const [k, v] of numeric) if (!(Number.isFinite(v) && v >= 0)) { console.log(`${k} must be a finite number of zero or more`); process.exit(1); }
+if (!once && cfg.intervalMs <= 0) { console.log("AGENT_INTERVAL_MS must be above zero"); process.exit(1); }
+if (cfg.maxTurns < 1) { console.log("AGENT_MAX_TURNS must be at least 1"); process.exit(1); }
 const chainCfg = JSON.parse(readFileSync(process.env.CHAIN_CONFIG ?? "config/arbitrum-one.json", "utf8"));
 const dep = JSON.parse(readFileSync(env("DEPLOYMENTS"), "utf8"));
 const targets: { address: Hex; name: string }[] = chainCfg.targets ?? [{ address: chainCfg.target, name: chainCfg.targetName ?? "yield source" }];
@@ -55,7 +60,7 @@ async function rpc(method: string, params: unknown[]): Promise<unknown> {
 let key: string | null = null;
 const setupActions: LoggedAction[] = [];
 const deps = (runId: number | null): ActDeps => ({
-  wallet, pub, log, runId, deferred: setupActions, api, factory: dep.factory as Hex, usdc, address, targets, setKey: (secret) => { key = secret; },
+  wallet, pub, log, runId, deferred: setupActions, api, redact: errorOf, factory: dep.factory as Hex, usdc, address, targets, setKey: (secret) => { key = secret; },
 });
 const vaultsByTarget = (): Record<string, string> => JSON.parse(log.getMeta("vaultsByTarget") ?? "{}");
 const usdcBalance = () => pub.readContract({ address: usdc, abi: usdcAbi, functionName: "balanceOf", args: [address] });
@@ -73,7 +78,14 @@ async function ensureRegistered(): Promise<void> {
   log.setMeta("floor", String(cfg.floorUsdc));
   const vault = log.getMeta("vault");
   const keyId = log.getMeta("keyId");
-  if (vault && keyId) { key = (await api(`/api/keys/${keyId}/rotate`, {})).key; return; }
+  const keyVault = log.getMeta("keyVault");
+  // a source move whose re-key failed leaves the key on the old vault: mint on the current one, revoking the old key
+  if (vault && keyId && keyVault && keyVault !== lower(vault)) { await act([{ kind: "rekey" }], deps(null)); return; }
+  if (vault && keyId) {
+    key = (await api(`/api/keys/${keyId}/rotate`, {})).key;
+    log.setMeta("keyVault", lower(vault));
+    return;
+  }
   if (vault) { await act([{ kind: "rekey" }], deps(null)); return; }
   if (cfg.demoDays > 0 && (await usdcBalance()) === 0n) await createFaucet({ rpcUrl: cfg.rpcUrl, usdc }).fund(address);
   const amount = BigInt(Math.round((cfg.bookUsdc / 2) * 1e6));
@@ -129,10 +141,9 @@ async function runOnce(): Promise<void> {
       const shares = await pub.readContract({ address: v as Hex, abi: vaultAbi, functionName: "balanceOf", args: [address] });
       if (shares === 0n) continue;
       const before = await usdcBalance();
-      const hash = await wallet.writeContract({ address: v as Hex, abi: vaultAbi, functionName: "redeem", args: [shares, address, address] });
-      await pub.waitForTransactionReceipt({ hash });
+      const receipt = await sendTx(wallet, pub, v as Hex, vaultAbi, "redeem", [shares, address, address]);
       walletUsdc = await usdcBalance();
-      log.addAction(runId, { kind: "sweep", detail: { vault: lower(v), target, amountUsdc: usd(walletUsdc - before) }, tx: hash });
+      log.addAction(runId, { kind: "sweep", detail: { vault: lower(v), target, amountUsdc: usd(walletUsdc - before) }, tx: receipt.transactionHash });
     }
     const positions = log.openPositions();
     const promptBook: PromptBook = {
@@ -170,7 +181,8 @@ async function runOnce(): Promise<void> {
     const after = await holdings().catch(() => null);
     log.finishRun(runId, { status, note, decision, bookAfter: after ?? {}, error });
     if (after) log.setMeta("book", JSON.stringify(after));
-    const settled = runId % 4 === 0 ? await monthEnd() : "";
+    // on a real chain the keeper settles; on a fork every fourth run stands in for a month end
+    const settled = cfg.demoDays > 0 && runId % 4 === 0 ? await monthEnd() : "";
     const cost = await api("/api/agent").then((j) => j.runs?.find((r: any) => r.id === runId)?.cost).catch(() => null);
     const money = (x: unknown) => (typeof x === "number" ? `$${x.toFixed(4)}` : "$?");
     console.log(`run ${runId} ${status} models ${money(cost?.models)} tools ${money(cost?.tools)}${settled}${error ? ` error: ${error}` : ""}`);
@@ -186,11 +198,17 @@ async function monthEnd(): Promise<string> {
   return ` month end settle ${results.join(",")}`;
 }
 
-await ensureRegistered();
-for (;;) {
-  await advanceClock();
-  try { await runOnce(); } catch (e) { console.log(`run not started: ${errorOf(e)}`); }
-  if (once) break;
-  await sleep(cfg.intervalMs);
+try {
+  await ensureRegistered();
+  for (;;) {
+    await advanceClock();
+    try { await runOnce(); } catch (e) { console.log(`run not started: ${errorOf(e)}`); }
+    if (once) break;
+    await sleep(cfg.intervalMs);
+  }
+} catch (e) {
+  console.log(`agent stopped: ${errorOf(e)}`);
+  process.exitCode = 1;
+} finally {
+  log.close();
 }
-log.close();

@@ -44,6 +44,14 @@ export const vaultAbi = parseAbi([
 ]);
 export const usdcAbi = parseAbi(["function approve(address, uint256) returns (bool)", "function balanceOf(address) view returns (uint256)"]);
 
+/** Sends one contract call and waits for it; a reverted receipt throws. */
+export async function sendTx(wallet: WalletClient<Transport, Chain, Account>, pub: ReturnType<typeof publicClient>, to: Hex, abi: any, functionName: string, args: unknown[]) {
+  const hash = await wallet.writeContract({ address: to, abi, functionName, args } as any);
+  const receipt = await pub.waitForTransactionReceipt({ hash });
+  if (receipt.status !== "success") throw new Error(`${functionName} reverted in ${hash}`);
+  return receipt;
+}
+
 export type LoggedAction = { kind: ActionKind; detail: Record<string, unknown>; tx?: string };
 export type ActDeps = {
   wallet: WalletClient<Transport, Chain, Account>;
@@ -57,6 +65,8 @@ export type ActDeps = {
   usdc: Hex;
   address: Hex;
   targets: { address: string; name: string }[];
+  /** One-line error text with secrets such as the RPC URL taken out; defaults to `errorText`. */
+  redact?: (e: unknown) => string;
   /** Keeps a fresh key's secret in memory only. */
   setKey(secret: string): void;
 };
@@ -73,12 +83,7 @@ const usdOf = (m: bigint) => Number(m) / 1e6;
 export async function act(steps: Step[], deps: ActDeps): Promise<void> {
   const { wallet, pub, log, address } = deps;
   const record = (a: LoggedAction) => { if (deps.runId === null) deps.deferred?.push(a); else log.addAction(deps.runId, a); };
-  const send = async (to: Hex, abi: any, functionName: string, args: unknown[]) => {
-    const hash = await wallet.writeContract({ address: to, abi, functionName, args } as any);
-    const receipt = await pub.waitForTransactionReceipt({ hash });
-    if (receipt.status !== "success") throw new Error(`${functionName} reverted in ${hash}`);
-    return receipt;
-  };
+  const send = (to: Hex, abi: any, functionName: string, args: unknown[]) => sendTx(wallet, pub, to, abi, functionName, args);
   const usdcBalance = () => pub.readContract({ address: deps.usdc, abi: usdcAbi, functionName: "balanceOf", args: [address] });
   const vaultsByTarget = (): Record<string, string> => JSON.parse(log.getMeta("vaultsByTarget") ?? "{}");
 
@@ -165,6 +170,7 @@ export async function act(steps: Step[], deps: ActDeps): Promise<void> {
           const keys: string[] = JSON.parse(log.getMeta("keys") ?? "[]");
           log.setMeta("keys", JSON.stringify([...keys, id]));
           log.setMeta("keyId", id);
+          log.setMeta("keyVault", lower(currentVault));
           if (previous && previous !== id) await deps.api(`/api/keys/${previous}/revoke`, {});
           break;
         }
@@ -191,7 +197,7 @@ export async function act(steps: Step[], deps: ActDeps): Promise<void> {
         }
       }
     } catch (e) {
-      const message = errorText(e);
+      const message = (deps.redact ?? errorText)(e);
       for (const rest of steps.slice(i + 1)) record({ kind: "refused", detail: { what: rest.kind, reason: `not attempted: ${message}` } });
       throw e;
     }
