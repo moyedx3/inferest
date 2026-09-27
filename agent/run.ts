@@ -89,8 +89,9 @@ async function ensureRegistered(): Promise<void> {
   }
   if (vault) { await act([{ kind: "rekey" }], deps(null)); return; }
   const book = BigInt(Math.round(cfg.bookUsdc * 1e6));
-  if (cfg.demoDays > 0) {
-    if ((await usdcBalance()) === 0n) await createFaucet({ rpcUrl: cfg.rpcUrl, usdc }).fund(address);
+  // only a wallet the faucet funded in this start is trimmed: a pre-funded wallet, or any real chain, is never touched
+  if (cfg.demoDays > 0 && (await usdcBalance()) === 0n) {
+    await createFaucet({ rpcUrl: cfg.rpcUrl, usdc }).fund(address);
     // the faucet gives far more than the book; burn the surplus so the wallet holds exactly what the prompt describes
     const surplus = (await usdcBalance()) - book;
     if (surplus > 0n) {
