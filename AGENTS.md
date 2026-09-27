@@ -39,7 +39,7 @@ The name of a submission event, program, judge or prize, or anything else from `
 | `app/` | Keeper, inference proxy at `/v1`, paid tools over MCP at `/mcp`, HTTP API, the three pages under `app/dashboard/` |
 | `agent/` | The hosted financial agent: runner, fence, executor, log, tests |
 | `config/` | Per-chain addresses and yield sources |
-| `docs/` | Problem, landscape, architecture, economics, risks, workflow, walkthrough, status; specs and plans under `docs/superpowers/` |
+| `docs/` | Problem, landscape, architecture, economics, risks, workflow, walkthrough, status, the runner safety review; specs and plans under `docs/superpowers/` |
 | `design/` | pen.dev source, PNG exports, the logo, the How it works prototype |
 
 Claude Code users: `.claude/settings.json` denies reads of `.env` files on purpose; ask the founder to run those commands.
