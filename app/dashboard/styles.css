@@ -288,6 +288,8 @@ details.operator[open] { display: flex; gap: 8px; align-items: center; }
 /* run cards */
 .runcards { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
 .runcards .none { margin: 0; color: var(--ink-3); }
+.runcards .more { align-self: flex-start; margin-top: 4px; cursor: pointer; color: var(--ink); }
+.explain .cadence { margin: 0; font-size: 13px; line-height: 1.55; color: var(--ink-3); }
 .runcard { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 20px 24px; display: flex; flex-direction: column; gap: 14px; }
 .runcard.running { border-color: var(--ink); }
 .runcard .runhead { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }

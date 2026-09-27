@@ -1,6 +1,7 @@
 // The Agents page: the hosted agent's book, its thinking budget, its runs and the yield sources, all from GET /api/agent.
 // It never reads a wallet or the chain. It does not import app.js, which carries the Dynamic session code.
 import { snippets } from "/snippets.js";
+import { runsText } from "./runs-text.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -169,9 +170,19 @@ function toolText(calls) {
   return `${calls.length} tool call${calls.length === 1 ? "" : "s"}, ${paid} paid · ${names}`;
 }
 
+const RUNS_SHOWN = 3;
+let showAll = false;
+let lastRuns = [];
+
 function renderRuns(runs) {
+  lastRuns = runs;
   if (!runs.length) { $("runlist").innerHTML = `<p class="none">The agent has not run yet.</p>`; return; }
-  $("runlist").innerHTML = [...runs].sort((a, b) => b.id - a.id).map((r) => {
+  const sorted = [...runs].sort((a, b) => b.id - a.id);
+  const shown = showAll ? sorted : sorted.slice(0, RUNS_SHOWN);
+  const more = sorted.length > RUNS_SHOWN
+    ? `<button type="button" class="preset more" data-more>${esc(showAll ? "Show fewer" : `Show all ${sorted.length} runs`)}</button>` : "";
+  const hadFocus = document.activeElement?.matches?.("[data-more]") ?? false; // the refresh replaces the button
+  $("runlist").innerHTML = shown.map((r) => {
     const [label, cls] = STATUS[r.status] ?? [r.status, ""];
     const calls = r.decision?.toolCalls ?? [];
     const date = new Date(r.clockAt * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric" });
@@ -182,8 +193,17 @@ function renderRuns(runs) {
       ${r.actions.length ? `<div class="actrows">${r.actions.map(actionRow).join("")}</div>` : ""}
       <div class="runfoot">${ICONS.wrench}<span>${esc(toolText(calls))}</span></div>
     </article>`;
-  }).join("");
+  }).join("") + more;
+  if (hadFocus) $("runlist").querySelector("[data-more]")?.focus();
 }
+
+// registered once: the list's HTML is replaced on every render, the listener on #runlist stays
+$("runlist").addEventListener("click", (e) => {
+  if (!e.target.closest("[data-more]")) return;
+  showAll = !showAll;
+  renderRuns(lastRuns);
+  $("runlist").querySelector("[data-more]")?.focus();
+});
 
 function renderSources(sources) {
   const best = Math.max(0, ...sources.map((s) => s.rate ?? 0));
@@ -250,6 +270,9 @@ function render(data) {
   renderFence(data.fence);
   renderBudget(data.budget);
   renderRuns(data.runs);
+  const how = runsText(data.runs, data.agent.schedule, data.agent.runCount);
+  $("runshow").textContent = how;
+  $("runshow").hidden = !how;
   renderSources(data.sources);
   renderActivity(data);
   showAgent(true);
@@ -261,6 +284,7 @@ async function load() {
     if (r.status === 404) {
       showAgent(false);
       $("runlist").innerHTML = `<p class="none">no agent yet</p>`;
+      $("runshow").hidden = true;
       $("thinkingchip").hidden = true;
       $("pagefine").textContent = "";
       return;

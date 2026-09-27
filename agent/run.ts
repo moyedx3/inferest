@@ -79,6 +79,7 @@ async function ensureRegistered(): Promise<void> {
   log.setMeta("address", address);
   log.setMeta("floor", String(cfg.floorUsdc));
   log.setMeta("fence", JSON.stringify({ floorUsdc: cfg.floorUsdc, tradeCapBps: cfg.tradeCapBps, maxToolCalls: cfg.maxToolCalls, maxTurns: cfg.maxTurns }));
+  log.setMeta("schedule", JSON.stringify({ intervalMs: cfg.intervalMs, demoDays: cfg.demoDays }));
   const vault = log.getMeta("vault");
   const keyId = log.getMeta("keyId");
   const keyVault = log.getMeta("keyVault");
