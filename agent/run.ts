@@ -78,6 +78,7 @@ async function holdings(): Promise<{ walletUsdc: number; vaultValue: number }> {
 async function ensureRegistered(): Promise<void> {
   log.setMeta("address", address);
   log.setMeta("floor", String(cfg.floorUsdc));
+  log.setMeta("fence", JSON.stringify({ floorUsdc: cfg.floorUsdc, tradeCapBps: cfg.tradeCapBps, maxToolCalls: cfg.maxToolCalls, maxTurns: cfg.maxTurns }));
   const vault = log.getMeta("vault");
   const keyId = log.getMeta("keyId");
   const keyVault = log.getMeta("keyVault");
