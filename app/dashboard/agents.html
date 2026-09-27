@@ -28,7 +28,7 @@
     <section class="agenthead">
       <div class="wrap">
         <div class="head">
-          <div><span class="tag" id="agenttag">Agent</span></div>
+          <div class="headtags"><span class="tag" id="agenttag">Agent</span><span class="chip thinking" id="thinkingchip" hidden><i class="dot"></i>thinking now</span><a class="mono faint" id="agentaddr" target="_blank" rel="noopener"></a></div>
           <h1 id="agenthead">It pays for its own thinking.<span class="second">A wallet of its own, half parked, half at work.</span></h1>
           <p class="fine" id="pagefine"></p>
         </div>
@@ -36,7 +36,7 @@
     </section>
 
     <section class="agent-only" id="book" hidden>
-      <div class="wrap">
+      <div class="wrap bookgrid">
         <div class="card bookcard">
           <div class="yieldhead">
             <div>
@@ -61,6 +61,12 @@
               <tbody id="positionrows"></tbody>
             </table>
           </div>
+        </div>
+        <div class="card fence" id="fence" hidden>
+          <div class="cardhead"><h3>The fence</h3><span class="faint fenceby"><span class="icon" data-icon="lock"></span><span id="fenceby">set by the runner</span></span></div>
+          <p class="sub">Checked before any signature. The model cannot change these; anything outside is refused and logged.</p>
+          <div class="fencerows" id="fencerows"></div>
+          <p class="fencenote">Split and source moves are real transactions. Trades are paper for now, marked at the price the agent fetched.</p>
         </div>
       </div>
     </section>
@@ -107,26 +113,27 @@
     </section>
 
     <section id="runs">
-      <div class="wrap">
-        <div class="head">
+      <div class="wrap split">
+        <div class="explain">
           <div><span class="tag">Runs</span></div>
           <h2>Every run, what it decided.<span class="second">Newest first. The fence drops anything outside its rules.</span></h2>
         </div>
-        <ul class="feed runs" id="runlist"><li class="none">The agent has not run yet.</li></ul>
+        <div class="runcards" id="runlist"><p class="none">The agent has not run yet.</p></div>
       </div>
     </section>
 
     <section class="agent-only" id="sourcesection" hidden>
-      <div class="wrap">
-        <div class="head">
+      <div class="wrap split">
+        <div class="explain">
           <div><span class="tag">Yield sources</span></div>
           <h2>Where it can park.<span class="second">Only allowlisted vaults. It moves when another pays more.</span></h2>
         </div>
-        <div class="card keytable">
+        <div class="card keytable sources">
           <table id="sources">
-            <thead><tr><th>Source</th><th>Address</th><th>Rate</th></tr></thead>
+            <thead><tr><th>ERC-4626 USDC vault</th><th>Rate, from share prices</th><th></th></tr></thead>
             <tbody id="sourcerows"></tbody>
           </table>
+          <p class="sourcefoot">A rate is the share price change between the last two samples, annualized. With one sample it is unknown and the agent stays put.</p>
         </div>
       </div>
     </section>
@@ -146,15 +153,15 @@
         <div class="explain">
           <div><span class="tag">Your own agent</span></div>
           <h2>Run one like it.<span class="second">Point your agent at Inferest with a key from your treasury.</span></h2>
-          <div class="ownlinks">
-            <a href="/treasury#use-a-key">Get a key on Treasury →</a>
-            <a href="https://github.com/moyedx3/inferest/tree/main/agent" target="_blank" rel="noopener">Read this agent's code ↗</a>
-          </div>
         </div>
         <div class="codeside">
           <div class="card window">
             <div class="windowbar"><span class="dots"><i></i><i></i><i></i></span><div class="tabs" id="tabs"></div><button class="linkbtn" id="copysnippet">Copy</button></div>
             <pre id="snippet"></pre>
+          </div>
+          <div class="linkcards">
+            <a class="card link dark" href="/treasury#use-a-key"><span class="icon" data-icon="key"></span><span class="text"><b>Get a key for your agent</b><small class="mono">/treasury#use-a-key</small></span><span class="icon go" data-icon="arrowUpRight"></span></a>
+            <a class="card link" href="https://github.com/moyedx3/inferest/tree/main/agent" target="_blank" rel="noopener"><span class="icon" data-icon="github"></span><span class="text"><b>Read the reference runner</b><small class="mono">github.com/moyedx3/inferest · agent/</small></span><span class="icon go" data-icon="arrowUpRight"></span></a>
           </div>
         </div>
       </div>
