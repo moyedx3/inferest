@@ -35,6 +35,7 @@ Inferest removes both:
 | **[`engine/ledger.ts`](engine/ledger.ts)** | **The ledger kernel.** Pure functions: accrued yield, credit limit, settlement, required principal. Source of truth for every number in these docs |
 | [`hackathon/PLAN.md`](hackathon/PLAN.md) | The original build plan and what comes after the first build |
 | [`deck/outline.md`](deck/outline.md) | Pitch deck content spec |
+| [`docs/08-status.md`](docs/08-status.md) | **Start here to pick up the work.** What is built, how to run it, how we work, what is left, and the decisions waiting |
 
 ```bash
 npm install
@@ -76,6 +77,7 @@ Every `npm run` command loads `.env` and then `.env.local` when that file exists
 | [`docs/05-risks.md`](docs/05-risks.md) | Terms of service, custody, contracts, rates, rail dependence, tax |
 | [`docs/06-workflow.md`](docs/06-workflow.md) | **The mechanism as built.** Who sends which transaction: per-customer vaults, the Splitter, the keeper, paid tools, settlement, known gaps |
 | [`docs/07-walkthrough.md`](docs/07-walkthrough.md) | The dashboard path a judge or a customer follows |
+| [`docs/09-runner-safety-review.md`](docs/09-runner-safety-review.md) | What must change before the hosted agent runs with real money |
 | [`sources/`](sources/) | The original Korean notes this repo is built from. Read-only reference |
 
 ---
