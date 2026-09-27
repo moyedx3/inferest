@@ -9,6 +9,9 @@ export type Run = {
 };
 export type Position = { id: number; openedRun: number; closedRun: number | null; asset: string; side: string; sizeUsdc: number; entryPrice: number; markPrice: number; closePrice: number | null };
 
+/** Share price samples kept per source; older rows are deleted as new ones arrive. */
+export const SAMPLES_KEPT = 200;
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS agent_meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS agent_samples (id INTEGER PRIMARY KEY, target TEXT NOT NULL, share_price TEXT NOT NULL, at INTEGER NOT NULL);
@@ -42,6 +45,8 @@ export function openAgentLog(path: string) {
     setMeta(k: string, v: string): void { db.prepare("INSERT INTO agent_meta (k, v) VALUES (?, ?) ON CONFLICT(k) DO UPDATE SET v = excluded.v").run(k, v); },
     addSample(target: string, sharePrice: bigint, at: number): void {
       db.prepare("INSERT INTO agent_samples (target, share_price, at) VALUES (?, ?, ?)").run(target.toLowerCase(), sharePrice.toString(), at);
+      db.prepare(`DELETE FROM agent_samples WHERE target = ? AND id NOT IN
+        (SELECT id FROM agent_samples WHERE target = ? ORDER BY at DESC, id DESC LIMIT ?)`).run(target.toLowerCase(), target.toLowerCase(), SAMPLES_KEPT);
     },
     lastSamples(target: string): { sharePrice: bigint; at: number }[] {
       // the latest row at each of the last two distinct times, so a second sample in one fork block cannot hide the rate
