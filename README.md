@@ -159,6 +159,8 @@ Settled 2026-09-24. Where they depart from the source notes in [`sources/`](sour
 | 13 | `report()` cadence | **Daily** | |
 | 14 | Rail fee (hackathon) | **We absorb it.** Customer gets $1 of credit per $1 of yield; the ~5% is our cost | `HACKATHON_PARAMS` in the kernel |
 | 15 | Admin identity | **Dynamic login; a vault's admin is the login whose verified wallet created it** | Decided 2026-09-26. Email code with an embedded wallet, or the treasury wallet through Dynamic's connectors; the operator token stays for us. See [`docs/superpowers/specs/2026-09-26-wallet-login-design.md`](docs/superpowers/specs/2026-09-26-wallet-login-design.md) |
+| 16 | License | **MIT** | Decided 2026-09-27. `LICENSE` at the root |
+| 17 | Public repository | **The notes in `sources/` and the specs and plans under `docs/superpowers/` stay in the public repository; history stays as it is** | Decided 2026-09-27. A readiness review found no credential in either, and nothing in history that needs a rewrite |
 
 ## Open
 
