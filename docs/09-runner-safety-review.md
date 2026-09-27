@@ -1,6 +1,6 @@
 # Runner safety review: the hosted agent on Arbitrum One with real money
 
-_A read-only review made on 2026-09-27 against `main` at 6f50e85, before the runner ever touched a real chain. Findings are ordered by severity; the last table lists what a real-chain start needs. `docs/08-status.md` says which of these are done._
+_A read-only review made on 2026-09-27 against `main` at 6f50e85, before the runner ever touched a real chain. Findings are ordered by severity; the last table lists what a real-chain start needs. `docs/08-status.md` says which of these are done. Line numbers refer to that commit; `app/config.ts` and the top of `app/server.ts` have moved a few lines since. After this review, `contracts/deployments/*.json` became git-ignored on purpose, and a real-chain deployment record is added with `git add -f`, which replaces finding 13's last sentence and the table's note on `DEPLOYMENTS`._
 
 Scope: `agent/*.ts`, `app/server.ts`, `app/keeper.ts`, with `app/tools.ts`, `app/proxy.ts`, `app/limits.ts`, `app/cli.ts`, `app/faucet.ts`, `contracts/src/VaultFactory.sol` and the spec (`docs/superpowers/specs/2026-09-27-agent-page-design.md`) read for context. Reviewed on `main` at 6f50e85. Read only. `agent/test/*.test.ts` passes (25 of 25, `node --test --test-timeout=60000 --test-force-exit`).
 
@@ -112,9 +112,9 @@ Smallest fix: make `report` and `settle` operator-only unless `DEMO_FAUCET=1`, o
 
 Evidence: `agent/run.ts:28-30` and `agent/run.ts:41` (no `chainCfg.chainId === dep.chainId` check, while the server has one at `app/config.ts:31`), `agent/run.ts:96` (the fork mode depends only on `AGENT_DEMO_DAYS`).
 
-Scenario: `AGENT_DEMO_DAYS=7` copied into a real-chain env. With an empty wallet the faucet's last method is refused and the agent stops (`app/faucet.ts:33-35`), which is safe. With a funded wallet every run logs "clock not advanced" and nothing else happens. viem's `writeContract` checks the RPC's chain against `dep.chainId` before signing, so a wrong RPC fails closed. Also, `contracts/deployments/42161.json` is untracked (only `.gitkeep` is tracked), so the real deployment record exists only in this working tree.
+Scenario: `AGENT_DEMO_DAYS=7` copied into a real-chain env. With an empty wallet the faucet's last method is refused and the agent stops (`app/faucet.ts:33-35`), which is safe. With a funded wallet every run logs "clock not advanced" and nothing else happens. viem's `writeContract` checks the RPC's chain against `dep.chainId` before signing, so a wrong RPC fails closed. Also, `contracts/deployments/42161.json` was untracked at the time (only `.gitkeep` is tracked), so the real deployment record existed only in the reviewer's working tree; it is now git-ignored on purpose.
 
-Smallest fix: copy the server's chain-id check. Refuse `AGENT_DEMO_DAYS > 0` when `eth_chainId` matches a real chain and `anvil_nodeInfo` or `tenderly_*` is unavailable. Commit the deployment file.
+Smallest fix: copy the server's chain-id check. Refuse `AGENT_DEMO_DAYS > 0` when `eth_chainId` matches a real chain and `anvil_nodeInfo` or `tenderly_*` is unavailable. Add the real-chain deployment file with `git add -f`.
 
 ### 14. Numeric config is only checked for being finite and non-negative (note)
 
@@ -132,7 +132,7 @@ Scenario: a page the model scraped gets it to write attacker text into `note`, w
 
 Smallest fix: cut `note` to about 120 words and `reasoning` to about 200 characters in `parseDecision`.
 
-## Answers to the brief's questions in brief
+## Answers to the review's seven questions (fork-only paths on a real chain, money bounds, key custody, crash safety, chain interaction, model and tool trust, operations)
 
 1. With `AGENT_DEMO_DAYS` unset or 0, the faucet, the burn, the clock move, the runner's `report` call and the runner's month-end settle never run (`agent/run.ts:96`, `:119`, `:128`, `:204`). A hand-funded wallet on first start parks `book / 2` and keeps the rest as working capital (finding 3). The server's `report` route still exists for owners (finding 12).
 2. The fence caps deposits at the wallet balance and withdrawals at the floor. It also allows at most one split and one source move per run, 3 trades, buys at the trade cap and sells at the open position. No tool result reaches a signing path except through the decision, and the fence checks every decision field. Values from the chain cannot unbound anything: a zero or negative rate only affects the prompt, a revert throws and fails the run, `NaN` amounts fail `> 0`. The paper book is not bounded (finding 10). Gas is not bounded (finding 8).
@@ -151,7 +151,7 @@ Smallest fix: cut `note` to about 120 words and `reasoning` to about 200 charact
 | Agent wallet funded with ETH for gas | `agent/act.ts:48-53` | Sends fail with insufficient funds. A move can fail between redeem and deposit. No warning |
 | `AGENT_DEMO_DAYS` unset or `0` | `agent/run.ts:20` | `>0` with a funded wallet: a harmless "clock not advanced" line every run. With an empty wallet: the faucet is refused and the agent stops |
 | `RPC_URL` to Arbitrum One, ideally not load-balanced | `agent/run.ts:18` | Down: "run not started" on stdout, no row. Stale: reverts or noisy rates (finding 11) |
-| `DEPLOYMENTS` pointing at `contracts/deployments/42161.json` (untracked today), with `CHAIN_CONFIG` matching | `agent/run.ts:28-29` | Wrong chain: viem refuses to sign. No config cross-check (finding 13) |
+| `DEPLOYMENTS` pointing at `contracts/deployments/42161.json` (git-ignored; add a real-chain record with `git add -f`), with `CHAIN_CONFIG` matching | `agent/run.ts:28-29` | Wrong chain: viem refuses to sign. No config cross-check (finding 13) |
 | Factory allowlists every `targets` entry | `contracts/src/VaultFactory.sol:60` | A move to a target that is not allowlisted reverts at `createVault` after the redeem. Funds stay in the wallet and the move is recorded as failed |
 | `DB_PATH` as an absolute path to the server's own SQLite file, with the runner on the same host | `agent/run.ts:18`, `app/cli.ts:45` | A different file: `/agents` answers 404, and a fresh file makes the runner create and fund a second vault (finding 1d) |
 | `API_URL` of the running server and `ADMIN_TOKEN` | `agent/run.ts:18` | Server down at start: "agent stopped", exit 1, so a supervisor with restart is needed. Down mid-loop: runs fail |
