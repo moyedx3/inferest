@@ -29,6 +29,7 @@ const chainCfg = JSON.parse(readFileSync(process.env.CHAIN_CONFIG ?? "config/arb
 const dep = JSON.parse(readFileSync(env("DEPLOYMENTS"), "utf8"));
 const targets: { address: Hex; name: string }[] = chainCfg.targets ?? [{ address: chainCfg.target, name: chainCfg.targetName ?? "yield source" }];
 
+const DEAD = "0x000000000000000000000000000000000000dEaD" as Hex;
 const OUT_OF_BUDGET = "out of thinking budget until yield accrues";
 const lower = (s: string) => s.toLowerCase();
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -87,8 +88,17 @@ async function ensureRegistered(): Promise<void> {
     return;
   }
   if (vault) { await act([{ kind: "rekey" }], deps(null)); return; }
-  if (cfg.demoDays > 0 && (await usdcBalance()) === 0n) await createFaucet({ rpcUrl: cfg.rpcUrl, usdc }).fund(address);
-  const amount = BigInt(Math.round((cfg.bookUsdc / 2) * 1e6));
+  const book = BigInt(Math.round(cfg.bookUsdc * 1e6));
+  if (cfg.demoDays > 0) {
+    if ((await usdcBalance()) === 0n) await createFaucet({ rpcUrl: cfg.rpcUrl, usdc }).fund(address);
+    // the faucet gives far more than the book; burn the surplus so the wallet holds exactly what the prompt describes
+    const surplus = (await usdcBalance()) - book;
+    if (surplus > 0n) {
+      const receipt = await sendTx(wallet, pub, usdc, usdcAbi, "transfer", [DEAD, surplus]);
+      setupActions.push({ kind: "sweep", detail: { surplusUsdc: usd(surplus), to: lower(DEAD) }, tx: receipt.transactionHash });
+    }
+  }
+  const amount = book / 2n;
   const target = lower(targets[0].address);
   const existing = vaultsByTarget()[target];
   const steps: Step[] = existing

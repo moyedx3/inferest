@@ -42,7 +42,7 @@ export const vaultAbi = parseAbi([
   "function convertToAssets(uint256) view returns (uint256)",
   "function targetVault() view returns (address)",
 ]);
-export const usdcAbi = parseAbi(["function approve(address, uint256) returns (bool)", "function balanceOf(address) view returns (uint256)"]);
+export const usdcAbi = parseAbi(["function approve(address, uint256) returns (bool)", "function transfer(address, uint256) returns (bool)", "function balanceOf(address) view returns (uint256)"]);
 
 /** Sends one contract call and waits for it; a reverted receipt throws. */
 export async function sendTx(wallet: WalletClient<Transport, Chain, Account>, pub: ReturnType<typeof publicClient>, to: Hex, abi: any, functionName: string, args: unknown[]) {
