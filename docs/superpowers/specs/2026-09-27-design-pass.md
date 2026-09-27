@@ -104,6 +104,15 @@ The live page already has every section. The changes:
 
 Headline copy: the live second line "A wallet of its own, half parked, half at work." can stay. The mockup's "1,000 USDC. Half parked…" only holds while the book is near 1,000.
 
+### Later, not in this pass: one Activity timeline
+
+`design/agents-later-activity.png` (frame "Later · Agents with one Activity timeline" in `site.pen`) merges Runs and Activity into one section named Activity. Run cards and on-chain events that no run made sit in one newest-first feed:
+- settlements, yield reports and vault creation get compact lime rows with their tx links
+- a move that a run made stays inside that run's card
+- an All / Decisions / On-chain filter sits on top
+
+Build it only when the agent runs on Arbitrum One with real funds. Today the runs come from a fork's clock and the activity from the testnet, so one timeline would interleave two histories. Until then, keep Runs and Activity as separate sections.
+
 ## Treasury
 
 Only the logo. Nothing else changes.
