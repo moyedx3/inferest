@@ -38,6 +38,7 @@ async function start(customer = "0x00000000000000000000000000000000000000cc", op
       prepareSettle: async () => ({ hash: "0x", send: async () => {} }), sendSettle: async () => "0x",
       settleStatus: async () => "success" as const, transactionKnown: async () => true,
       customerOf: async (v) => (v === V ? customer : ZERO),
+      targetOf: async () => "0x",
     },
     gateway: { search: async () => [], details: async () => ({}), run: async () => ({}) } as unknown as ToolGateway,
     params: HACKATHON_PARAMS,
@@ -394,9 +395,21 @@ test("/setup sends developers to the page's snippets", async () => {
   const { base, server } = await start();
   const r = await fetch(base + "/setup", { redirect: "manual" });
   assert.equal(r.status, 302);
-  assert.equal(r.headers.get("location"), "/#use-a-key");
-  const page = await (await fetch(base + "/")).text();
+  assert.equal(r.headers.get("location"), "/treasury#use-a-key");
+  const page = await (await fetch(base + "/treasury")).text();
   assert.match(page, /id="use-a-key"/);
+  server.close();
+});
+
+test("the three pages are served from clean paths", async () => {
+  const { base, server } = await start();
+  for (const [path, marker] of [["/", "For treasuries"], ["/treasury", 'id="signin"'], ["/agents", 'id="runs"']] as const) {
+    const r = await fetch(base + path);
+    assert.equal(r.status, 200, path);
+    assert.equal(r.headers.get("content-type"), "text/html");
+    assert.ok((await r.text()).includes(marker), `${path} carries ${marker}`);
+  }
+  assert.equal((await fetch(base + "/index.html")).status, 404);
   server.close();
 });
 
@@ -625,5 +638,42 @@ test("the faucet funds a session's own wallet and refuses a foreign address", as
   assert.equal((await postAs(base, "/api/demo/fund", { address: "nope" }, tokenFor([OWNER]))).status, 400);
   assert.equal((await post(base, "/api/demo/fund", { address: OTHER })).status, 200); // the operator may fund anyone
   assert.equal((await fetch(base + "/api/demo/fund", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ address: OWNER }) })).status, 401);
+  server.close();
+});
+
+import { openAgentLog } from "../../agent/log.ts";
+
+test("GET /api/agent is 404 without a runner and public with one", async () => {
+  const { base, server, store, d } = await start();
+  assert.equal((await fetch(base + "/api/agent")).status, 404);
+  const log = openAgentLog(":memory:");
+  d.agentLog = log;
+  assert.equal((await fetch(base + "/api/agent")).status, 404); // tables exist, no vault registered yet
+  await post(base, "/api/vaults", { vault: V, label: "Agent" });
+  const { id: keyId } = await (await post(base, "/api/keys", { vault: V, name: "agent", weight: 1 })).json();
+  log.setMeta("address", "0x00000000000000000000000000000000000000cc");
+  log.setMeta("vault", V);
+  log.setMeta("keys", JSON.stringify([keyId]));
+  const OLD = "0x00000000000000000000000000000000000000ab";
+  log.setMeta("vaultsByTarget", JSON.stringify({ "0x00000000000000000000000000000000000000c1": OLD.toUpperCase().replace("0X", "0x"), "0x00000000000000000000000000000000000000c2": V }));
+  store.recordSettlement(OLD, 7n, "0xold");
+  store.recordSettlement(V, 9n, "0xnew");
+  store.recordSettlement("0x00000000000000000000000000000000000000ee", 3n, "0xother");
+  const run = log.startRun({ clockAt: 1_700_000_000, bookBefore: { walletUsdc: 500 } }, 1_000);
+  store.recordModelCall({ keyId, model: "m", costUsd: 0.002, generationId: "g1" }, 1_500);
+  log.addAction(run, { kind: "deposit", detail: { amountUsdc: 50 }, tx: "0xdead" });
+  log.finishRun(run, { status: "done", note: "parked 50", decision: { split: { action: "deposit", amountUsdc: 50 } }, bookAfter: { walletUsdc: 450 } }, 2_000);
+  const r = await fetch(base + "/api/agent");
+  assert.equal(r.status, 200);
+  const body: any = await r.json();
+  assert.equal(body.agent.vault, V);
+  assert.equal(body.agent.runCount, 1);
+  assert.equal(body.budget.vault, V);
+  assert.deepEqual(body.runs[0].cost, { models: 0.002, tools: 0 });
+  assert.equal(body.runs[0].actions[0].tx, "0xdead");
+  assert.equal(body.book.floor, 200);
+  assert.ok(Array.isArray(body.sources));
+  assert.deepEqual(body.settlements.map((x: any) => x.tx).sort(), ["0xnew", "0xold"]); // the older agent vault's settlement survives the move
+  assert.ok(!JSON.stringify(body).includes("secret"));
   server.close();
 });

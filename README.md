@@ -42,16 +42,20 @@ npm test                                  # ledger kernel + app, no network
 cd contracts && forge test                # Splitter, factory, lifecycle
 cp .env.example .env                      # then fill it in
 # deploy: export RPC_URL, DEPLOYER_PRIVATE_KEY, KEEPER, FLOAT_ADDRESS, FEE_ADDRESS, EMERGENCY_ADMIN,
-# TARGET_VAULT (and optionally FEE_BPS) in the shell first; this writes contracts/deployments/<chainId>.json,
+# TARGET_VAULT (and optionally TARGET_VAULTS, FEE_BPS) in the shell first; this writes contracts/deployments/<chainId>.json,
 # which DEPLOYMENTS in .env points at
 (cd contracts && forge script script/Deploy.s.sol --rpc-url $RPC_URL --private-key $DEPLOYER_PRIVATE_KEY --broadcast --slow)
-npm run serve                             # builds the dashboard bundle, then dashboard, API, chat at /v1, MCP at /mcp
+npm run serve                             # builds the dashboard bundle, then Home, Treasury and Agents, API, chat at /v1, MCP at /mcp
 npm run demo:treasury                     # or demo:agent
 ```
+
+**Deployment.** `TARGET_VAULTS` (comma-separated) allowlists extra ERC-4626 yield sources beyond `TARGET_VAULT`, which stays the default the Treasury page creates over and must match `config/arbitrum-one.json`'s `targets` list.
 
 **Use a key.** Point any OpenAI-compatible client at `http://localhost:8787/v1` with an Inferest key as the API key (model ids are OpenRouter's); the dashboard's Use a key section (`http://localhost:8787/setup` redirects there) has copyable snippets, and works without signing in. The same key authenticates to the MCP tools server at `/mcp`. Set `KEY_ENCRYPTION_KEY` (`openssl rand -hex 32`) before the first start.
 
 **Sign in.** With `DYNAMIC_ENVIRONMENT_ID` set (a free environment at app.dynamic.xyz with email login and EVM embedded wallets enabled, and the dashboard's origin allowed), a finance lead signs in on the dashboard with an email code or by connecting the treasury wallet, and manages the vault that wallet created. Without it, the operator token is the only credential. `PUBLIC_RPC_URL` is the browser-facing RPC the dashboard's wallet uses; `DEMO_FAUCET=1` adds a "Get demo funds" button on a forked chain. The judge path is in [`docs/07-walkthrough.md`](docs/07-walkthrough.md). `npm run serve` reads `.env` and `.env.local` itself.
+
+**The hosted agent.** `npm run agent` runs our own financial agent under `agent/`: a wallet of its own (`AGENT_PRIVATE_KEY`) keeps half its book parked in an Inferest vault and works the other half on paper. Every `AGENT_INTERVAL_MS` it reads its book, researches with a model and paid tools on its own Inferest key, decides, and has the fence in `agent/fence.ts` drop anything outside its rules before it acts: a deposit, a withdrawal, a move to another allowlisted yield source, paper trades. The yield on the parked half is its thinking budget; when that runs out, the run says so and waits for yield. `AGENT_DEMO_DAYS` ships as 0 for a real chain, where the keeper settles; set it to 7 on a fork or a Tenderly testnet, and it moves the chain clock that many days before each run, every fourth run settles its vault as a month end, and a first start with an empty wallet funds it from the faucet and burns everything above the book. `npm run agent -- --once` does one run and exits. It writes its runs to the store's file, which `GET /api/agent` and the Agents page read. The Agents page (`/agents`, no sign-in) shows its book, its thinking budget, every run with what it did and cost, and the yield sources, and has setups for running your own agent the same way. Its Inferest key never touches disk: the runner rotates the key on each start and keeps the secret in memory.
 
 `forge test` prints diagnostics from an upstream Foundry lint bug before its results; read the `Suite result` lines.
 

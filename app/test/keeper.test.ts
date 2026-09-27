@@ -39,6 +39,7 @@ function setup(opts: { yieldMicro?: bigint; lossPending?: boolean; orUsage?: num
     settleStatus: async () => ctl.status,
     transactionKnown: async () => ctl.known,
     customerOf: async () => "0x00000000000000000000000000000000000000cc",
+    targetOf: async () => "0x",
   };
   const or: OpenRouter = {
     createKey: async () => ({ key: "k", hash: "h" }),

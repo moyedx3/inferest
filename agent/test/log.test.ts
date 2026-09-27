@@ -1,0 +1,86 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+import { openAgentLog, SAMPLES_KEPT } from "../log.ts";
+
+test("a run is opened, given actions, and finished; runs list newest first with their actions", () => {
+  const log = openAgentLog(":memory:");
+  const a = log.startRun({ clockAt: 1_000, bookBefore: { walletUsdc: 500 } });
+  log.addAction(a, { kind: "deposit", detail: { amountUsdc: 100 }, tx: "0xa" });
+  log.addAction(a, { kind: "refused", detail: { what: "trade", reason: "over the cap" } });
+  log.finishRun(a, { status: "done", note: "parked more", decision: { split: { action: "deposit", amountUsdc: 100 } }, bookAfter: { walletUsdc: 400 } });
+  const b = log.startRun({ clockAt: 2_000, bookBefore: {} });
+  log.finishRun(b, { status: "out_of_budget", note: "out of thinking budget until yield accrues", decision: null, bookAfter: {} });
+  const runs = log.listRuns(10);
+  assert.deepEqual(runs.map((r) => r.id), [b, a]);
+  assert.equal(runs[1].actions.length, 2);
+  assert.equal(runs[1].actions[1].detail.reason, "over the cap");
+  assert.equal(runs[0].status, "out_of_budget");
+  assert.equal(log.latestRun()!.id, b);
+});
+
+test("samples keep the last two per target and meta round-trips", () => {
+  const log = openAgentLog(":memory:");
+  log.addSample("0xT", 1_000_000n, 100);
+  log.addSample("0xT", 1_001_000n, 200);
+  log.addSample("0xT", 1_002_000n, 300);
+  assert.deepEqual(log.lastSamples("0xT").map((s) => s.at), [200, 300]);
+  assert.equal(log.getMeta("vault"), undefined);
+  log.setMeta("vault", "0xV");
+  assert.equal(log.getMeta("vault"), "0xV");
+});
+
+test("positions open and close", () => {
+  const log = openAgentLog(":memory:");
+  const run = log.startRun({ clockAt: 1, bookBefore: {} });
+  const id = log.openPosition(run, { asset: "ETH", side: "buy", sizeUsdc: 50, entryPrice: 4_000 });
+  assert.equal(log.openPositions().length, 1);
+  log.markPositions({ ETH: 4_100 });
+  assert.equal(log.openPositions()[0].markPrice, 4_100);
+  log.closePosition(id, run, 4_050);
+  assert.equal(log.openPositions().length, 0);
+});
+
+test("a run left running is closed as failed on start, and finished runs are untouched", () => {
+  const log = openAgentLog(":memory:");
+  const done = log.startRun({ clockAt: 1, bookBefore: {} }, 1_000);
+  log.finishRun(done, { status: "done", note: "", decision: null, bookAfter: {} }, 1_500);
+  const stale = log.startRun({ clockAt: 2, bookBefore: {} }, 2_000);
+  assert.equal(log.failStaleRuns(9_000), 1);
+  const [s, d] = log.listRuns(10);
+  assert.equal(s.id, stale);
+  assert.equal(s.status, "failed");
+  assert.equal(s.finishedAt, 2_000);
+  assert.equal(s.error, "runner stopped");
+  assert.equal(d.status, "done");
+  assert.equal(d.finishedAt, 1_500);
+  assert.equal(log.failStaleRuns(9_000), 0);
+});
+
+test("a second sample at the same time does not hide a known rate", () => {
+  const log = openAgentLog(":memory:");
+  log.addSample("0xT", 1_000_000n, 100);
+  log.addSample("0xT", 1_001_000n, 200);
+  log.addSample("0xT", 1_001_000n, 200);
+  assert.deepEqual(log.lastSamples("0xT").map((s) => s.at), [100, 200]);
+});
+
+test("the samples table keeps the newest 200 rows per source", () => {
+  const dir = mkdtempSync(join(tmpdir(), "agent-log-"));
+  const path = join(dir, "log.db");
+  const log = openAgentLog(path);
+  for (let i = 1; i <= 205; i++) log.addSample("0xA", BigInt(1_000_000 + i), i * 10);
+  for (let i = 1; i <= 3; i++) log.addSample("0xB", BigInt(1_000_000 + i), i * 10);
+  const db = new DatabaseSync(path);
+  const count = (t: string) => Number((db.prepare("SELECT COUNT(*) AS n FROM agent_samples WHERE target = ?").get(t) as { n: number }).n);
+  assert.equal(SAMPLES_KEPT, 200);
+  assert.equal(count("0xa"), 200);
+  assert.equal(count("0xb"), 3);
+  assert.deepEqual(log.lastSamples("0xA").map((s) => s.at), [2_040, 2_050]);
+  db.close();
+  log.close();
+  rmSync(dir, { recursive: true, force: true });
+});

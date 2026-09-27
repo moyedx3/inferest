@@ -117,7 +117,7 @@ async function loadDynamic() {
   renderSession();
 }
 
-/** No login on this page: the sign-in card holds the operator token instead of email and wallet. */
+/** No login on the Treasury page: the sign-in card holds the operator token instead of email and wallet. */
 function loginOff(msg) {
   dyn = null;
   session = null;
@@ -173,7 +173,7 @@ function setPageState() {
   placeOperatorField();
 }
 
-/** The vault the page shows: the one this login just created or picked, else the first the caller may see. */
+/** The vault the Treasury page shows: the one this login just created or picked, else the first the caller may see. */
 function currentVault() {
   const vaults = lastState?.vaults ?? [];
   return vaults.find((v) => v.vault === myVault?.toLowerCase()) ?? vaults[0];

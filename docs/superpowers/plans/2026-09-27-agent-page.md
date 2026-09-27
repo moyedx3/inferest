@@ -15,7 +15,7 @@
 - Erasable TypeScript only; relative imports end in `.ts`; `npm test` and `npm run typecheck` green after every task.
 - Prose, comments and commit messages: no em dashes, American spelling, no event names.
 - Secrets never reach a log line, a store row, or a response body: the agent's Inferest key lives only in the runner's memory; the runner's private key is read from the environment only.
-- The runner reads and writes only tables prefixed `agent_`; it reaches the server only through `/v1/chat/completions`, `/mcp`, `POST /api/vaults`, `POST /api/keys`, `POST /api/keys/:id/rotate`, `POST /api/keys/:id/revoke`, and `POST /api/admin/settle`.
+- The runner reads and writes only tables prefixed `agent_`; it reaches the server only through `/v1/chat/completions`, `/mcp`, `POST /api/vaults`, `POST /api/keys`, `POST /api/keys/:id/rotate`, `POST /api/keys/:id/revoke`, `POST /api/admin/settle`, `POST /api/admin/report` (fork only, after it moves the clock), and the public `GET /api/agent`.
 - The fence in `agent/fence.ts` is pure and is the only place a decision is validated.
 - Amounts in USDC base units are `bigint`; dollars in the log are numbers with six decimals at most.
 - Every `git commit` ends with the two trailers used on this branch (see the ledger).
@@ -554,12 +554,13 @@ test("a deposit above the wallet, a sell above the position, a fourth trade, a z
       { side: "buy", asset: "ARB", sizeUsdc: 10, price: 1, reasoning: "r" },
       { side: "buy", asset: "ARB", sizeUsdc: 10, price: 1, reasoning: "r" },
       { side: "buy", asset: "ARB", sizeUsdc: 10, price: 1, reasoning: "r" },
+      { side: "buy", asset: "ARB", sizeUsdc: 10, price: 1, reasoning: "r" },
     ],
   });
   const { accepted, refused } = applyFence(d, ctx);
   assert.equal(accepted.split.action, "hold");
   assert.equal(accepted.source.action, "stay");
-  assert.equal(accepted.trades.length, 2);
+  assert.equal(accepted.trades.length, 3); // the three legal ARB buys; the fourth is over the per-run count
   assert.equal(refused.filter((r) => r.what.startsWith("trade")).length, 3);
 });
 ```

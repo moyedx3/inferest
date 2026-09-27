@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Inferest</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500&family=Geist+Mono&family=Newsreader:opsz@6..72&display=swap" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body data-state="out">
+  <header class="topbar">
+    <div class="wrap">
+      <div class="left"><a class="brand" href="/">Inferest</a><nav class="nav"><a href="/">Home</a><a href="/treasury">Treasury</a><a href="/agents" aria-current="page">Agents</a></nav></div>
+      <div class="account">
+        <span class="chip"><i class="dot"></i><span id="network"></span></span>
+        <span class="chip in-only" id="whochip"><span id="who"></span><span class="mono faint" id="address"></span></span>
+        <span class="in-only" id="walletlist"></span>
+        <button class="linkbtn in-only" id="linkwallet" hidden>Connect treasury wallet</button>
+        <button class="linkbtn in-only" id="signout" hidden>Sign out</button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="agenthead">
+      <div class="wrap">
+        <div class="head">
+          <div><span class="tag" id="agenttag">Agent</span></div>
+          <h1 id="agenthead">It pays for its own thinking.<span class="second">A wallet of its own, half parked, half at work.</span></h1>
+          <p class="fine" id="pagefine"></p>
+        </div>
+      </div>
+    </section>
+
+    <section class="agent-only" id="book" hidden>
+      <div class="wrap">
+        <div class="card bookcard">
+          <div class="yieldhead">
+            <div>
+              <div class="label">The book</div>
+              <div class="figure"><b id="booktotal">$0</b></div>
+            </div>
+            <div class="vaultmeta"><span>Agent wallet</span><a id="agentlink" target="_blank" rel="noopener"></a></div>
+          </div>
+          <div class="splitbar" id="splitbar">
+            <div class="seg parked" id="segparked"><small>Parked</small><span id="parkedamt"></span></div>
+            <div class="seg working" id="segworking"><small>At work</small><span id="workingamt"></span></div>
+            <i class="floor" id="floor"></i>
+          </div>
+          <div class="breakdown">
+            <div id="parked"><small>Parked in the vault</small><span id="parkedvalue"></span><em id="parkedsource"></em></div>
+            <div id="working"><small>At work in the wallet</small><span id="workingvalue"></span><em id="workingnote"></em></div>
+            <div><small>Floor</small><span id="floorvalue"></span><em>the vault never goes under it</em></div>
+          </div>
+          <div class="keytable positions" id="positions">
+            <table>
+              <thead><tr><th>Asset</th><th>Side</th><th>Size</th><th>Entry</th><th>Mark</th><th>Change</th></tr></thead>
+              <tbody id="positionrows"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="treasury agent-only" id="budget" hidden>
+      <div class="wrap">
+        <div class="head">
+          <div><span class="tag" id="budgettag">Thinking budget</span></div>
+          <h2>The interest is the budget.<span class="second">Models and paid tools spend only what the parked half earns.</span></h2>
+        </div>
+        <div class="grid">
+          <div class="card yieldcard">
+            <div class="yieldhead">
+              <div>
+                <div class="label">Yield earned this period</div>
+                <div class="figure"><b id="yield">$0.00</b><span class="live">live</span></div>
+              </div>
+              <div class="vaultmeta"><span id="vaultname"></span><a id="vaultlink" target="_blank" rel="noopener"></a></div>
+            </div>
+            <div class="bars">
+              <div class="yieldbar">
+                <div class="seg used" id="barused"><small>Used</small><span id="usedamt"></span></div>
+                <div class="seg open"><small>Open credit</small><span id="openamt"></span></div>
+              </div>
+            </div>
+            <div class="breakdown">
+              <div><small>Models</small><span id="models"></span><em id="modelsnote"></em></div>
+              <div><small>Tools</small><span id="tools"></span><em>paid MCP calls</em></div>
+              <div><small>Provider backstop</small><span id="backstop"></span><em id="backstopnote"></em></div>
+            </div>
+          </div>
+          <div class="side">
+            <div class="card">
+              <div class="cardhead"><h3>If it settles now</h3><span class="mono faint" id="pvperiod"></span></div>
+              <div class="preview">
+                <div><p style="margin:0">Usage<small>to the provider float</small></p><span id="pvusage"></span></div>
+                <div><p style="margin:0">Inferest fee<small>10% of unused yield</small></p><span id="pvfee"></span></div>
+                <div class="yours"><p style="margin:0"><b>Stays in its vault</b><small>becomes principal</small></p><span id="pvreturned"></span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="runs">
+      <div class="wrap">
+        <div class="head">
+          <div><span class="tag">Runs</span></div>
+          <h2>Every run, what it decided.<span class="second">Newest first. The fence drops anything outside its rules.</span></h2>
+        </div>
+        <ul class="feed runs" id="runlist"><li class="none">The agent has not run yet.</li></ul>
+      </div>
+    </section>
+
+    <section class="agent-only" id="sourcesection" hidden>
+      <div class="wrap">
+        <div class="head">
+          <div><span class="tag">Yield sources</span></div>
+          <h2>Where it can park.<span class="second">Only allowlisted vaults. It moves when another pays more.</span></h2>
+        </div>
+        <div class="card keytable">
+          <table id="sources">
+            <thead><tr><th>Source</th><th>Address</th><th>Rate</th></tr></thead>
+            <tbody id="sourcerows"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="agent-only" id="activitysection" hidden>
+      <div class="wrap split">
+        <div class="explain">
+          <div><span class="tag">Activity</span></div>
+          <h2>Every move, on-chain.<span class="second">Its wallet signs deposits and moves. The keeper settles.</span></h2>
+        </div>
+        <ul class="feed" id="activity"><li class="none">Nothing on-chain yet.</li></ul>
+      </div>
+    </section>
+
+    <section id="own">
+      <div class="wrap split">
+        <div class="explain">
+          <div><span class="tag">Your own agent</span></div>
+          <h2>Run one like it.<span class="second">Point your agent at Inferest with a key from your treasury.</span></h2>
+          <div class="ownlinks">
+            <a href="/treasury#use-a-key">Get a key on Treasury →</a>
+            <a href="https://github.com/moyedx3/inferest/tree/main/agent" target="_blank" rel="noopener">Read this agent's code ↗</a>
+          </div>
+        </div>
+        <div class="codeside">
+          <div class="card window">
+            <div class="windowbar"><span class="dots"><i></i><i></i><i></i></span><div class="tabs" id="tabs"></div><button class="linkbtn" id="copysnippet">Copy</button></div>
+            <pre id="snippet"></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <div style="display:flex;align-items:center"><a class="brand" href="/">Inferest</a><span class="tagline">Your interest, now inference.</span></div>
+      <div class="contracts">
+        <span id="contracts"></span>
+        <details class="operator" id="operator">
+          <summary>🔒 Operator</summary>
+          <span class="pillfield operatorfield" id="operatorfield"><input id="token" type="password" placeholder="admin token" /></span>
+        </details>
+      </div>
+    </div>
+  </footer>
+  <script type="module" src="/agents.js"></script>
+</body>
+</html>
