@@ -20,7 +20,7 @@ const OTHER = "0x00000000000000000000000000000000000000dd";
 const tokenFor = (wallets: string[], over: Record<string, unknown> = {}) =>
   SIGNER.sign(claims({ verified_credentials: wallets.map((address, i) => ({ id: `vc-${i}`, address, chain: "eip155" })), ...over }));
 
-async function start(customer = "0x00000000000000000000000000000000000000cc", opts: { login?: boolean; faucet?: (address: string) => void } = {}) {
+async function start(customer = "0x00000000000000000000000000000000000000cc", opts: { login?: boolean; faucet?: (address: string) => void; ownerCooldown?: AppDeps["ownerCooldown"] } = {}) {
   const store = openStore(":memory:");
   const created: string[] = [];
   const d: AppDeps = {
@@ -57,6 +57,7 @@ async function start(customer = "0x00000000000000000000000000000000000000cc", op
     }),
     faucet: opts.faucet ? { fund: async (a) => { opts.faucet!(a); return { native: 10n ** 18n, usdc: 100_000_000_000n }; } } : undefined,
     logError: () => {},
+    ownerCooldown: opts.ownerCooldown,
   };
   d.keeper = { chain: d.chain, store, or: d.or, params: d.params, log: () => {}, sleep: async () => {}, decrypt: d.secrets.decrypt };
   const server = createApp(d);
@@ -535,6 +536,65 @@ test("a session cannot touch another owner's vault", async () => {
   }
   assert.equal((await postAs(base, "/api/keys/deadbeefdeadbeef/weight", { weight: 1 }, t)).status, 404);
   assert.equal((await postAs(base, "/api/admin/settle", { vault: "0x00000000000000000000000000000000000000ee" }, t)).status, 404);
+  server.close();
+});
+
+const COOLDOWN = { reportMs: 3_600_000, settleMs: 86_400_000 };
+
+test("an owner reports at most once an hour on a real chain; the operator is unlimited", async () => {
+  const { base, server } = await start(undefined, { ownerCooldown: COOLDOWN });
+  await post(base, "/api/vaults", { vault: V });
+  const t = tokenFor([OWNER]);
+  assert.equal((await postAs(base, "/api/admin/report", { vault: V }, t)).status, 200);
+  const r = await postAs(base, "/api/admin/report", { vault: V }, t);
+  assert.equal(r.status, 429);
+  const body = await r.json();
+  assert.equal(body.error, "reported less than an hour ago; the keeper reports every vault daily");
+  assert.ok(body.retryAfterSeconds >= 3590 && body.retryAfterSeconds <= 3600, String(body.retryAfterSeconds));
+  assert.equal(r.headers.get("retry-after"), String(body.retryAfterSeconds));
+  assert.equal((await postAs(base, "/api/admin/sync", { vault: V }, t)).status, 200); // sync has no cooldown
+  assert.equal((await post(base, "/api/admin/report", { vault: V })).status, 200);
+  assert.equal((await post(base, "/api/admin/report", { vault: V })).status, 200);
+  assert.equal((await post(base, "/api/admin/report", {})).status, 200);
+  server.close();
+});
+
+test("an owner settles at most once a day on a real chain; the operator is unlimited", async () => {
+  const { base, server } = await start(undefined, { ownerCooldown: COOLDOWN });
+  await post(base, "/api/vaults", { vault: V });
+  const t = tokenFor([OWNER]);
+  const first = await postAs(base, "/api/admin/settle", { vault: V }, t);
+  assert.equal(first.status, 200);
+  assert.equal((await first.json()).pending, false); // a settle with no usage to bill still counts as a call
+  const r = await postAs(base, "/api/admin/settle", { vault: V }, t);
+  assert.equal(r.status, 429);
+  const body = await r.json();
+  assert.equal(body.error, "settled less than a day ago; the keeper settles every vault at month end");
+  assert.ok(body.retryAfterSeconds >= 86_390 && body.retryAfterSeconds <= 86_400, String(body.retryAfterSeconds));
+  assert.equal(r.headers.get("retry-after"), String(body.retryAfterSeconds));
+  assert.equal((await post(base, "/api/admin/settle", { vault: V })).status, 200);
+  assert.equal((await post(base, "/api/admin/settle", { vault: V })).status, 200);
+  server.close();
+});
+
+test("without a cooldown an owner reports and settles as often as they like", async () => {
+  const { base, server } = await start();
+  await post(base, "/api/vaults", { vault: V });
+  const t = tokenFor([OWNER]);
+  for (const path of ["/api/admin/report", "/api/admin/report", "/api/admin/settle", "/api/admin/settle"]) {
+    assert.equal((await postAs(base, path, { vault: V }, t)).status, 200, path);
+  }
+  server.close();
+});
+
+test("a cooldown does not answer for a vault the caller does not own", async () => {
+  const { base, server } = await start(undefined, { ownerCooldown: COOLDOWN });
+  await post(base, "/api/vaults", { vault: V });
+  const t = tokenFor([OTHER]);
+  for (const path of ["/api/admin/report", "/api/admin/report", "/api/admin/settle", "/api/admin/settle"]) {
+    assert.equal((await postAs(base, path, { vault: V }, t)).status, 403, path);
+  }
+  assert.equal((await postAs(base, "/api/admin/report", { vault: V }, tokenFor([OWNER]))).status, 200);
   server.close();
 });
 
