@@ -24,6 +24,8 @@ test("the loop calls a paid tool, then decides", async () => {
   assert.equal(r.turns, 2);
   assert.equal(bodies[0].messages[0].role, "system");
   assert.match(bodies[0].messages[0].content, /a buy at most 15% of the working half; a sell at most the open position; at most 3 trades\./);
+  assert.ok(bodies[0].messages[0].content.includes("at least one small paper position"));
+  assert.ok(bodies[0].messages[0].content.includes("abstractapi /v1/live"));
   assert.ok(bodies[0].tools.some((t: any) => t.function.name === "decide"));
   assert.equal(bodies[1].messages.at(-1).role, "tool");
 });

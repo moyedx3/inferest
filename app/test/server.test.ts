@@ -675,5 +675,23 @@ test("GET /api/agent is 404 without a runner and public with one", async () => {
   assert.ok(Array.isArray(body.sources));
   assert.deepEqual(body.settlements.map((x: any) => x.tx).sort(), ["0xnew", "0xold"]); // the older agent vault's settlement survives the move
   assert.ok(!JSON.stringify(body).includes("secret"));
+  assert.deepEqual(body.fence, { floorUsdc: 200, tradeCapBps: 2000, maxToolCalls: 4, maxTurns: 10, maxTrades: 3, assets: ["ETH", "BTC", "ARB"], splitMovesPerRun: 1, sourceMovesPerRun: 1, fromRunner: false });
+  log.setMeta("fence", JSON.stringify({ floorUsdc: 250, tradeCapBps: 1500, maxToolCalls: 2, maxTurns: 6 }));
+  const again: any = await (await fetch(base + "/api/agent")).json();
+  assert.equal(again.fence.floorUsdc, 250);
+  assert.equal(again.fence.maxToolCalls, 2);
+  assert.equal(again.fence.maxTrades, 3);
+  assert.equal(again.fence.fromRunner, true);
+  server.close();
+});
+
+test("the logo files are served as SVG images", async () => {
+  const { base, server } = await start();
+  for (const path of ["/inferest-icon.svg", "/favicon.svg"]) {
+    const r = await fetch(base + path);
+    assert.equal(r.status, 200, path);
+    assert.equal(r.headers.get("content-type"), "image/svg+xml", path);
+    assert.ok((await r.text()).includes("<svg"), path);
+  }
   server.close();
 });

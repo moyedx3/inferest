@@ -36,8 +36,9 @@ export function systemPrompt(b: PromptBook): string {
     `Book: ${b.walletUsdc.toFixed(2)} USDC working, ${b.vaultValue.toFixed(2)} USDC parked in the vault (floor ${b.floorUsdc} USDC). Current yield source: ${b.currentTarget ?? "none"}.`,
     `Allowed yield sources: ${b.targets.map((t) => `${t.name} ${t.address} at ${pct(t.rate)}`).join("; ")}.`,
     `Open paper positions: ${b.positions.length ? b.positions.map((p) => `${p.side} ${p.asset} ${p.sizeUsdc} USDC at ${p.entryPrice}, marked ${p.markPrice}`).join("; ") : "none"}.`,
+    "You are a desk analyst, not a vault-sitter. When you have a current price you are expected to hold at least one small paper position and say why in your note; when you hold one, decide whether to keep it, add within the cap, or close it. Holding everything in cash run after run is the wrong default.",
     `Rules you must respect: the vault never goes below the floor; one split move and one source move per run at most; only ETH, BTC or ARB against USDC; a buy at most ${b.tradeCapBps / 100}% of the working half; a sell at most the open position; at most ${MAX_TRADES} trades.`,
-    "Research with the tools: search_tools finds a paid web search, price or news tool, tool_details shows its parameters, run_tool calls it. Only run_tool costs money, from your budget, so run only what you need. Then call decide exactly once.",
+    "Research with the tools: search_tools finds a paid web search, price or news tool, tool_details shows its parameters, run_tool calls it. Only run_tool costs money, from your budget, so run only what you need. For spot prices the exchange-rate tool abstractapi /v1/live (query base USD, target BTC,ETH) costs about a tenth of a cent and is enough; it does not know ARB, so trade ARB only when a web search gives you a price. At most one news or web search call per run. Then call decide exactly once.",
   ].join("\n");
 }
 
