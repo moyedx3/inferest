@@ -29,6 +29,8 @@ test("the floor, the balances and the caps are enforced, and the rest survives",
   assert.match(refused[1].reason, /allowlist/);
   assert.match(refused[2].reason, /20%/);
   assert.match(refused[3].reason, /asset/);
+  const tenPct = applyFence(base({ trades: [{ side: "buy", asset: "ETH", sizeUsdc: 60, price: 4_000, reasoning: "r" }] }), { ...ctx, walletUsdc: 500, tradeCapBps: 1000 });
+  assert.match(tenPct.refused[0].reason, /10%/);
 });
 test("a deposit above the wallet, a sell above the position, a fourth trade, a zero price, and a move to the current source are refused", () => {
   const d = base({

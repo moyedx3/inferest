@@ -31,7 +31,7 @@ export function applyFence(d: Decision, c: FenceContext): { accepted: Decision; 
     if (trades.length >= MAX_TRADES) return refused.push({ what, reason: `at most ${MAX_TRADES} trades per run` });
     if (!ASSETS.has(t.asset)) return refused.push({ what, reason: `asset ${t.asset} is not allowed` });
     if (!(t.price > 0)) return refused.push({ what, reason: "price must be above zero" });
-    if (t.side === "buy" && !(t.sizeUsdc > 0 && t.sizeUsdc <= cap)) return refused.push({ what, reason: `a buy is at most 20% of the working half (${cap.toFixed(2)} USDC)` });
+    if (t.side === "buy" && !(t.sizeUsdc > 0 && t.sizeUsdc <= cap)) return refused.push({ what, reason: `a buy is at most ${c.tradeCapBps / 100}% of the working half (${cap.toFixed(2)} USDC)` });
     const held = c.positions.filter((p) => p.asset === t.asset).reduce((s, p) => s + p.sizeUsdc, 0);
     if (t.side === "sell" && !(t.sizeUsdc > 0 && t.sizeUsdc <= held)) return refused.push({ what, reason: `a sell is at most the open ${t.asset} position (${held} USDC)` });
     trades.push(t);
