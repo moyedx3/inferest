@@ -7,12 +7,12 @@ import type { Chain } from "./chain.ts";
 import type { OpenRouter } from "./openrouter.ts";
 import type { Store, VaultRow } from "./store.ts";
 import type { ToolGateway } from "./tools.ts";
-import type { Proxy } from "./proxy.ts";
+import { readBody, BodyTooLarge, type Proxy } from "./proxy.ts";
 import type { Auth, Session } from "./auth.ts";
 import type { Faucet } from "./faucet.ts";
 import { buildMcpServer } from "./mcp.ts";
 import { computeLimits, settlePreview } from "./limits.ts";
-import { sha256, newInferestKey, type SecretBox } from "./crypto.ts";
+import { sha256, sameSecret, newInferestKey, type SecretBox } from "./crypto.ts";
 import { syncAll, syncVault, reportAll, reportVault, settleVault, markRegistered, isSettling, type KeeperDeps } from "./keeper.ts";
 import type { AgentLog } from "../agent/log.ts";
 import { rateFrom } from "../agent/rate.ts";
@@ -51,10 +51,11 @@ function send(res: ServerResponse, status: number, body: unknown): void {
   res.end(JSON.stringify(body, (_k, v) => (typeof v === "bigint" ? v.toString() : v)));
 }
 
+/** Cap on a JSON body outside /v1. Past it readBody throws BodyTooLarge, which createApp answers with 413. */
+const MAX_JSON_BYTES = 1_000_000;
+
 async function readJson(req: IncomingMessage): Promise<any> {
-  const chunks: Buffer[] = [];
-  for await (const c of req) chunks.push(c as Buffer);
-  const raw = Buffer.concat(chunks).toString("utf8");
+  const raw = await readBody(req, MAX_JSON_BYTES);
   return raw ? JSON.parse(raw) : {};
 }
 
@@ -65,7 +66,7 @@ function bearer(req: IncomingMessage): string {
 
 /** Resolves the request's credentials once. A bearer that fails verification counts as nobody and is logged by reason only. */
 export async function resolveCaller(d: AppDeps, req: IncomingMessage): Promise<Caller> {
-  if (req.headers["x-admin-token"] === d.adminToken) return { kind: "operator" };
+  if (sameSecret(req.headers["x-admin-token"], d.adminToken)) return { kind: "operator" };
   const token = bearer(req);
   if (!token || !d.auth) return { kind: "none" };
   try {
@@ -329,6 +330,7 @@ function sanitizeError(message: string): string {
 export function createApp(d: AppDeps): Server {
   return createServer((req, res) => {
     route(d, req, res).catch((e) => {
+      if (e instanceof BodyTooLarge && !res.headersSent) return send(res, 413, { error: "request too large" });
       const err = e as Error;
       (d.logError ?? console.error)(err.stack ?? err.message);
       if (res.headersSent) { res.end(); return; }

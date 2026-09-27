@@ -1,6 +1,12 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
 export const sha256 = (s: string): string => createHash("sha256").update(s).digest("hex");
+
+/** Constant-time secret check. Compares SHA-256 digests so the lengths need not match; a missing or repeated header is false. */
+export function sameSecret(a: string | string[] | undefined, b: string): boolean {
+  if (typeof a !== "string") return false;
+  return timingSafeEqual(createHash("sha256").update(a).digest(), createHash("sha256").update(b).digest());
+}
 
 function keyBytes(hex: string): Buffer {
   if (!/^[0-9a-f]{64}$/i.test(hex)) throw new Error("KEY_ENCRYPTION_KEY must be 32 bytes as 64 hex characters");
