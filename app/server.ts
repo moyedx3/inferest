@@ -10,6 +10,7 @@ import type { ToolGateway } from "./tools.ts";
 import { readBody, BodyTooLarge, type Proxy } from "./proxy.ts";
 import type { Auth, Session } from "./auth.ts";
 import type { Faucet } from "./faucet.ts";
+import { OwnerCooldown } from "./cooldown.ts";
 import { buildMcpServer } from "./mcp.ts";
 import { computeLimits, settlePreview } from "./limits.ts";
 import { sha256, sameSecret, newInferestKey, type SecretBox } from "./crypto.ts";
@@ -34,6 +35,12 @@ export type AppDeps = {
   agentLog?: AgentLog;
   /** Logs an uncaught error from a route (default console.error). */
   logError?: (msg: string) => void;
+  /**
+   * How long a signed-in owner waits between two report calls and between two settle calls on one vault, so no
+   * owner can make the keeper spend gas at will on a real chain. Unset means no limit (demo chains). The operator
+   * is never limited.
+   */
+  ownerCooldown?: { reportMs: number; settleMs: number };
 };
 
 /** Who is asking: the operator (admin token), a signed-in finance lead, or nobody. */
@@ -46,9 +53,23 @@ const NEED_LOGIN = { error: "sign in or send the admin token" };
 const NOT_YOURS = { error: "not your vault" };
 const OPERATOR_ONLY = { error: "operator only" };
 
-function send(res: ServerResponse, status: number, body: unknown): void {
-  res.writeHead(status, { "Content-Type": "application/json" });
+function send(res: ServerResponse, status: number, body: unknown, headers: Record<string, string> = {}): void {
+  res.writeHead(status, { "Content-Type": "application/json", ...headers });
   res.end(JSON.stringify(body, (_k, v) => (typeof v === "bigint" ? v.toString() : v)));
+}
+
+const COOLDOWN_MESSAGE = {
+  report: "reported less than an hour ago; the keeper reports every vault daily",
+  settle: "settled less than a day ago; the keeper settles every vault at month end",
+} as const;
+
+/** Answers 429 and returns true when an owner (never the operator) is inside the cooldown for this kind and vault. */
+function coolingDown(cooldown: OwnerCooldown | undefined, res: ServerResponse, caller: Caller, kind: "report" | "settle", vault: string): boolean {
+  if (!cooldown || caller.kind === "operator") return false;
+  const wait = cooldown.check(kind, vault, Date.now());
+  if (wait === 0) return false;
+  send(res, 429, { error: COOLDOWN_MESSAGE[kind], retryAfterSeconds: wait }, { "Retry-After": String(wait) });
+  return true;
 }
 
 /** Cap on a JSON body outside /v1. Past it readBody throws BodyTooLarge, which createApp answers with 413. */
@@ -158,7 +179,7 @@ function vaultFor(d: AppDeps, res: ServerResponse, caller: Caller, vault: string
   return row;
 }
 
-async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse): Promise<void> {
+async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse, cooldown?: OwnerCooldown): Promise<void> {
   const url = new URL(req.url ?? "/", "http://localhost");
   if (await d.proxy.handle(req, res)) return;
 
@@ -288,6 +309,7 @@ async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse): Pro
       }
       const vault = String(body.vault ?? "").toLowerCase();
       if (!vaultFor(d, res, caller, vault)) return;
+      if (report && coolingDown(cooldown, res, caller, "report", vault)) return;
       if (report) await reportVault(d.keeper, vault);
       await syncVault(d.keeper, vault);
       return send(res, 200, { ok: true });
@@ -295,6 +317,7 @@ async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse): Pro
     if (url.pathname === "/api/admin/settle") {
       const vault = String(body.vault ?? "").toLowerCase();
       if (!vaultFor(d, res, caller, vault)) return;
+      if (coolingDown(cooldown, res, caller, "settle", vault)) return;
       const r = await settleVault(d.keeper, vault);
       return send(res, 200, { usageMicro: r ? r.usage.toString() : null, tx: r ? r.tx : null, pending: r?.pending === true });
     }
@@ -328,8 +351,9 @@ function sanitizeError(message: string): string {
 }
 
 export function createApp(d: AppDeps): Server {
+  const cooldown = d.ownerCooldown ? new OwnerCooldown(d.ownerCooldown) : undefined;
   return createServer((req, res) => {
-    route(d, req, res).catch((e) => {
+    route(d, req, res, cooldown).catch((e) => {
       if (e instanceof BodyTooLarge && !res.headersSent) return send(res, 413, { error: "request too large" });
       const err = e as Error;
       (d.logError ?? console.error)(err.stack ?? err.message);

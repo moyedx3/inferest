@@ -43,6 +43,8 @@ switch (cmd) {
       store, or, chain, gateway, params: cfg.params, adminToken: cfg.adminToken, keeper, secrets: box, proxy, auth,
       faucet: cfg.demoFaucet ? createFaucet({ rpcUrl: cfg.rpcUrl, usdc: cfg.usdc }) : undefined,
       agentLog: openAgentLog(cfg.dbPath),
+      // an owner may make the keeper report once an hour and settle once a day per vault; demo chains have no limit
+      ownerCooldown: cfg.demoFaucet ? undefined : { reportMs: 3_600_000, settleMs: 86_400_000 },
       publicConfig: {
         chainId: cfg.chainId, factory: cfg.factory, splitter: cfg.splitter, usdc: cfg.usdc, target: cfg.target, targets: cfg.targets, publicUrl: cfg.publicUrl,
         dynamicEnvironmentId: cfg.dynamicEnvironmentId ?? null, publicRpcUrl: cfg.publicRpcUrl ?? null, chainName: cfg.chainName,

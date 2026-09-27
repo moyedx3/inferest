@@ -183,6 +183,7 @@ On a loss, `report()` **burns the Splitter's shares of that vault first**. So un
 | Overlapping ticks and duplicate settlements of one vault are skipped | in-flight guards in `app/keeper.ts` |
 | Tool payments are capped at the key's budget before signing, never retried, and rejected payments are not charged | `toolGateway`, `x402PayingFetch` in `app/tools.ts` |
 | Every mutating API route needs a session that owns the vault or the operator token; state is scoped to the caller | `resolveCaller`, `vaultFor` in `app/server.ts`; `app/auth.ts` |
+| On a real chain an owner may trigger report once an hour and settle once a day per vault; the operator is unlimited; demo chains have no limit | `ownerCooldown` in `app/server.ts`; `app/cooldown.ts` |
 
 ### Contract interfaces
 
