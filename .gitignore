@@ -32,3 +32,6 @@ app/dashboard/dynamic.bundle.js
 # editor state and fork deployments
 .obsidian/
 contracts/deployments/*.json
+
+# superpowers local only docs
+docs/superpowers/

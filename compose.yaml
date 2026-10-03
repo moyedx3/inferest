@@ -1,0 +1,78 @@
+name: inferest
+
+services:
+  server:
+    image: ${INFEREST_IMAGE:-inferest:local}
+    build:
+      context: .
+      args:
+        NODE_VERSION: ${NODE_VERSION:-24.21.0}
+    init: true
+    restart: unless-stopped
+    env_file:
+      - ${SERVER_ENV_FILE:-.env.server}
+    environment:
+      DB_PATH: /data/inferest.db
+      CHAIN_CONFIG: /run/inferest/chain.json
+      DEPLOYMENTS: /run/inferest/deployment.json
+      PORT: "8787"
+    ports:
+      - "127.0.0.1:${SERVER_PORT:-8787}:8787"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - data:/data
+      - type: bind
+        source: ${CHAIN_CONFIG_FILE:-./config/arbitrum-one.json}
+        target: /run/inferest/chain.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${DEPLOYMENTS_FILE:-./contracts/deployments/42161.json}
+        target: /run/inferest/deployment.json
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8787/', {signal: AbortSignal.timeout(3000)}).then(async r => {if (!r.ok || !(await r.text()).toLowerCase().includes('<!doctype html>')) process.exit(1)}).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 6
+
+  agent:
+    profiles: [agent]
+    image: ${INFEREST_IMAGE:-inferest:local}
+    command: ["node", "agent/run.ts"]
+    init: true
+    restart: "no"
+    depends_on:
+      server:
+        condition: service_healthy
+    env_file:
+      - ${AGENT_ENV_FILE:-.env.agent}
+    environment:
+      DB_PATH: /data/inferest.db
+      CHAIN_CONFIG: /run/inferest/chain.json
+      DEPLOYMENTS: /run/inferest/deployment.json
+      API_URL: http://server:8787
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - data:/data
+      - type: bind
+        source: ${CHAIN_CONFIG_FILE:-./config/arbitrum-one.json}
+        target: /run/inferest/chain.json
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ${DEPLOYMENTS_FILE:-./contracts/deployments/42161.json}
+        target: /run/inferest/deployment.json
+        read_only: true
+        bind:
+          create_host_path: false
+
+volumes:
+  data:
