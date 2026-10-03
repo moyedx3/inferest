@@ -77,6 +77,7 @@ Every `npm run` command loads `.env` and then `.env.local` when that file exists
 | [`docs/05-risks.md`](docs/05-risks.md) | Terms of service, custody, contracts, rates, rail dependence, tax |
 | [`docs/06-workflow.md`](docs/06-workflow.md) | **The mechanism as built.** Who sends which transaction: per-customer vaults, the Splitter, the keeper, paid tools, settlement, known gaps |
 | [`docs/07-walkthrough.md`](docs/07-walkthrough.md) | The dashboard path a judge or a customer follows |
+| [`docs/10-about.md`](docs/10-about.md) | **The project in one page:** motivation, what it is, how it works, who it is for, revenue, alternatives, the demo, what's real today. Submission answers are cut from it |
 | [`docs/09-runner-safety-review.md`](docs/09-runner-safety-review.md) | What must change before the hosted agent runs with real money |
 | [`sources/`](sources/) | The original Korean notes this repo is built from. Read-only reference |
 
