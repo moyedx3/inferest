@@ -81,7 +81,6 @@ h1 .second, h2 .second { display: block; color: var(--ink-3); }
 .facts b { display: block; font-weight: 500; }
 .facts span { font-size: 13px; color: var(--ink-2); }
 .intro { flex: 1; display: flex; flex-direction: column; gap: 32px; }
-.intro h1 { font-size: 48px; line-height: 1.1; }
 .intro .notes { max-width: 520px; border-top: 1px solid var(--line); }
 .intro .notes li { gap: 14px; padding: 16px 0; border-top: 0; border-bottom: 1px solid var(--line); }
 .intro .notes b { font-size: 14px; line-height: 1.3; margin-bottom: 4px; }
@@ -234,7 +233,7 @@ details.operator[open] { display: flex; gap: 8px; align-items: center; }
 .operatorfield input { width: 200px; }
 
 @media (max-width: 900px) {
-  h1 { font-size: 36px; } .pitch h1 { font-size: 48px; } .intro h1 { font-size: 36px; } .figure b { font-size: 48px; }
+  h1 { font-size: 36px; } .pitch h1 { font-size: 48px; } .figure b { font-size: 48px; }
   .hero .wrap, .treasury .grid, .split { flex-direction: column; align-items: stretch; }
   .signin, .side, .explain { width: auto; }
   .breakdown, .facts { flex-wrap: wrap; row-gap: 16px; } .breakdown div, .facts div { flex-basis: 50%; }
