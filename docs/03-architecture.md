@@ -27,7 +27,7 @@ Arrows carry information as well as money. **The core loop: raise each key's lim
 
 1. **Yield adapter.** The user deposits USDC or ETH into a standard ERC-4626 vault. The standard makes Morpho, Aave and Yearn interchangeable behind one interface.
 2. **Ledger.** Records each user's principal and vault shares. Accrued yield is `convertToAssets(shares) − principal`.
-3. **Splitter** (was harvester). Yield is not redeemed per request. The ledger opens credit against accrued yield first, and redemption settles in a batch each period. It redeems only `usage + fee`; the rest of the leftover yield stays in the vault and becomes principal. See `settle` in the kernel.
+3. **Splitter** (was harvester). Yield is not redeemed per request. The ledger opens credit against accrued yield first, and redemption settles in a batch each period. It redeems only `usage + fee` and sends the rest of the leftover yield back to the customer's wallet as vault shares, where it becomes principal. See `settle` in the kernel.
 4. **Credit router.** Decides which inference rail receives the usage USDC. For the hackathon, one OpenRouter float is enough.
 5. **Key manager.** Issues a key per developer or agent and syncs the ledger's yield balance to each key's spend limit.
 

@@ -100,10 +100,10 @@ customer wallet ──deposit──▶ ERC-4626 vault (shares stay in the custom
             usage    = credits spent / (1 − railFee)       → redeemed, tops up the OpenRouter float
             leftover = yield − usage
             fee      = 10% × leftover                       → redeemed, to Inferest
-            the other 90% of leftover stays in the vault    → becomes principal
+            the other 90% of leftover, as vault shares      → back to the customer's wallet, becomes principal
 ```
 
-**The limit opens only up to yield already earned, never ahead of it.** So spend can never reach principal. At settlement only `usage + fee` leaves the customer's position; returning leftover yield means simply not taking it.
+**The limit opens only up to yield already earned, never ahead of it.** So spend can never reach principal. At settlement only `usage + fee` leaves the customer's position; the Splitter sends the leftover shares back to the customer's wallet.
 
 **Our fee is on what the customer did not use.** A customer who spends all its yield pays us nothing; one who spends none keeps 90% of it. Worked numbers in [`docs/04-unit-economics.md`](docs/04-unit-economics.md).
 
@@ -115,7 +115,7 @@ customer wallet ──deposit──▶ ERC-4626 vault (shares stay in the custom
 |---|---|---|
 | ① | **Never open a limit ahead of earned yield** | The moment spend can exceed yield, principal is at risk and "principal never moves" is false |
 | ② | **Yield side and credit side meet only in the ledger** | So vaults (Morpho, Aave, Octant YDS, Kiln) and rails (OpenRouter, Venice, x402) swap independently |
-| ③ | **Take only `usage + fee` at settlement** | Leftover yield is returned by staying in the vault, not by a transfer back |
+| ③ | **Take only `usage + fee` at settlement** | The Splitter redeems only `usage + fee` and transfers the leftover shares back to the customer |
 | ④ | **The chain is a config value** | Any EVM chain with an audited ERC-4626 USDC vault. Contracts and worker take the chain and vault address as config, nothing chain-specific in code |
 | ⑤ | **Demo on a mainnet fork of the target chain** | Real yield is cents. Time-warp with `evm_increaseTime` to show months in seconds |
 

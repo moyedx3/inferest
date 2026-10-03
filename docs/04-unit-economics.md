@@ -22,7 +22,7 @@ _Every number here comes from [`../engine/ledger.ts`](../engine/ledger.ts) and i
 usage    = credits spent / (1 − railFee)
 leftover = yield − usage
 fee      = 10% × leftover      → Inferest
-returned = 90% × leftover      → stays in the vault as principal
+returned = 90% × leftover      → back to the customer's wallet as vault shares, now principal
 ```
 
 **Example** (the demo): $100,000 for six months at 4.5% APY earns $2,225. The keys can spend up to $2,114 of credit.

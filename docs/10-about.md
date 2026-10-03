@@ -99,7 +99,7 @@ About three minutes, treasury first. Real yield on a demo deposit is cents, so t
 | Time | Page | What happens |
 |---|---|---|
 | 0:00 to 0:20 | Home | The problem in one line, then the calculator: $100,000 at 4.5% on Kimi K2.6 buys about 208M tokens a month, about 45,700 calls |
-| 0:20 to 1:50 | Treasury | A finance lead signs in with an email code and deposits USDC; the principal bar shows the shares in their wallet; yield accrues; they create a key, run one curl call, and the key's row moves; they settle: usage paid, fee taken, the rest stays in the vault |
+| 0:20 to 1:50 | Treasury | A finance lead signs in with an email code and deposits USDC; the principal bar shows the shares in their wallet; yield accrues; they create a key, run one curl call, and the key's row moves; they settle: usage paid, fee taken, the rest back in their wallet as principal |
 | 1:50 to 2:40 | Agents | Our hosted agent: a 1,000 USDC book, half parked in its vault (that yield is its budget), half at work on paper trades. A fence it cannot change checks every move. Runs a week apart, each paid for from its own yield, and a month-end settlement |
 | 2:40 to 3:00 | Close | The principal never moved. What comes next |
 
