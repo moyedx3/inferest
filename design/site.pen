@@ -4676,182 +4676,288 @@
             {
               "type": "frame",
               "id": "udUwX",
-              "name": "Pitch",
+              "name": "Treasury intro",
               "width": "fill_container",
               "layout": "vertical",
-              "gap": 36,
+              "gap": 32,
               "children": [
                 {
                   "type": "frame",
-                  "id": "sYzyp",
+                  "id": "Anq88",
+                  "name": "Tag",
+                  "fill": "#E9E6DF",
+                  "stroke": "$ink-3",
+                  "strokeWidth": {
+                    "left": 2
+                  },
+                  "padding": [
+                    4,
+                    10
+                  ],
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "duKmR",
+                      "name": "Tag label",
+                      "fill": "$ink-2",
+                      "content": "Treasury",
+                      "fontFamily": "$sans",
+                      "fontSize": 12,
+                      "fontWeight": "normal"
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "LpoZs",
                   "name": "Headline",
                   "width": "fill_container",
                   "layout": "vertical",
                   "children": [
                     {
                       "type": "text",
-                      "id": "N0Qgii",
-                      "name": "H1",
+                      "id": "XrnEz",
+                      "name": "Line 1",
                       "fill": "$ink",
-                      "content": "Your interest,",
-                      "lineHeight": 1.02,
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Your vault, keys and usage.",
+                      "lineHeight": 1.1,
                       "fontFamily": "$serif",
-                      "fontSize": 72,
-                      "fontWeight": "normal",
-                      "letterSpacing": -2
+                      "fontSize": 48,
+                      "fontWeight": "normal"
                     },
                     {
                       "type": "text",
-                      "id": "QzddT",
-                      "name": "H2",
+                      "id": "rZXdp",
+                      "name": "Line 2",
                       "fill": "$ink-3",
-                      "content": "now inference.",
-                      "lineHeight": 1.02,
+                      "textGrowth": "fixed-width",
+                      "width": "fill_container",
+                      "content": "Sign in to manage them.",
+                      "lineHeight": 1.1,
                       "fontFamily": "$serif",
-                      "fontSize": 72,
-                      "fontWeight": "normal",
-                      "letterSpacing": -2
+                      "fontSize": 48,
+                      "fontWeight": "normal"
                     }
                   ]
                 },
                 {
-                  "type": "text",
-                  "id": "D63PdI",
-                  "name": "Sub",
-                  "fill": "$ink-2",
-                  "textGrowth": "fixed-width",
-                  "width": 520,
-                  "content": "Deposit USDC into a yield vault that stays in your wallet. Only the interest it earns becomes LLM credit, issued as spend limits on keys for your developers and agents.",
-                  "lineHeight": 1.5,
-                  "fontFamily": "$sans",
-                  "fontSize": 17,
-                  "fontWeight": "normal"
-                },
-                {
                   "type": "frame",
-                  "id": "YCPCt",
-                  "name": "Facts",
-                  "width": "fill_container",
+                  "id": "qTVVl",
+                  "name": "Inside",
+                  "width": 520,
+                  "stroke": "$line",
+                  "strokeWidth": {
+                    "top": 1
+                  },
+                  "layout": "vertical",
                   "children": [
                     {
                       "type": "frame",
-                      "id": "Mg4YX",
-                      "name": "Principal never moves",
+                      "id": "lBNBl",
+                      "name": "Deposit and withdraw",
                       "width": "fill_container",
                       "stroke": "$line",
                       "strokeWidth": {
-                        "top": 1
+                        "bottom": 1
                       },
-                      "layout": "vertical",
-                      "gap": 4,
+                      "gap": 14,
                       "padding": [
                         16,
-                        24,
-                        0,
                         0
                       ],
                       "children": [
                         {
-                          "type": "text",
-                          "id": "A2pGD",
-                          "name": "a",
-                          "fill": "$ink",
-                          "content": "Principal never moves",
-                          "fontFamily": "$sans",
-                          "fontSize": 14,
-                          "fontWeight": "500"
+                          "type": "icon",
+                          "id": "IRBlW",
+                          "name": "Icon",
+                          "width": 16,
+                          "height": 16,
+                          "icon": "landmark",
+                          "library": "lucide",
+                          "fill": "$ink-2"
                         },
                         {
-                          "type": "text",
-                          "id": "XI27k",
-                          "name": "b",
-                          "fill": "$ink-2",
-                          "content": "Shares stay in your wallet.",
-                          "fontFamily": "$sans",
-                          "fontSize": 13,
-                          "fontWeight": "normal"
+                          "type": "frame",
+                          "id": "t4UqZi",
+                          "name": "Text",
+                          "width": "fill_container",
+                          "layout": "vertical",
+                          "gap": 4,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "wZynv",
+                              "name": "Title",
+                              "fill": "$ink",
+                              "content": "Deposit and withdraw",
+                              "fontFamily": "$sans",
+                              "fontSize": 14,
+                              "fontWeight": "500"
+                            },
+                            {
+                              "type": "text",
+                              "id": "iMhfk",
+                              "name": "Body",
+                              "fill": "$ink-2",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "Principal goes in and out of your own vault, from your wallet.",
+                              "fontFamily": "$sans",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            }
+                          ]
                         }
                       ]
                     },
                     {
                       "type": "frame",
-                      "id": "xh9Co",
-                      "name": "Limits follow yield",
+                      "id": "kGJJJ",
+                      "name": "Issue keys",
                       "width": "fill_container",
                       "stroke": "$line",
                       "strokeWidth": {
-                        "top": 1
+                        "bottom": 1
                       },
-                      "layout": "vertical",
-                      "gap": 4,
+                      "gap": 14,
                       "padding": [
                         16,
-                        24,
-                        0,
                         0
                       ],
                       "children": [
                         {
-                          "type": "text",
-                          "id": "IJTmF",
-                          "name": "a",
-                          "fill": "$ink",
-                          "content": "Limits follow yield",
-                          "fontFamily": "$sans",
-                          "fontSize": 14,
-                          "fontWeight": "500"
+                          "type": "icon",
+                          "id": "zGW95",
+                          "name": "Icon",
+                          "width": 16,
+                          "height": 16,
+                          "icon": "key-round",
+                          "library": "lucide",
+                          "fill": "$ink-2"
                         },
                         {
-                          "type": "text",
-                          "id": "VWLUq",
-                          "name": "b",
-                          "fill": "$ink-2",
-                          "content": "Never ahead of what's earned.",
-                          "fontFamily": "$sans",
-                          "fontSize": 13,
-                          "fontWeight": "normal"
+                          "type": "frame",
+                          "id": "H6CEyA",
+                          "name": "Text",
+                          "width": "fill_container",
+                          "layout": "vertical",
+                          "gap": 4,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "IHefv",
+                              "name": "Title",
+                              "fill": "$ink",
+                              "content": "Issue keys",
+                              "fontFamily": "$sans",
+                              "fontSize": 14,
+                              "fontWeight": "500"
+                            },
+                            {
+                              "type": "text",
+                              "id": "gc1Nj",
+                              "name": "Body",
+                              "fill": "$ink-2",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "Each key gets a spend limit, opened only as yield is earned.",
+                              "fontFamily": "$sans",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            }
+                          ]
                         }
                       ]
                     },
                     {
                       "type": "frame",
-                      "id": "s5QEd5",
-                      "name": "Unused yield returns",
+                      "id": "MDez1",
+                      "name": "See every call",
                       "width": "fill_container",
                       "stroke": "$line",
                       "strokeWidth": {
-                        "top": 1
+                        "bottom": 1
                       },
-                      "layout": "vertical",
-                      "gap": 4,
+                      "gap": 14,
                       "padding": [
                         16,
-                        24,
-                        0,
                         0
                       ],
                       "children": [
                         {
-                          "type": "text",
-                          "id": "LbjMp",
-                          "name": "a",
-                          "fill": "$ink",
-                          "content": "Unused yield returns",
-                          "fontFamily": "$sans",
-                          "fontSize": 14,
-                          "fontWeight": "500"
+                          "type": "icon",
+                          "id": "jpWgh",
+                          "name": "Icon",
+                          "width": 16,
+                          "height": 16,
+                          "icon": "receipt-text",
+                          "library": "lucide",
+                          "fill": "$ink-2"
                         },
                         {
-                          "type": "text",
-                          "id": "OclwT",
-                          "name": "b",
-                          "fill": "$ink-2",
-                          "content": "Less a 10% fee.",
-                          "fontFamily": "$sans",
-                          "fontSize": 13,
-                          "fontWeight": "normal"
+                          "type": "frame",
+                          "id": "MsoEu",
+                          "name": "Text",
+                          "width": "fill_container",
+                          "layout": "vertical",
+                          "gap": 4,
+                          "children": [
+                            {
+                              "type": "text",
+                              "id": "y3bvkB",
+                              "name": "Title",
+                              "fill": "$ink",
+                              "content": "See every call",
+                              "fontFamily": "$sans",
+                              "fontSize": 14,
+                              "fontWeight": "500"
+                            },
+                            {
+                              "type": "text",
+                              "id": "b9TXw",
+                              "name": "Body",
+                              "fill": "$ink-2",
+                              "textGrowth": "fixed-width",
+                              "width": "fill_container",
+                              "content": "Usage per key, and each month's settlement on-chain.",
+                              "fontFamily": "$sans",
+                              "fontSize": 13,
+                              "fontWeight": "normal"
+                            }
+                          ]
                         }
                       ]
+                    }
+                  ]
+                },
+                {
+                  "type": "frame",
+                  "id": "xDM1m",
+                  "name": "Home link",
+                  "gap": 6,
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "text",
+                      "id": "e7G7U",
+                      "name": "Lead",
+                      "fill": "$ink-2",
+                      "content": "New to Inferest?",
+                      "fontFamily": "$sans",
+                      "fontSize": 14,
+                      "fontWeight": "normal"
+                    },
+                    {
+                      "type": "text",
+                      "id": "AVL82",
+                      "name": "Link",
+                      "fill": "$ink",
+                      "content": "See how it works →",
+                      "fontFamily": "$sans",
+                      "fontSize": 14,
+                      "fontWeight": "500"
                     }
                   ]
                 }
@@ -23871,7 +23977,7 @@
       "id": "hVmDP",
       "x": 8720,
       "y": 0,
-      "name": "Agents · runs + activity",
+      "name": "Later · Agents with one Activity timeline (for the mainnet agent)",
       "clip": true,
       "width": 1440,
       "fill": "$bg",
@@ -26232,7 +26338,7 @@
                       "id": "mGXCI",
                       "name": "Tag label",
                       "fill": "$ink-2",
-                      "content": "Runs and activity",
+                      "content": "Activity",
                       "fontFamily": "$sans",
                       "fontSize": 12,
                       "fontWeight": "normal"

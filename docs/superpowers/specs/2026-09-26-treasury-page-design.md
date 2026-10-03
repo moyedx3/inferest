@@ -12,7 +12,7 @@ The demo works but looks like a debug console. A judge or a treasury lead should
 
 | State | When | Shows |
 |---|---|---|
-| Signed out | no session and no operator token | Hero "Your interest, / now inference." with three facts (principal never moves, limits follow yield, unused yield returns less 10%) and the sign-in card (email → code, or Connect treasury wallet). Below it, Use a key with `sk-inf-YOUR-KEY`. Footer. |
+| Signed out | no session and no operator token | A Treasury intro: the Treasury tag, "Your vault, keys and usage. / Sign in to manage them.", three rows of what the page does (deposit and withdraw, issue keys, see every call) and a "New to Inferest? See how it works" link to Home's How it works, beside the sign-in card (email → code, or Connect treasury wallet). Below it, Use a key with `sk-inf-YOUR-KEY`. Footer. |
 | No vault yet | signed in, no vault for this login | Treasury section with a four-step checklist (demo funds, create vault and deposit, yield accrues, settle) and the deposit card as "Create vault and deposit". Keys section with its empty state and the create form disabled. Activity. Footer. |
 | Signed in | signed in, a vault | Treasury, Keys, Use a key, Activity, footer, as below. |
 
