@@ -94,7 +94,7 @@
         </div>
         <div class="card yieldcard novault-only">
           <div class="steps">
-            <div class="step" id="stepfunds"><span class="num">1</span><div><b>Get demo funds</b><p>Gas and 100,000 USDC on the demo fork. One click.</p></div></div>
+            <div class="step" id="stepfunds" hidden><span class="num">1</span><div><b>Get demo funds</b><p>Gas and 100,000 USDC on the demo fork. One click.</p></div></div>
             <div class="step now"><span class="num">2</span><div><b>Create vault and deposit</b><p>Four signatures from your wallet: create, accept, approve, deposit. The shares stay in your wallet.</p></div></div>
             <div class="step"><span class="num">3</span><div><b>Yield accrues, keys open</b><p>The keeper books yield; each key's limit rises with it, never ahead.</p></div></div>
             <div class="step"><span class="num">4</span><div><b>Settle each period</b><p>Usage pays the provider. Unused yield stays yours, less 10%.</p></div></div>
@@ -103,7 +103,7 @@
         <div class="side">
           <div class="card" id="depositcard">
             <div class="cardhead"><h3 id="deposittitle">Add to principal</h3><button class="btn btn-lime" id="fund" hidden>Get demo funds</button></div>
-            <label class="field amountfield"><input id="amount" type="number" min="0" value="100000" /><span class="faint">USDC</span></label>
+            <label class="field amountfield"><input id="amount" type="number" min="0" /><span class="faint">USDC</span></label>
             <button class="btn btn-primary btn-block" id="open">Deposit</button>
             <div class="foot"><span id="walletbalance"></span><button class="linkbtn vault-only" id="withdraw">Withdraw all</button></div>
             <div class="fine novault-only">Your wallet will ask for 4 signatures.</div>

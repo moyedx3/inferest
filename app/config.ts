@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { parseEther } from "viem";
 import { HACKATHON_PARAMS, type Params } from "../engine/ledger.ts";
 
 type Hex = `0x${string}`;
@@ -7,6 +8,10 @@ export type Config = {
   rpcUrl: string; chainId: number; usdc: Hex; target: Hex; factory: Hex; splitter: Hex;
   keeperKey: Hex; openRouterKey: string; orthogonalKey: string; toolWalletKey?: Hex;
   openRouterTotalLimitUsd?: number;
+  pilotCustomerAddress?: Hex;
+  keeperAutomaticTransactions?: boolean;
+  keeperMinBalanceWei?: bigint;
+  keeperMaxTxCostWei?: bigint;
   adminToken: string; keyEncryptionKey: string; publicUrl: string; dbPath: string; port: number; params: Params;
   /** Allowlisted ERC-4626 yield sources, the first one being `target`, the default the Treasury page creates over. */
   targets: { address: Hex; name: string }[];
@@ -53,7 +58,23 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   if (openRouterTotalLimitUsd !== undefined && (!Number.isFinite(openRouterTotalLimitUsd) || openRouterTotalLimitUsd < 0)) {
     throw new Error("OPENROUTER_TOTAL_LIMIT_USD must be finite and nonnegative");
   }
+  const pilotCustomerAddress = env.PILOT_CUSTOMER_ADDRESS?.trim() || undefined;
+  if (pilotCustomerAddress && !/^0x[0-9a-f]{40}$/i.test(pilotCustomerAddress)) {
+    throw new Error("PILOT_CUSTOMER_ADDRESS must be one 20-byte hex address");
+  }
+  const automatic = env.KEEPER_AUTOMATIC_TRANSACTIONS?.trim() || "true";
+  if (automatic !== "true" && automatic !== "false") throw new Error("KEEPER_AUTOMATIC_TRANSACTIONS must be true or false");
+  const ethBound = (name: string): bigint | undefined => {
+    const value = env[name]?.trim();
+    if (!value) return undefined;
+    if (!/^\d+(?:\.\d{1,18})?$/.test(value)) throw new Error(`${name} must be nonnegative ETH with at most 18 decimal places`);
+    return parseEther(value);
+  };
   return {
+    pilotCustomerAddress: pilotCustomerAddress?.toLowerCase() as Hex | undefined,
+    keeperAutomaticTransactions: automatic === "true",
+    keeperMinBalanceWei: ethBound("KEEPER_MIN_BALANCE_ETH"),
+    keeperMaxTxCostWei: ethBound("KEEPER_MAX_TX_COST_ETH"),
     rpcUrl: need("RPC_URL"),
     chainId: Number(dep.chainId),
     usdc: chain.usdc,

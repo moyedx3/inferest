@@ -26,6 +26,7 @@ export type AppDeps = {
   adminToken: string; publicConfig: Record<string, unknown>; keeper: KeeperDeps;
   /** Encrypts each vault's OpenRouter key at rest. */
   secrets: SecretBox;
+  pilotCustomerAddress?: string;
   proxy: Proxy;
   /** Verifies finance-lead logins; unset means the operator token is the only credential. */
   auth?: Auth;
@@ -244,6 +245,9 @@ async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse, cool
       const vault = String(body.vault ?? "").toLowerCase();
       const customer = await d.chain.customerOf(vault).catch(() => "");
       if (!customer || ZERO.test(customer)) return send(res, 400, { error: "not a vault from our factory" });
+      if (d.pilotCustomerAddress && customer.toLowerCase() !== d.pilotCustomerAddress.toLowerCase()) {
+        return send(res, 403, { error: "customer is not admitted to this pilot" });
+      }
       if (!owns(caller, customer)) return send(res, 403, NOT_YOURS);
       // the provider key is minted before anything is written, so a provider failure leaves no half-registered
       // vault; a vault whose row already has a key is registered already and is only answered again

@@ -1,0 +1,74 @@
+{
+  "network": "arbitrum-one",
+  "environment": "arbitrum-one-mainnet",
+  "chainId": 42161,
+  "deployedAt": "2026-10-04",
+  "implementation": "0x86be0549C6252b3630B8C64A6BD85ABC30582aB0",
+  "splitter": "0xBB2Bb56fadD96569c256e3092bF6c8e48c98C684",
+  "factory": "0x90c07624f98cC3F0360D0e120CD7e6081132f12c",
+  "target": "0x1A996cb54bb95462040408C06122D45D6Cdb6096",
+  "targets": [
+    "0x1A996cb54bb95462040408C06122D45D6Cdb6096"
+  ],
+  "asset": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
+  "sourceCommit": "cbba4302a1eb300685da689f7869fc53fa42c2d1",
+  "compiler": {
+    "version": "0.8.33+commit.64118f21",
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "evmVersion": "cancun"
+  },
+  "initialRoles": {
+    "owner": "0x4686afa8BEA18Ba5Ca571dc6EAdDe4211D7f443c",
+    "keeper": "0x4686afa8BEA18Ba5Ca571dc6EAdDe4211D7f443c",
+    "emergencyAdmin": "0x4686afa8BEA18Ba5Ca571dc6EAdDe4211D7f443c",
+    "floatAddress": "0x4686afa8BEA18Ba5Ca571dc6EAdDe4211D7f443c",
+    "feeAddress": "0x4686afa8BEA18Ba5Ca571dc6EAdDe4211D7f443c"
+  },
+  "initialFeeBps": 1000,
+  "runtimeCodeHashes": {
+    "implementation": "0x8945a383f3f70e8bd10c6f98e3ad5dbd3d45f4bc45bd73b78f572b4432ee121d",
+    "splitter": "0xdfba365442200274bc8521e02419394ffaf3c08b8518b05fbd659af9c6c3ce30",
+    "factory": "0x5f47a5a65069ef542cc2076d2eb51ca30b7d35f937d8e72ed89d34c6e4ed3421"
+  },
+  "transactions": {
+    "implementation": {
+      "hash": "0xea819fa641211249ba37d1c6185929e3f2e4846b5d904a4bf5f65a758a5b0306",
+      "blockNumber": 511580786
+    },
+    "splitter": {
+      "hash": "0xfed0557de459db1704bce664278209c1b62c6bb8a53cbcfa2c8d2af9ec78ec4a",
+      "blockNumber": 511580794
+    },
+    "factory": {
+      "hash": "0xd0ad6cfef683fe6b8f78c3f75b12b823aedd94521bb99b7aa2544b32a4071a23",
+      "blockNumber": 511580803
+    },
+    "allowFluidTarget": {
+      "hash": "0x201c3936469ef69fe352ef73e0001f8eaa785c2c04d20156c98aab98396fc2ee",
+      "blockNumber": 511580814
+    }
+  },
+  "verification": {
+    "implementation": {
+      "creationMatch": "match",
+      "runtimeMatch": "match",
+      "verifiedAt": "2026-10-04T10:04:02Z",
+      "url": "https://sourcify.dev/server/v2/contract/42161/0x86be0549C6252b3630B8C64A6BD85ABC30582aB0"
+    },
+    "splitter": {
+      "creationMatch": "match",
+      "runtimeMatch": "match",
+      "verifiedAt": "2026-10-04T10:04:00Z",
+      "url": "https://sourcify.dev/server/v2/contract/42161/0xBB2Bb56fadD96569c256e3092bF6c8e48c98C684"
+    },
+    "factory": {
+      "creationMatch": "match",
+      "runtimeMatch": "match",
+      "verifiedAt": "2026-10-04T10:04:02Z",
+      "url": "https://sourcify.dev/server/v2/contract/42161/0x90c07624f98cC3F0360D0e120CD7e6081132f12c"
+    }
+  }
+}

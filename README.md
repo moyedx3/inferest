@@ -60,6 +60,18 @@ npm run agent -- --once                   # one run of the hosted agent (needs A
 
 **Sign in.** With `DYNAMIC_ENVIRONMENT_ID` set (a free environment at app.dynamic.xyz with email login and EVM embedded wallets enabled, and the dashboard's origin allowed), a finance lead signs in on the dashboard with an email code or by connecting the treasury wallet, and manages the vault that wallet created. Without it, the operator token is the only credential. `PUBLIC_RPC_URL` is the browser-facing RPC the dashboard's wallet uses; `DEMO_FAUCET=1` adds a "Get demo funds" button on a forked chain. The full walkthrough is in [`docs/07-walkthrough.md`](docs/07-walkthrough.md). `npm run serve` reads `.env` and `.env.local` itself.
 
+**Supervised wallet pilot.** Set `PILOT_CUSTOMER_ADDRESS` to the wallet that creates the vault and
+`KEEPER_AUTOMATIC_TRANSACTIONS=false` to schedule reports and settlements manually while the keeper
+still reconciles receipts and model usage and syncs limits. Registration checks the factory customer
+for sessions and the operator; the factory itself stays permissionless. Set `KEEPER_MIN_BALANCE_ETH`
+and `KEEPER_MAX_TX_COST_ETH` to preserve a gas reserve and cap each prepared transaction's gas times
+fee ceiling before signing. Empty bounds keep the previous behavior. Use one keeper process and
+schedule browser or CLI wallet transactions separately; the process guard cannot coordinate external
+signers. An unresolved settlement blocks new keeper writes. If an RPC loses sight of its hash, retain
+the pending row until a receipt arrives or an operator verifies the wallet nonce and transaction outcome
+before manually clearing it. Reports do not yet have durable pending-transaction tracking: if a report
+times out after submission, verify its receipt and wallet nonce before requesting another keeper write.
+
 **The hosted agent.** `npm run agent` runs our own financial agent under `agent/`: a wallet of its own (`AGENT_PRIVATE_KEY`) keeps half its book parked in an Inferest vault and works the other half on paper. Every `AGENT_INTERVAL_MS` it reads its book, researches with a model and paid tools on its own Inferest key, decides, and has the fence in `agent/fence.ts` drop anything outside its rules before it acts: a deposit, a withdrawal, a move to another allowlisted yield source, paper trades. The yield on the parked half is its thinking budget; when that runs out, the run says so and waits for yield. `AGENT_DEMO_DAYS` ships as 0 for a real chain, where the keeper settles; set it to 7 on a fork or a Tenderly testnet, and it moves the chain clock that many days before each run, every fourth run settles its vault as a month end, and a first start with an empty wallet funds it from the faucet and burns everything above the book. `npm run agent -- --once` does one run and exits. It writes its runs to the store's file, which `GET /api/agent` and the Agents page read. The Agents page (`/agents`, no sign-in) shows its book, its thinking budget, every run with what it did and cost, and the yield sources, and has setups for running your own agent the same way. Its Inferest key never touches disk: the runner rotates the key on each start and keeps the secret in memory.
 
 `forge test` prints diagnostics from an upstream Foundry lint bug before its results; read the `Suite result` lines.

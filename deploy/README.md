@@ -29,6 +29,15 @@ Settlement does not reset it. Keep one keeper process and preserve the database;
 keys outside this registry and paid tools are not covered. Provider billing delays
 or in-flight calls can exceed provider limits, so retain spending headroom.
 
+For a shared-wallet pilot, set `PILOT_CUSTOMER_ADDRESS` to that wallet and
+`KEEPER_AUTOMATIC_TRANSACTIONS=false`. The server still reconciles and syncs; reports
+and settlements are manual. Set `KEEPER_MIN_BALANCE_ETH` and `KEEPER_MAX_TX_COST_ETH`
+to bound the prepared gas and fee ceiling before signing. Run only one keeper and
+schedule external wallet transactions separately. Unknown signed settlements keep
+the vault closed and block new keeper transactions until receipt or verified operator
+reconciliation. Reports lack durable pending-transaction tracking; after a report timeout,
+verify its receipt and wallet nonce before another keeper write. See the README's supervised wallet pilot notes.
+
 ```sh
 NODE_VERSION=$(cat .node-version) docker compose build server
 docker compose config --quiet

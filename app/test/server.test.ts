@@ -796,3 +796,31 @@ test("concurrent registration preserves the first company key after it has recei
     server.close();
   }
 });
+
+
+test("pilot admission rejects other factory customers before minting or writing, including operators", async (t) => {
+  const { base, server, store, created, d } = await start(OTHER);
+  t.after(() => server.close());
+  d.pilotCustomerAddress = OWNER;
+  for (const response of [
+    await post(base, "/api/vaults", { vault: V }),
+    await postAs(base, "/api/vaults", { vault: V }, tokenFor([OTHER])),
+  ]) {
+    assert.equal(response.status, 403);
+    assert.deepEqual(await response.json(), { error: "customer is not admitted to this pilot" });
+  }
+  assert.equal(created.length, 0);
+  assert.equal(store.vault(V), undefined);
+  assert.equal(store.getMeta("settledMonth:" + V), undefined);
+});
+
+test("the admitted wallet owner can register and manage its vault", async (t) => {
+  const { base, server, store, created, d } = await start();
+  t.after(() => server.close());
+  d.pilotCustomerAddress = OWNER.toUpperCase();
+  const token = tokenFor([OWNER]);
+  assert.equal((await postAs(base, "/api/vaults", { vault: V }, token)).status, 201);
+  assert.equal((await postAs(base, "/api/keys", { vault: V, name: "pilot" }, token)).status, 201);
+  assert.equal(created.length, 1);
+  assert.equal(store.vault(V)!.customer, OWNER);
+});
