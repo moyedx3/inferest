@@ -1,0 +1,10 @@
+[Unit]
+Description=Check Inferest main for deployment every five minutes
+
+[Timer]
+OnStartupSec=2min
+OnUnitInactiveSec=5min
+RandomizedDelaySec=30s
+
+[Install]
+WantedBy=timers.target

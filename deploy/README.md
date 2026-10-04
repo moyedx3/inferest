@@ -1,7 +1,9 @@
-# Local deployment
+# Deployment
 
 Run one server and an optional agent with Docker Compose. The server includes
-the dashboard, API, proxy and keeper. Public hosting is not configured.
+the dashboard, API, proxy and keeper. Keep the server port on loopback and use
+a host reverse proxy for HTTPS. The optional updater below deploys successful
+`main` revisions on an existing Linux host.
 
 ## Setup
 
@@ -121,3 +123,90 @@ Node checks and contract unit tests. Fork tests require manual dispatch on `main
 with `fork_tests` enabled and the `ARBITRUM_RPC_URL` repository secret.
 
 For native setup and commands, see the [root README](../README.md).
+
+## Automatic hosted updates
+
+The host checks GitHub every five minutes. It fetches `main`, requires successful
+push CI for that exact revision, and rebuilds only when application runtime inputs
+change. Documentation and tests alone do not restart the server. GitHub errors,
+incomplete CI and failed CI leave the current service running. This uses the public
+GitHub API; no deployment key or server credential goes into GitHub.
+
+Use a dedicated, clean checkout with an HTTPS GitHub remote, Docker Compose,
+Python 3 and a systemd user session. First deploy and verify a known-good image
+with the `org.opencontainers.image.revision` label set to its full Git SHA. Keep
+all operational files ignored, retain the existing Compose project and database
+volume, and keep exactly one server process. The updater recreates only `server`.
+
+Install from a reviewed, merged checkout on the host:
+
+```sh
+install -d -m 700 ~/.local/lib/inferest ~/.config/inferest ~/.local/state/inferest-deploy
+install -m 600 deploy/update.py ~/.local/lib/inferest/update.py
+```
+
+Create `~/.config/inferest/deploy.json` with mode `600`. Use absolute paths and your
+existing project name and Compose environment file. For example:
+
+```json
+{
+  "root": "/home/user/dev/inferest",
+  "githubRepo": "moyedx3/inferest",
+  "composeEnv": "/home/user/dev/inferest/private/compose.production.env",
+  "project": "inferest-production",
+  "stateDir": "/home/user/.local/state/inferest-deploy",
+  "healthUrl": "http://127.0.0.1:8787"
+}
+```
+
+The Compose environment file selects `SERVER_ENV_FILE`, `CHAIN_CONFIG_FILE`,
+`DEPLOYMENTS_FILE` and `SERVER_PORT` for the existing installation. Keep credentials
+in the selected server environment file. Do not print rendered Compose configuration.
+
+```sh
+python3 ~/.local/lib/inferest/update.py --config ~/.config/inferest/deploy.json init
+python3 ~/.local/lib/inferest/update.py --config ~/.config/inferest/deploy.json run
+install -d -m 700 ~/.config/systemd/user
+install -m 600 deploy/inferest-deploy.service deploy/inferest-deploy.timer ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now inferest-deploy.timer
+```
+
+Enable user lingering once, if necessary, so the timer runs after logout:
+`sudo loginctl enable-linger "$USER"`. Check status with
+`systemctl --user list-timers inferest-deploy.timer` and
+`journalctl --user -u inferest-deploy.service -n 30`.
+Inspect the deployed revision and pending recovery with
+`python3 ~/.local/lib/inferest/update.py --config ~/.config/inferest/deploy.json status`.
+
+The updater records the running image, reviewed Compose configuration and private
+input fingerprints. It stops on unexpected drift. It builds an image tagged and
+labeled with the source SHA in an isolated checkout, then checks that `main` has
+not changed before switching. Compose health plus read-only HTTP checks must pass.
+Persistent state is written atomically before the switch so the next run can
+recover an interrupted deployment. A failed candidate rolls back to the previous
+image; a failed rollback leaves recovery pending and stops further deployments.
+Retain the previous images. Never prune images or volumes during deployment.
+The host checkout stays at its operator-reviewed revision; the fetched `main` commit
+and the updater's saved revision identify the deployed source. The image override
+is supplied by the updater, so use it for updates instead of a bare Compose `up`.
+
+Database and configuration changes need operator review. Changes to `app/store.ts`,
+`agent/log.ts` or `compose.yaml` block automatic deployment because image rollback
+cannot undo a SQLite migration or safely change the host's mounts and settings.
+After reviewing and manually deploying such a change, rebaseline with `init --replace`.
+Keep a database backup and the matching encryption key; the updater does not restore
+an old database automatically because that could erase newer usage accounting.
+
+Inspect failures before retrying the same revision with `run --retry`.
+Repeated builds of a revision that already failed are also suppressed. To stop
+polling, use `systemctl --user disable --now inferest-deploy.timer`; an already
+running service finishes its current operation. Update the installed script and
+unit files explicitly after reviewing deployment-tool changes. Application updates
+do not replace the updater itself or enable the agent, paid tools or contract deployment.
+
+Run the deployment tests locally with:
+
+```sh
+python3 -m unittest discover -s deploy -p '*_test.py'
+```

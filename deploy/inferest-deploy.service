@@ -1,0 +1,8 @@
+[Unit]
+Description=Deploy Inferest after successful main CI
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/.local/lib/inferest/update.py --config %h/.config/inferest/deploy.json run
+TimeoutStartSec=40min
+UMask=0077
