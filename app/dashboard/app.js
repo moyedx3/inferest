@@ -8,7 +8,7 @@ const factoryAbi = parseAbi([
 const vaultAbi = parseAbi([
   "function acceptManagement()",
   "function deposit(uint256 assets, address receiver) returns (uint256)",
-  "function redeem(uint256 shares, address receiver, address owner) returns (uint256)",
+  "function redeem(uint256 shares, address receiver, address owner, uint256 maxLoss) returns (uint256)",
   "function balanceOf(address) view returns (uint256)",
   "function convertToAssets(uint256 shares) view returns (uint256)",
   "function decimals() view returns (uint8)",
@@ -92,6 +92,9 @@ async function api(path, body) {
 
 async function loadConfig() {
   cfg = (await api("/api/state")).config;
+  show("stepfunds", Boolean(cfg.demoFaucet));
+  document.querySelectorAll(".steps > .step:not(#stepfunds) .num").forEach((n, i) => { n.textContent = i + (cfg.demoFaucet ? 2 : 1); });
+  $("amount").defaultValue = cfg.demoFaucet ? "100000" : "";
   $("network").textContent = `${cfg.chainName ?? `chain ${cfg.chainId}`}${cfg.demoFaucet ? " · demo fork" : ""}`;
   $("contracts").innerHTML = [["Factory", cfg.factory], ["Splitter", cfg.splitter], ["USDC", cfg.usdc]]
     .filter(([, a]) => a).map(([k, a]) => `<span>${k}<b>${esc(short(a))}</b></span>`).join(" ");
@@ -248,6 +251,10 @@ async function tx(wallet, pub, address, abi, functionName, args, detail = "") {
 /** With a vault: approve and deposit into it. Without: create the vault, accept management, approve, deposit. */
 $("open").onclick = async () => {
   if (!syncSession()) return;
+  if (cfg.pilotCustomerAddress && session?.address?.toLowerCase() !== cfg.pilotCustomerAddress.toLowerCase()) {
+    activity({ title: "Pilot restricted", detail: "Deposits are currently restricted to the admitted pilot wallet. Select that wallet to continue.", error: true });
+    return;
+  }
   $("open").disabled = true;
   try {
     const w = await dyn.walletClient();
@@ -295,7 +302,7 @@ $("withdraw").onclick = async () => {
     const pub = dyn.publicClient();
     const vault = currentVault()?.vault;
     const shares = await pub.readContract({ address: vault, abi: vaultAbi, functionName: "balanceOf", args: [session.address] });
-    await tx(w, pub, vault, vaultAbi, "redeem", [shares, session.address, session.address], `all shares to ${short(session.address)}`);
+    await tx(w, pub, vault, vaultAbi, "redeem", [shares, session.address, session.address, 0n], `all shares to ${short(session.address)}`);
     wallet = null;
     await render();
   } catch (e) { fail("Withdraw failed")(e); }

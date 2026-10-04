@@ -211,14 +211,14 @@ test("settlement usage is model cost over the rail fee plus tool spend", async (
   assert.equal(r!.usage, 30_000_000n);
 });
 
-test("reportAll reports every vault and survives a failing one", async () => {
+test("reportAll stops and propagates the first report failure before another vault can sign", async () => {
   const { d, store, events } = setup();
   store.addVault("0x00000000000000000000000000000000000000bb", "0x1", "U");
   const orig = d.chain.report;
   d.chain.report = async (v) => { if (v.endsWith("aa")) throw new Error("boom"); return orig(v); };
-  await reportAll(d, 5);
-  assert.ok(events.includes("report:0x00000000000000000000000000000000000000bb"));
-  assert.equal(store.getMeta("lastReport"), "5");
+  await assert.rejects(reportAll(d, 5), /boom/);
+  assert.ok(!events.includes("report:0x00000000000000000000000000000000000000bb"));
+  assert.equal(store.getMeta("lastReport"), undefined);
 });
 
 test("reportAll skips an empty vault", async () => {
@@ -761,8 +761,8 @@ test("an ambiguous broadcast stays pending and is not sent twice", async () => {
   assert.equal(store.listSettlements().length, 1);
 });
 
-test("a settlement unknown to the node past the age limit is cleared and retried", async () => {
-  const { d, store, events, ctl, spend } = setup({ orUsage: [100], status: "pending" });
+test("an unknown signed settlement stays closed and a late receipt applies once", async () => {
+  const { d, store, events, logs, ctl, spend } = setup({ orUsage: [100], status: "pending" });
   spend("k1", 100);
   let lookups = 0;
   d.chain.transactionKnown = async () => { lookups++; return ctl.known; };
@@ -774,9 +774,17 @@ test("a settlement unknown to the node past the age limit is cleared and retried
   assert.equal(store.pendingSettlement(V)!.tx, "0xs");
   await tick(d, NOV + 31 * MIN);
   assert.equal(lookups, 1);
-  // cleared, then the month rule settled the vault again in the same tick
-  assert.equal(settles(events), 2);
-  assert.equal(store.pendingSettlement(V)!.tx, "0xs2");
+  assert.equal(settles(events), 1);
+  assert.equal(ctl.prepared, 1);
+  assert.equal(store.pendingSettlement(V)!.tx, "0xs");
+  assert.equal(store.vault(V)!.settling, true);
+  assert.ok(logs.some((m) => m.includes("operator reconciliation required")));
+  ctl.status = "success";
+  await tick(d, NOV + 32 * MIN);
+  await tick(d, NOV + 33 * MIN);
+  assert.equal(store.listSettlements().length, 1);
+  assert.equal(store.vault(V)!.period, 1);
+  assert.equal(ctl.prepared, 1);
 });
 
 test("a settlement known to the node but unmined stays pending past the age limit", async () => {
@@ -885,4 +893,69 @@ test("provider allowance fails closed on unknown reservations and recovers after
   live.get(OR)!.usage = 0.1;
   await syncVault(d, V);
   assert.equal(live.get(OR)!.limit, 0);
+});
+
+
+test("supervised ticks reconcile receipts and model usage and sync without automatic transactions", async () => {
+  const { d, store, events, ctl } = setup({ status: "pending" });
+  d.automaticTransactions = false;
+  await settleVault(d, V, OCT);
+  store.recordPendingModelCall({ keyId: "k1", model: "m", generationId: "late" });
+  ctl.generations.late = 0.1;
+  ctl.status = "success";
+  await tick(d, NOV);
+  await tick(d, Date.UTC(2026, 11, 1));
+  assert.equal(store.listSettlements().length, 1);
+  assert.equal(store.modelCall("late")!.status, "recorded");
+  assert.ok(store.syncedAt(V) > 0);
+  assert.equal(events.filter((e) => e.startsWith("report:")).length, 0);
+  assert.equal(ctl.prepared, 1);
+  await reportVault(d, V);
+  await settleVault(d, V);
+  assert.equal(ctl.prepared, 2);
+  assert.equal(events.filter((e) => e.startsWith("report:")).length, 1);
+});
+
+for (const firstAction of ["report", "settle"] as const) {
+  test(`an in-flight ${firstAction} rejects report and settlement signing across vaults`, async () => {
+    const { d, store, ctl } = setup();
+    const other = "0x00000000000000000000000000000000000000bb";
+    store.addVault(other, "0xcc", "other");
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const ready = new Promise<void>((r) => { entered = r; });
+    if (firstAction === "report") d.chain.report = async (v) => { if (v === V) { entered(); await gate; } return "0xr"; };
+    else {
+      const prepare = d.chain.prepareSettle;
+      d.chain.prepareSettle = async (v, u) => { if (v === V) { entered(); await gate; } return prepare(v, u); };
+    }
+    const first = firstAction === "report" ? reportVault(d, V) : settleVault(d, V);
+    await ready;
+    try {
+      await assert.rejects(reportVault(d, other), /keeper transaction in progress/);
+      await assert.rejects(settleVault(d, other), /keeper transaction in progress/);
+      assert.equal(ctl.prepared, 0);
+    } finally { release(); await first; }
+    await settleVault(d, other);
+    assert.equal(ctl.prepared, firstAction === "report" ? 1 : 2);
+  });
+}
+
+test("an unresolved settlement blocks new writes to every vault until receipt reconciliation", async () => {
+  const { d, store, ctl } = setup({ status: "pending" });
+  const other = "0x00000000000000000000000000000000000000bb";
+  store.addVault(other, "0xcc", "other");
+  await settleVault(d, V, OCT);
+  ctl.known = false;
+  await reconcilePending(d, OCT + 31 * MIN);
+  await assert.rejects(reportVault(d, other), /unresolved settlement/);
+  await assert.rejects(settleVault(d, other), /unresolved settlement/);
+  await assert.rejects(reportVault(d, V), /unresolved settlement/);
+  assert.equal((await settleVault(d, V))!.tx, "0xs");
+  assert.equal(ctl.prepared, 1);
+  ctl.status = "success";
+  await reconcilePending(d);
+  await settleVault(d, other);
+  assert.equal(ctl.prepared, 2);
 });

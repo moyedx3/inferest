@@ -20,6 +20,7 @@ const box = secretBox(cfg.keyEncryptionKey);
 const keeper: KeeperDeps = {
   chain, store, or, params: cfg.params, decrypt: box.decrypt,
   openRouterTotalLimitUsd: cfg.openRouterTotalLimitUsd,
+  automaticTransactions: cfg.keeperAutomaticTransactions,
   log: (m) => console.log(new Date().toISOString(), m),
 };
 const noWallet: PayingFetchFactory = () => { throw new Error("TOOL_WALLET_PRIVATE_KEY is not set"); };
@@ -42,6 +43,7 @@ switch (cmd) {
   case "serve": {
     const app = createApp({
       store, or, chain, gateway, params: cfg.params, adminToken: cfg.adminToken, keeper, secrets: box, proxy, auth,
+      pilotCustomerAddress: cfg.pilotCustomerAddress,
       faucet: cfg.demoFaucet ? createFaucet({ rpcUrl: cfg.rpcUrl, usdc: cfg.usdc }) : undefined,
       agentLog: openAgentLog(cfg.dbPath),
       // an owner may make the keeper report once an hour and settle once a day per vault; demo chains have no limit
@@ -50,6 +52,7 @@ switch (cmd) {
         chainId: cfg.chainId, factory: cfg.factory, splitter: cfg.splitter, usdc: cfg.usdc, target: cfg.target, targets: cfg.targets, publicUrl: cfg.publicUrl,
         dynamicEnvironmentId: cfg.dynamicEnvironmentId ?? null, publicRpcUrl: cfg.publicRpcUrl ?? null, chainName: cfg.chainName,
         nativeCurrency: cfg.nativeCurrency, explorer: cfg.explorer ?? null, demoFaucet: cfg.demoFaucet,
+        pilotCustomerAddress: cfg.pilotCustomerAddress ?? null,
       },
     });
     app.listen(cfg.port, () => console.log(`Inferest on http://localhost:${cfg.port} (chat at /v1/chat/completions, MCP at /mcp, login ${auth ? "on" : "off"})`));

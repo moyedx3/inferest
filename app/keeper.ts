@@ -10,6 +10,8 @@ export type KeeperDeps = {
   decrypt: (encrypted: string) => string;
   /** lifetime USD allowance across this store's company keys; requires one keeper process. */
   openRouterTotalLimitUsd?: number;
+  /** false keeps ticks read-only on chain; manual report and settle remain available. */
+  automaticTransactions?: boolean;
   /** Waits for the vault's in-flight proxy requests to finish metering, up to ms. The server sets it from the proxy. */
   drain?: (vault: string, ms: number) => Promise<void>;
   /** How long settlement waits for in-flight metering (default 10 s). */
@@ -53,6 +55,14 @@ export function markRegistered(store: Store, vault: string, now: number = Date.n
 }
 
 let ticking = false;
+let writing = false;
+
+/** reserves this process's keeper signer until the operation finishes. */
+function beginWrite(d: KeeperDeps): void {
+  if (writing) throw new Error("keeper transaction in progress; retry after reconciliation");
+  if (d.store.listPendingSettlements().length > 0) throw new Error("unresolved settlement blocks new keeper transactions; reconcile it first");
+  writing = true;
+}
 const settlingVaults = new Set<string>();
 
 /** Whether this process is settling or reconciling the vault right now. */
@@ -174,12 +184,17 @@ const MIN_REPORTABLE_ASSETS = 1_000n;
 
 /** Calls report() on one vault unless it holds only dust. Throws on a chain failure. */
 export async function reportVault(d: KeeperDeps, vault: string): Promise<void> {
-  const assets = await d.chain.totalAssets(vault);
-  if (assets <= MIN_REPORTABLE_ASSETS) {
-    d.log(`report ${vault} skipped: vault is empty`);
-    return;
+  beginWrite(d);
+  try {
+    const assets = await d.chain.totalAssets(vault);
+    if (assets <= MIN_REPORTABLE_ASSETS) {
+      d.log(`report ${vault} skipped: vault is empty`);
+      return;
+    }
+    await d.chain.report(vault);
+  } finally {
+    writing = false;
   }
-  await d.chain.report(vault);
 }
 
 export async function reportAll(d: KeeperDeps, now: number = Date.now()): Promise<void> {
@@ -188,6 +203,7 @@ export async function reportAll(d: KeeperDeps, now: number = Date.now()): Promis
       await reportVault(d, v.vault);
     } catch (e) {
       d.log(`report ${v.vault} failed: ${(e as Error).message}`);
+      throw e;
     }
   }
   d.store.setMeta("lastReport", String(now));
@@ -329,11 +345,9 @@ async function reconcileOne(d: KeeperDeps, p: PendingSettlement, now: number): P
     d.log(`settlement ${p.tx} for ${p.vault} still unmined after ${minutes} min: vault stays closed`);
     return "pending";
   }
-  // never accepted by the node: nothing can mine, so the month rule may settle the vault again
-  d.store.clearPendingSettlement(p.vault, p.tx);
-  d.log(`settlement ${p.tx} for ${p.vault} unknown to the node after ${minutes} min: pending row cleared`);
-  await resync(d, p.vault, "dropped settlement");
-  return "cleared";
+  // one node's absence cannot prove that a signed transaction will never mine.
+  d.log(`settlement ${p.tx} for ${p.vault} unknown to the node after ${minutes} min: vault stays closed; operator reconciliation required before clearing the pending row`);
+  return "pending";
 }
 
 /** Settles the bookkeeping of every settlement sent earlier whose receipt was not seen at the time. */
@@ -412,6 +426,7 @@ export async function settleVault(d: KeeperDeps, vault: string, now: number = Da
     return null;
   }
   settlingVaults.add(key);
+  let ownsWrite = false;
   try {
     const earlier = d.store.pendingSettlement(vault);
     if (earlier) {
@@ -423,6 +438,8 @@ export async function settleVault(d: KeeperDeps, vault: string, now: number = Da
       // an applied earlier settlement is this call's result, not a reason to settle again
       if (r === "applied") return { usage: earlier.usageMicro, tx: earlier.tx };
     }
+    beginWrite(d);
+    ownsWrite = true;
     if (await d.chain.lossPending(vault)) {
       d.log(`settle ${vault} skipped: loss pending`);
       return null;
@@ -482,6 +499,7 @@ export async function settleVault(d: KeeperDeps, vault: string, now: number = Da
     d.log(`settlement ${tx} for ${vault} not confirmed yet: left pending, vault stays closed`);
     return { usage, tx, pending: true };
   } finally {
+    if (ownsWrite) writing = false;
     settlingVaults.delete(key);
   }
 }
@@ -493,6 +511,7 @@ export async function tick(d: KeeperDeps, now: number = Date.now()): Promise<voi
     await reconcilePending(d, now);
     await resolvePendingModelCalls(d, now);
     await syncAll(d);
+    if (d.automaticTransactions === false || d.store.listPendingSettlements().length > 0) return;
     const lastReport = Number(d.store.getMeta("lastReport") ?? 0);
     if (now - lastReport >= DAY_MS) {
       await reportAll(d, now);

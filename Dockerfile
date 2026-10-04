@@ -15,7 +15,7 @@ COPY package.json package-lock.json ./
 COPY app/*.ts ./app/
 COPY agent/*.ts ./agent/
 COPY engine/*.ts ./engine/
-RUN mkdir /data && chown node:node /data
+RUN chmod -R a+rX /opt/inferest && mkdir /data && chown node:node /data
 USER node
 EXPOSE 8787
 CMD ["node", "app/cli.ts", "serve"]

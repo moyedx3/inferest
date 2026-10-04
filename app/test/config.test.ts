@@ -100,3 +100,30 @@ test("the optional OpenRouter total limit must be finite and nonnegative", () =>
     assert.throws(() => loadConfig({ ...env, OPENROUTER_TOTAL_LIMIT_USD: value }), /OPENROUTER_TOTAL_LIMIT_USD/);
   }
 });
+
+
+test("pilot admission and automatic transactions are optional and validated", () => {
+  const env = envFor(42161, 42161);
+  assert.equal(loadConfig(env).pilotCustomerAddress, undefined);
+  assert.equal(loadConfig(env).keeperAutomaticTransactions, true);
+  const address = "0x" + "ab".repeat(20);
+  assert.equal(loadConfig({ ...env, PILOT_CUSTOMER_ADDRESS: address }).pilotCustomerAddress, address);
+  assert.equal(loadConfig({ ...env, KEEPER_AUTOMATIC_TRANSACTIONS: "false" }).keeperAutomaticTransactions, false);
+  for (const value of ["0x123", "arbitrary", "0x" + "zz".repeat(20)]) {
+    assert.throws(() => loadConfig({ ...env, PILOT_CUSTOMER_ADDRESS: value }), /PILOT_CUSTOMER_ADDRESS/);
+  }
+  assert.throws(() => loadConfig({ ...env, KEEPER_AUTOMATIC_TRANSACTIONS: "no" }), /KEEPER_AUTOMATIC_TRANSACTIONS/);
+});
+
+test("keeper ETH bounds parse exactly to wei and reject invalid or excessive precision", () => {
+  const env = envFor(42161, 42161);
+  assert.equal(loadConfig(env).keeperMinBalanceWei, undefined);
+  assert.equal(loadConfig(env).keeperMaxTxCostWei, undefined);
+  for (const [name, field] of [["KEEPER_MIN_BALANCE_ETH", "keeperMinBalanceWei"], ["KEEPER_MAX_TX_COST_ETH", "keeperMaxTxCostWei"]] as const) {
+    assert.equal(loadConfig({ ...env, [name]: "0.001000000000000001" })[field], 1_000_000_000_000_001n);
+    assert.equal(loadConfig({ ...env, [name]: "0" })[field], 0n);
+    for (const value of ["-1", "NaN", "Infinity", "1e-3", "0.0000000000000000001"]) {
+      assert.throws(() => loadConfig({ ...env, [name]: value }), new RegExp(name));
+    }
+  }
+});

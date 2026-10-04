@@ -58,23 +58,22 @@ export function makeChain(cfg: Config): Chain {
   const account = privateKeyToAccount(cfg.keeperKey);
   const wallet = createWalletClient({ chain, account, transport: http(cfg.rpcUrl) });
 
-  async function send(address: Hex, abi: any, functionName: string, args: unknown[]): Promise<Hex> {
-    const { request } = await pub.simulateContract({ account, address, abi, functionName, args } as any);
-    return wallet.writeContract(request as any);
-  }
-
-  async function write(address: Hex, abi: any, functionName: string, args: unknown[]): Promise<string> {
-    const hash = await send(address, abi, functionName, args);
-    const receipt = await pub.waitForTransactionReceipt({ hash });
-    if (receipt.status !== "success") throw new Error(`${functionName} reverted: ${hash}`);
-    return hash;
-  }
-
-  async function prepareSettle(vault: string, usageMicro: bigint): Promise<PreparedSettle> {
-    const args = [vault as Hex, usageMicro] as const;
-    await pub.simulateContract({ account, address: cfg.splitter, abi: splitterAbi, functionName: "settle", args });
-    const data = encodeFunctionData({ abi: splitterAbi, functionName: "settle", args });
-    const request = await wallet.prepareTransactionRequest({ account, chain, to: cfg.splitter, data });
+  async function prepare(address: Hex, abi: any, functionName: string, args: unknown[]): Promise<PreparedSettle> {
+    await pub.simulateContract({ account, address, abi, functionName, args } as any);
+    const data = encodeFunctionData({ abi, functionName, args });
+    const request = await wallet.prepareTransactionRequest({ account, chain, to: address, data });
+    if (cfg.keeperMinBalanceWei !== undefined || cfg.keeperMaxTxCostWei !== undefined) {
+      const fee = request.maxFeePerGas ?? request.gasPrice;
+      if (request.gas === undefined || fee === undefined) throw new Error("keeper transaction gas or fee ceiling unavailable");
+      const cost = request.gas * fee;
+      if (cfg.keeperMaxTxCostWei !== undefined && cost > cfg.keeperMaxTxCostWei) {
+        throw new Error("keeper transaction exceeds KEEPER_MAX_TX_COST_ETH");
+      }
+      const balance = await pub.getBalance({ address: account.address, blockTag: "pending" });
+      if (balance < cost + (cfg.keeperMinBalanceWei ?? 0n)) {
+        throw new Error("keeper balance cannot cover transaction cost and KEEPER_MIN_BALANCE_ETH reserve");
+      }
+    }
     const serializedTransaction = await wallet.signTransaction(request as any);
     return {
       hash: keccak256(serializedTransaction),
@@ -83,6 +82,17 @@ export function makeChain(cfg: Config): Chain {
       },
     };
   }
+
+  async function write(address: Hex, abi: any, functionName: string, args: unknown[]): Promise<string> {
+    const prepared = await prepare(address, abi, functionName, args);
+    await prepared.send();
+    const receipt = await pub.waitForTransactionReceipt({ hash: prepared.hash as Hex });
+    if (receipt.status !== "success") throw new Error(`${functionName} reverted: ${prepared.hash}`);
+    return prepared.hash;
+  }
+
+  const prepareSettle = (vault: string, usageMicro: bigint): Promise<PreparedSettle> =>
+    prepare(cfg.splitter, splitterAbi, "settle", [vault as Hex, usageMicro]);
 
   return {
     yieldOf: (vault) =>
