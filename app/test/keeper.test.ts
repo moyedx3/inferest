@@ -836,3 +836,53 @@ test("reportVault reports one vault and skips an empty one", async () => {
   assert.deepEqual(events.filter((e) => e.startsWith("report:")), [`report:${V}`]);
   assert.equal(store.getMeta("lastReport"), undefined); // only reportAll stamps the day
 });
+
+test("a lifetime provider allowance bounds concurrent vaults and survives settlement and new keeper deps", async () => {
+  const { d, store, spend } = setup();
+  const other = "0x00000000000000000000000000000000000000bb";
+  store.addVault(other, "0xcc", "second");
+  store.setVaultOpenRouterKey(other, "other", "enc:other");
+  store.addKey({ id: "k3", vault: other, name: "c", weight: 1, secretSha256: "s3" });
+  const live = new Map([OR, "other"].map((hash) => [hash, { hash, usage: 0, limit: 0, disabled: false }]));
+  d.openRouterTotalLimitUsd = 0.9;
+  d.or.getKey = async (hash) => ({ ...live.get(hash)! });
+  d.or.setLimit = async (hash, limit) => { live.get(hash)!.limit = limit; };
+  await Promise.all([syncVault(d, V), syncVault(d, other)]);
+  assert.equal(live.get(OR)!.limit, 0.9);
+  assert.equal(live.get("other")!.limit, 0);
+  live.get(OR)!.usage = 0.2;
+  spend("k1", 0.2);
+  d.chain.yieldOf = async (vault) => vault === V ? 0n : 2_000_000_000n;
+  await settleVault(d, V);
+  assert.equal(live.get(OR)!.limit, 0.2);
+  store.setVaultState(V, { orLimit: 0, orUsage: 0 });
+  await syncVault({ ...d }, other);
+  assert.equal(live.get("other")!.limit, 0.7);
+  await syncVault({ ...d }, V);
+  assert.ok(live.get(OR)!.limit <= 0.2);
+});
+
+test("provider allowance fails closed on unknown reservations and recovers after a failed PATCH", async () => {
+  const { d, store } = setup();
+  const other = "0x00000000000000000000000000000000000000bb";
+  store.addVault(other, "0xcc", "second");
+  store.setVaultOpenRouterKey(other, "other", "enc:other");
+  store.addKey({ id: "k3", vault: other, name: "c", weight: 1, secretSha256: "s3" });
+  d.openRouterTotalLimitUsd = 0.9;
+  const live = new Map([OR, "other"].map((hash) => [hash, { hash, usage: 0, limit: 0 as number | null, disabled: false }]));
+  let patches = 0;
+  d.or.getKey = async (hash) => ({ ...live.get(hash)! });
+  d.or.setLimit = async () => { patches++; throw new Error("PATCH failed"); };
+  live.get("other")!.limit = null;
+  await assert.rejects(syncVault(d, V), /accounting/);
+  assert.equal(patches, 0);
+  live.get("other")!.limit = 0;
+  await assert.rejects(syncVault(d, V), /PATCH failed/);
+  assert.equal(patches, 1);
+  d.or.setLimit = async (hash, limit) => { live.get(hash)!.limit = limit; };
+  await syncVault(d, other);
+  assert.equal(live.get("other")!.limit, 0.9);
+  live.get(OR)!.usage = 0.1;
+  await syncVault(d, V);
+  assert.equal(live.get(OR)!.limit, 0);
+});

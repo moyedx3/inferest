@@ -249,9 +249,13 @@ async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse, cool
       // vault; a vault whose row already has a key is registered already and is only answered again
       if (!d.store.openRouterKeyFor(vault)) {
         const minted = await mintCompanyKey(d, vault);
-        d.store.addVault(vault, customer, String(body.label ?? "customer"));
-        markRegistered(d.store, vault); // a vault added mid-month is first settled next month
-        d.store.setVaultOpenRouterKey(vault, minted.hash, minted.encrypted);
+        // another registration may have completed while minting; never orphan its funded key.
+        // the unused freshly minted key stays at its initial zero limit.
+        if (!d.store.openRouterKeyFor(vault)) {
+          d.store.addVault(vault, customer, String(body.label ?? "customer"));
+          markRegistered(d.store, vault); // a vault added mid-month is first settled next month
+          d.store.setVaultOpenRouterKey(vault, minted.hash, minted.encrypted);
+        }
       }
       return send(res, 201, { vault, customer: customer.toLowerCase() });
     }

@@ -766,3 +766,33 @@ test("the logo files are served as SVG images", async () => {
   }
   server.close();
 });
+
+test("concurrent registration preserves the first company key after it has received credit", async () => {
+  const { base, server, store, d } = await start();
+  let started = () => {};
+  let release = () => {};
+  const minted = new Promise<void>((resolve) => { started = resolve; });
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let mints = 0;
+  d.or.createKey = async () => {
+    const n = ++mints;
+    if (n === 1) { started(); await gate; }
+    return { key: `secret-${n}`, hash: `hash-${n}` };
+  };
+  try {
+    const delayed = post(base, "/api/vaults", { vault: V });
+    await minted;
+    assert.equal((await post(base, "/api/vaults", { vault: V })).status, 201);
+    d.chain.yieldOf = async () => 100_000_000n;
+    let fundedHash = "";
+    d.or.setLimit = async (hash, limit) => { if (limit > 0) fundedHash = hash; };
+    assert.equal((await post(base, "/api/keys", { vault: V, name: "dev" })).status, 201);
+    assert.equal(fundedHash, "hash-2");
+    release();
+    assert.equal((await delayed).status, 201);
+    assert.equal(store.openRouterKeyFor(V)?.hash, fundedHash);
+  } finally {
+    release();
+    server.close();
+  }
+});

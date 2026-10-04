@@ -88,3 +88,15 @@ test("targets come from the chain config and must all be in the deployment's lis
   writeFileSync(depPath, JSON.stringify({ chainId: 1, target: "0x02", targets: ["0x02"], factory: "0x03", splitter: "0x04" }));
   assert.throws(() => loadConfig(env), /target 0x06 is not allowlisted in the deployment/);
 });
+
+test("the optional OpenRouter total limit must be finite and nonnegative", () => {
+  const env = envFor(42161, 42161);
+  assert.equal(loadConfig(env).openRouterTotalLimitUsd, undefined);
+  assert.equal(loadConfig({ ...env, OPENROUTER_TOTAL_LIMIT_USD: "" }).openRouterTotalLimitUsd, undefined);
+  for (const value of ["0", "0.9"]) {
+    assert.equal(loadConfig({ ...env, OPENROUTER_TOTAL_LIMIT_USD: value }).openRouterTotalLimitUsd, Number(value));
+  }
+  for (const value of ["-1", "NaN", "Infinity", "abc"]) {
+    assert.throws(() => loadConfig({ ...env, OPENROUTER_TOTAL_LIMIT_USD: value }), /OPENROUTER_TOTAL_LIMIT_USD/);
+  }
+});
