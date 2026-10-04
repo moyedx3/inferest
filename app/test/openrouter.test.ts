@@ -69,3 +69,14 @@ test("getGeneration treats a missing cost as not ready", async () => {
   const f = fakeFetch([{ data: { id: "gen-1", model: "m" } }]);
   assert.equal(await openRouter("m", f.fn).getGeneration("gen-1", "k"), undefined);
 });
+
+test("getKey rejects missing or invalid accounting instead of treating it as zero", async () => {
+  for (const usage of [undefined, null, -1, "0"]) {
+    const f = fakeFetch([{ data: { hash: "h", usage, limit: 0 } }]);
+    await assert.rejects(openRouter("m", f.fn).getKey("h"), /invalid.*usage/i);
+  }
+  for (const limit of [undefined, -1, "1"]) {
+    const f = fakeFetch([{ data: { hash: "h", usage: 0, limit } }]);
+    await assert.rejects(openRouter("m", f.fn).getKey("h"), /invalid.*limit/i);
+  }
+});

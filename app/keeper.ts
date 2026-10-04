@@ -8,6 +8,8 @@ export type KeeperDeps = {
   chain: Chain; store: Store; or: OpenRouter; params: Params; log: (msg: string) => void;
   /** Decrypts a vault's OpenRouter key secret (secretBox(KEY_ENCRYPTION_KEY).decrypt in production). */
   decrypt: (encrypted: string) => string;
+  /** lifetime USD allowance across this store's company keys; requires one keeper process. */
+  openRouterTotalLimitUsd?: number;
   /** Waits for the vault's in-flight proxy requests to finish metering, up to ms. The server sets it from the proxy. */
   drain?: (vault: string, ms: number) => Promise<void>;
   /** How long settlement waits for in-flight metering (default 10 s). */
@@ -61,6 +63,20 @@ export const isSettling = (vault: string): boolean => settlingVaults.has(vault.t
  * With no open credit (a freeze, or the settlement snapshot) the limit is the usage itself.
  */
 async function syncCompanyKey(d: KeeperDeps, vault: string, limits: KeyLimit[]): Promise<void> {
+  if (d.openRouterTotalLimitUsd === undefined) return syncCompanyKeyNow(d, vault, limits);
+  const next = () => syncCompanyKeyNow(d, vault, limits);
+  const run = (companyKeyQueues.get(d.store) ?? Promise.resolve()).then(next, next);
+  companyKeyQueues.set(d.store, run);
+  try {
+    await run;
+  } finally {
+    if (companyKeyQueues.get(d.store) === run) companyKeyQueues.delete(d.store);
+  }
+}
+
+const companyKeyQueues = new WeakMap<Store, Promise<void>>();
+
+async function syncCompanyKeyNow(d: KeeperDeps, vault: string, limits: KeyLimit[]): Promise<void> {
   const orKey = d.store.openRouterKeyFor(vault);
   if (!orKey) {
     d.log(`sync ${vault}: no OpenRouter key on file, nothing to pin`);
@@ -75,8 +91,21 @@ async function syncCompanyKey(d: KeeperDeps, vault: string, limits: KeyLimit[]):
   // below the live usage: an in-flight request may have overshot the stored limit, and the hold then pins at usage.
   // When usage overshot, the held value is live usage itself, which can sit above the 4-decimal floored candidate
   // by under 1e-4; that is intended.
-  const limit = pending > 0 && stored > 0 ? Math.max(live.usage, Math.min(candidate, stored)) : candidate;
+  let limit = pending > 0 && stored > 0 ? Math.max(live.usage, Math.min(candidate, stored)) : candidate;
   if (limit !== candidate) d.log(`sync ${vault}: ${pending} pending model call(s), backstop held at ${limit}`);
+  if (d.openRouterTotalLimitUsd !== undefined) {
+    let reserved = 0;
+    const hashes = new Set(d.store.listVaults().map((v) => v.orKeyHash).filter((h) => h !== null));
+    for (const hash of hashes) {
+      const key = hash === orKey.hash ? live : await d.or.getKey(hash);
+      if (!Number.isFinite(key.usage) || key.usage < 0 || key.limit === null || !Number.isFinite(key.limit) || key.limit < 0) {
+        throw new Error("OpenRouter total limit requires finite nonnegative key accounting");
+      }
+      if (hash !== orKey.hash) reserved += Math.max(key.usage, key.limit);
+    }
+    const remaining = Math.floor(Math.max(0, d.openRouterTotalLimitUsd - reserved) * 1e4) / 1e4;
+    limit = Math.min(limit, remaining);
+  }
   await d.or.setLimit(orKey.hash, limit);
   d.store.setVaultState(vault, { orLimit: limit, orUsage: live.usage });
 }

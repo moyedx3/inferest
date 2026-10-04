@@ -23,9 +23,15 @@ export function openRouter(managementKey: string, fetchFn: typeof fetch = fetch,
     if (!res.ok) throw new Error(`OpenRouter ${method} ${path} failed: ${res.status} ${await res.text()}`);
     return res.json();
   }
-  const toKey = (d: any): OrKey => ({
-    hash: String(d.hash), usage: Number(d.usage ?? 0), limit: d.limit ?? null, disabled: Boolean(d.disabled),
-  });
+  const toKey = (d: any): OrKey => {
+    if (typeof d?.usage !== "number" || !Number.isFinite(d.usage) || d.usage < 0) {
+      throw new Error("OpenRouter invalid key usage");
+    }
+    if (d.limit !== null && (typeof d.limit !== "number" || !Number.isFinite(d.limit) || d.limit < 0)) {
+      throw new Error("OpenRouter invalid key limit");
+    }
+    return { hash: String(d.hash), usage: d.usage, limit: d.limit, disabled: Boolean(d.disabled) };
+  };
   return {
     async createKey(name, limit) {
       const r = await call("POST", "/keys", { name, limit, include_byok_in_limit: true });

@@ -19,6 +19,7 @@ const or = openRouter(cfg.openRouterKey);
 const box = secretBox(cfg.keyEncryptionKey);
 const keeper: KeeperDeps = {
   chain, store, or, params: cfg.params, decrypt: box.decrypt,
+  openRouterTotalLimitUsd: cfg.openRouterTotalLimitUsd,
   log: (m) => console.log(new Date().toISOString(), m),
 };
 const noWallet: PayingFetchFactory = () => { throw new Error("TOOL_WALLET_PRIVATE_KEY is not set"); };

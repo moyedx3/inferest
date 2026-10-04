@@ -6,6 +6,7 @@ type Hex = `0x${string}`;
 export type Config = {
   rpcUrl: string; chainId: number; usdc: Hex; target: Hex; factory: Hex; splitter: Hex;
   keeperKey: Hex; openRouterKey: string; orthogonalKey: string; toolWalletKey?: Hex;
+  openRouterTotalLimitUsd?: number;
   adminToken: string; keyEncryptionKey: string; publicUrl: string; dbPath: string; port: number; params: Params;
   /** Allowlisted ERC-4626 yield sources, the first one being `target`, the default the Treasury page creates over. */
   targets: { address: Hex; name: string }[];
@@ -47,6 +48,11 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   const adminToken = need("ADMIN_TOKEN");
   if (adminToken.length < 32) console.warn("ADMIN_TOKEN is under 32 characters; use openssl rand -hex 32");
   const port = Number(env.PORT ?? 8787);
+  const openRouterTotalLimitUsd = env.OPENROUTER_TOTAL_LIMIT_USD?.trim()
+    ? Number(env.OPENROUTER_TOTAL_LIMIT_USD) : undefined;
+  if (openRouterTotalLimitUsd !== undefined && (!Number.isFinite(openRouterTotalLimitUsd) || openRouterTotalLimitUsd < 0)) {
+    throw new Error("OPENROUTER_TOTAL_LIMIT_USD must be finite and nonnegative");
+  }
   return {
     rpcUrl: need("RPC_URL"),
     chainId: Number(dep.chainId),
@@ -57,6 +63,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     targets,
     keeperKey: need("KEEPER_PRIVATE_KEY") as Hex,
     openRouterKey: need("OPENROUTER_MANAGEMENT_KEY"),
+    openRouterTotalLimitUsd,
     orthogonalKey: env.ORTHOGONAL_API_KEY ?? "",
     toolWalletKey: env.TOOL_WALLET_PRIVATE_KEY ? (env.TOOL_WALLET_PRIVATE_KEY as Hex) : undefined,
     adminToken,

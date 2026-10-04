@@ -23,6 +23,11 @@ funded provider balance. Generate independent `ADMIN_TOKEN` and
 stable across restarts. Paid tools also need an Orthogonal key and a funded Base
 USDC wallet. Dynamic login is optional; operator-token access works without it.
 Never commit credentials. Provider calls can cost real money even on a fork.
+For a small demo, set `OPENROUTER_TOTAL_LIMIT_USD=0.9`. This bounds cumulative
+provider credit across the database's registered model keys, including past usage.
+Settlement does not reset it. Keep one keeper process and preserve the database;
+keys outside this registry and paid tools are not covered. Provider billing delays
+or in-flight calls can exceed provider limits, so retain spending headroom.
 
 ```sh
 NODE_VERSION=$(cat .node-version) docker compose build server
