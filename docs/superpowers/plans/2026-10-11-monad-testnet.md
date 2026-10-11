@@ -1332,7 +1332,7 @@ These are two words on a page; the screenshot acceptance happens in Task 7's wal
 
 - [ ] **Step 8: Check the prose and the suite**
 
-Run: `grep -rn -- $'—' .gitignore contracts/foundry.toml deploy/server.env.example deploy/README.md README.md docs/06-workflow.md docs/08-status.md docs/07-walkthrough.md app/dashboard/treasury.html app/dashboard/app.js | head; npm test -- --test-timeout=60000 --test-force-exit 2>&1 | grep -E "^ℹ (tests|pass|fail)"`
+Run: `grep -rn -- $'\xe2\x80\x94' .gitignore contracts/foundry.toml deploy/server.env.example deploy/README.md README.md docs/06-workflow.md docs/08-status.md docs/07-walkthrough.md app/dashboard/treasury.html app/dashboard/app.js | head; npm test -- --test-timeout=60000 --test-force-exit 2>&1 | grep -E "^ℹ (tests|pass|fail)"`
 Expected: the grep prints nothing (no em dashes); `pass 358`, `fail 0`.
 
 - [ ] **Step 9: Commit**
