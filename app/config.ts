@@ -21,6 +21,13 @@ export type Config = {
   publicRpcUrl?: string;
   /** Whether POST /api/demo/fund exists (DEMO_FAUCET=1). */
   demoFaucet: boolean;
+  /** How POST /api/demo/fund works: "cheat" over a fork's cheat methods (DEMO_FAUCET=1), "mint" over the demo
+   *  contracts of a live testnet (DEMO_FAUCET=mint). Unset means no faucet and a real chain. */
+  faucetMode?: "cheat" | "mint";
+  /** Mint mode: the signer that mints test USDC, sends gas and warps the demo yield sources. Never the keeper. */
+  faucetKey?: Hex;
+  /** Mint mode: gas sent per fund, and the demo yield sources whose clocks the warp route moves. */
+  demoFund?: { nativeWei: bigint; warpTargets: Hex[] };
   chainName: string;
   nativeCurrency: { name: string; symbol: string; decimals: number };
   explorer?: string;
@@ -46,6 +53,27 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   if (targets[0].address.toLowerCase() !== String(chain.target).toLowerCase()) throw new Error("the first of targets must be target");
   const allowlisted = new Set((Array.isArray(dep.targets) ? dep.targets : [dep.target]).map((a: string) => String(a).toLowerCase()));
   for (const t of targets) if (!allowlisted.has(t.address.toLowerCase())) throw new Error(`target ${t.address} is not allowlisted in the deployment`);
+  const faucetMode: Config["faucetMode"] = env.DEMO_FAUCET === "1" ? "cheat" : env.DEMO_FAUCET === "mint" ? "mint" : undefined;
+  let faucetKey: Hex | undefined;
+  let demoFund: Config["demoFund"];
+  if (faucetMode === "mint") {
+    const demo = chain.demo;
+    if (!demo || typeof demo.fundNative !== "string" || !Array.isArray(demo.warpTargets)) {
+      throw new Error("DEMO_FAUCET=mint needs demo.fundNative and demo.warpTargets in the chain config");
+    }
+    if (!/^\d+(?:\.\d{1,18})?$/.test(demo.fundNative)) throw new Error("demo.fundNative must be a nonnegative amount with at most 18 decimal places");
+    const known = new Set(targets.map((t) => t.address.toLowerCase()));
+    const warpTargets = (demo.warpTargets as unknown[]).map((t) => String(t));
+    for (const t of warpTargets) {
+      if (!/^0x[0-9a-f]{40}$/i.test(t)) throw new Error(`demo.warpTargets entry ${t} must be one 20-byte hex address`);
+      if (!known.has(t.toLowerCase())) throw new Error(`demo.warpTargets entry ${t} is not one of the chain config's targets`);
+    }
+    const key = need("DEMO_FAUCET_PRIVATE_KEY");
+    if (!/^0x[0-9a-f]{64}$/i.test(key)) throw new Error("DEMO_FAUCET_PRIVATE_KEY must be 32 bytes as 0x plus 64 hex characters");
+    if (key.toLowerCase() === need("KEEPER_PRIVATE_KEY").toLowerCase()) throw new Error("DEMO_FAUCET_PRIVATE_KEY must not be the keeper's key");
+    faucetKey = key as Hex;
+    demoFund = { nativeWei: parseEther(demo.fundNative), warpTargets: warpTargets as Hex[] };
+  }
   const railFee = Number(env.RAIL_FEE ?? "0");
   if (!(railFee >= 0 && railFee < 1)) throw new Error("RAIL_FEE must be in [0, 1)");
   const keyEncryptionKey = need("KEY_ENCRYPTION_KEY");
@@ -95,7 +123,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     params: { ...HACKATHON_PARAMS, railFee },
     dynamicEnvironmentId: env.DYNAMIC_ENVIRONMENT_ID || undefined,
     publicRpcUrl: env.PUBLIC_RPC_URL ? env.PUBLIC_RPC_URL.replace(/\/+$/, "") : undefined,
-    demoFaucet: env.DEMO_FAUCET === "1",
+    demoFaucet: faucetMode !== undefined,
+    faucetMode,
+    faucetKey,
+    demoFund,
     chainName: String(chain.name ?? `chain ${dep.chainId}`),
     nativeCurrency: chain.nativeCurrency ?? { name: "Ether", symbol: "ETH", decimals: 18 },
     explorer: chain.explorer ? String(chain.explorer) : undefined,

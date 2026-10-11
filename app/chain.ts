@@ -51,7 +51,7 @@ type Hex = `0x${string}`;
 
 export function makeChain(cfg: Config): Chain {
   const chain = defineChain({
-    id: cfg.chainId, name: "inferest", nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+    id: cfg.chainId, name: cfg.chainName, nativeCurrency: cfg.nativeCurrency,
     rpcUrls: { default: { http: [cfg.rpcUrl] } },
   });
   const pub = createPublicClient({ chain, transport: http(cfg.rpcUrl) });
