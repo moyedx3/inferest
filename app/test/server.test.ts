@@ -7,6 +7,7 @@ import { openStore } from "../store.ts";
 import { HACKATHON_PARAMS } from "../../engine/ledger.ts";
 import type { ToolGateway } from "../tools.ts";
 import { createAuth } from "../auth.ts";
+import { FaucetDry } from "../faucet.ts";
 import { makeSigner, dynamicFetch, claims, hashedClaims } from "./testjwt.ts";
 
 const V = "0x00000000000000000000000000000000000000aa";
@@ -20,7 +21,7 @@ const OTHER = "0x00000000000000000000000000000000000000dd";
 const tokenFor = (wallets: string[], over: Record<string, unknown> = {}) =>
   SIGNER.sign(claims({ verified_credentials: wallets.map((address, i) => ({ id: `vc-${i}`, address, chain: "eip155" })), ...over }));
 
-async function start(customer = "0x00000000000000000000000000000000000000cc", opts: { login?: boolean; faucet?: (address: string) => void; ownerCooldown?: AppDeps["ownerCooldown"] } = {}) {
+async function start(customer = "0x00000000000000000000000000000000000000cc", opts: { login?: boolean; faucet?: (address: string) => void; warp?: (seconds: bigint) => string[]; dry?: boolean; ownerCooldown?: AppDeps["ownerCooldown"] } = {}) {
   const store = openStore(":memory:");
   const created: string[] = [];
   const d: AppDeps = {
@@ -55,7 +56,14 @@ async function start(customer = "0x00000000000000000000000000000000000000cc", op
       // a token with only credential hashes gets its wallets from the users endpoint, which answers with OWNER
       fetchFn: dynamicFetch([SIGNER], { body: { verifiedCredentials: [{ format: "blockchain", chain: "eip155", address: OWNER }, { format: "email" }] } }).fn,
     }),
-    faucet: opts.faucet ? { fund: async (a) => { opts.faucet!(a); return { native: 10n ** 18n, usdc: 100_000_000_000n }; } } : undefined,
+    faucet: opts.faucet || opts.warp ? {
+      fund: async (a) => {
+        if (opts.dry) throw new FaucetDry("the faucet signer 0x00000000000000000000000000000000000000ff holds too little MON to fund a wallet");
+        opts.faucet?.(a);
+        return { native: 10n ** 18n, usdc: 100_000_000_000n };
+      },
+      ...(opts.warp ? { warp: async (s: bigint) => opts.warp!(s) } : {}),
+    } : undefined,
     logError: () => {},
     ownerCooldown: opts.ownerCooldown,
   };
@@ -706,6 +714,37 @@ test("the faucet funds a session's own wallet and refuses a foreign address", as
   assert.equal((await postAs(base, "/api/demo/fund", { address: "nope" }, tokenFor([OWNER]))).status, 400);
   assert.equal((await post(base, "/api/demo/fund", { address: OTHER })).status, 200); // the operator may fund anyone
   assert.equal((await fetch(base + "/api/demo/fund", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ address: OWNER }) })).status, 401);
+  server.close();
+});
+
+test("the warp route is operator-only, validates seconds and reports the transactions", async () => {
+  const warped: bigint[] = [];
+  const { base, server } = await start(undefined, { faucet: () => {}, warp: (s) => { warped.push(s); return ["0xaa", "0xbb"]; } });
+  const ok = await post(base, "/api/demo/warp", { seconds: 15_768_000 });
+  assert.equal(ok.status, 200);
+  assert.deepEqual(await ok.json(), { ok: true, seconds: 15_768_000, txs: ["0xaa", "0xbb"] });
+  assert.deepEqual(warped, [15_768_000n]);
+  assert.equal((await postAs(base, "/api/demo/warp", { seconds: 60 }, tokenFor([OWNER]))).status, 403);
+  for (const seconds of [0, -5, 1.5, "soon", 315_360_001]) {
+    assert.equal((await post(base, "/api/demo/warp", { seconds })).status, 400, `seconds ${seconds}`);
+  }
+  assert.equal((await fetch(base + "/api/demo/warp", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ seconds: 60 }) })).status, 401);
+  assert.equal(warped.length, 1);
+  server.close();
+});
+
+test("the warp route is absent on a fork, where the faucet has no warp", async () => {
+  const { base, server } = await start(undefined, { faucet: () => {} });
+  assert.equal((await post(base, "/api/demo/warp", { seconds: 60 })).status, 404);
+  assert.equal((await post(base, "/api/demo/fund", { address: OTHER })).status, 200);
+  server.close();
+});
+
+test("a dry faucet answers 503 with the reason", async () => {
+  const { base, server } = await start(undefined, { faucet: () => {}, dry: true });
+  const r = await post(base, "/api/demo/fund", { address: OTHER });
+  assert.equal(r.status, 503);
+  assert.match((await r.json()).error, /holds too little MON to fund a wallet/);
   server.close();
 });
 

@@ -86,8 +86,15 @@ export function createMintFaucet(d: {
     if (receipt.status !== "success") throw new Error(`faucet transaction reverted: ${hash}`);
     return hash;
   };
+  // one signer, one nonce sequence: overlapping route calls queue behind each other instead of racing for a nonce
+  let queue: Promise<unknown> = Promise.resolve();
+  const serial = <T>(work: () => Promise<T>): Promise<T> => {
+    const run = queue.then(work, work);
+    queue = run.catch(() => undefined);
+    return run;
+  };
   return {
-    async fund(address) {
+    fund: (address) => serial(async () => {
       const to = address as Hex;
       const balance = await pub.getBalance({ address: account.address });
       if (balance < d.nativeWei * 2n) {
@@ -96,14 +103,14 @@ export function createMintFaucet(d: {
       await mined(await wallet.writeContract({ address: d.usdc, abi: testUsdcAbi, functionName: "mint", args: [to, FAUCET_USDC] }));
       if (d.nativeWei > 0n) await mined(await wallet.sendTransaction({ to, value: d.nativeWei }));
       return { native: d.nativeWei, usdc: FAUCET_USDC };
-    },
-    async warp(seconds) {
+    }),
+    warp: (seconds) => serial(async () => {
       if (!(seconds > 0n && seconds <= MAX_WARP_SECONDS)) throw new Error("warp must be between one second and ten years");
       const txs: string[] = [];
       for (const target of d.warpTargets) {
         txs.push(await mined(await wallet.writeContract({ address: target, abi: demoVaultAbi, functionName: "warp", args: [seconds] })));
       }
       return txs;
-    },
+    }),
   };
 }

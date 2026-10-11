@@ -163,3 +163,10 @@ test("warp refuses zero, negative and more than ten years without a transaction"
 test("the cheat faucet has no warp: a fork moves its own clock", () => {
   assert.equal(createFaucet({ rpcUrl: "http://rpc", usdc: USDC }).warp, undefined);
 });
+
+test("overlapping faucet calls are serialized so one signer never races for a nonce", async (t) => {
+  const { decoded } = node(t);
+  const faucet = mintFaucet();
+  await Promise.all([faucet.fund(TO), faucet.warp!(60n)]);
+  assert.deepEqual(decoded().map((tx) => tx.nonce), [0, 1, 2, 3]);
+});
