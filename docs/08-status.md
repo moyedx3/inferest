@@ -7,6 +7,7 @@ _Where the build stands, how to run it, how we work on it, and what is left, so 
 | Area | State | Where |
 |---|---|---|
 | Contracts | One Octant ERC-4626 vault per customer over an allowlisted yield source, the Splitter, the factory, tests, the deploy script (`TARGET_VAULTS` allowlists sources) | `contracts/`, `docs/06-workflow.md` |
+| Demo chain contracts | `TestUSDC` and `DemoYieldVault` for a testnet with no USDC yield source: a fixed simulated rate on a clock the faucet signer can warp; `DeployDemo.s.sol`; the mint faucet and the warp route behind `DEMO_FAUCET=mint` | `contracts/src/demo/`, `app/faucet.ts`, spec `docs/superpowers/specs/2026-10-11-monad-testnet-design.md` |
 | Ledger kernel | Pure functions for accrued yield, credit limit, settlement, required principal; tested | `engine/ledger.ts` |
 | Proxy and tools | `/v1/chat/completions` with `sk-inf-` keys metered against each key's yield budget; one encrypted OpenRouter key per vault as backstop; paid web tools over MCP at `/mcp` paid in USDC through x402 | `app/server.ts`, `app/proxy.ts`, `app/mcp.ts`, `app/tools.ts` |
 | Keeper | Reports each vault daily, keeps the backstop limit in step, settles each period; runs inside `npm run serve` | `app/keeper.ts`, `app/cli.ts` |
@@ -40,6 +41,19 @@ A demo needs a fork. Over Arbitrum's public RPC a fork serves state for about th
 
 Browser checks in this project were driven with Playwright from a small local script, not a browser tool; screenshots against the PNGs in `design/` are the acceptance test.
 
+### Monad testnet
+
+Monad testnet (chain id 10143) has no USDC yield source, so the demo runs over our `DemoYieldVault` and `TestUSDC`. Facts and decisions: `docs/superpowers/specs/2026-10-11-monad-testnet-design.md`.
+
+Fork mode, as above, with `anvil --fork-url https://testnet-rpc.monad.xyz --port 8545` and `DEMO_FAUCET=1`; the cheat faucet and the clock warp work on the fork.
+
+Live mode, in `.env.local`: `RPC_URL=https://testnet-rpc.monad.xyz`, `PUBLIC_RPC_URL=https://testnet-rpc.monad.xyz`, `CHAIN_CONFIG=config/monad-testnet.json`, `DEPLOYMENTS=contracts/deployments/10143.json`, `DEMO_FAUCET=mint`, `DEMO_FAUCET_PRIVATE_KEY` (the demo vault owner), `KEEPER_PRIVATE_KEY`, both holding MON from `https://faucet.monad.xyz`; `AGENT_DEMO_DAYS=7` for the agent. Then:
+
+1. Deploy once, in this order (the README's deploy line, with `DEMO_OWNER` = the faucet signer's address): `forge script script/DeployDemo.s.sol ...` writes `contracts/deployments/10143-demo.json`; `TARGET_VAULT=<its target> forge script script/Deploy.s.sol ...` writes `contracts/deployments/10143.json`. The reviewed public record is `contracts/deployments/monad-testnet.json`.
+2. `npm run serve`, then `npm run demo:treasury`: its "six months pass" step moves the demo vault's clock through `POST /api/demo/warp`, and the rest runs as on a fork. To move months by hand: `curl -X POST -H "x-admin-token: $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{"seconds":15768000}' http://localhost:8787/api/demo/warp`, then Report yield on the page.
+3. Treasury page: `docs/07-walkthrough.md`; "Get demo funds" mints 100,000 tUSDC and sends 0.5 MON. The faucet route answers 503 when the faucet signer runs low; top it up from the Monad faucet.
+4. Agent: `npm run agent -- --once` as above; each run warps the demo vault a week through the server, so the run cards show real dates while the yield jumps.
+
 ## How we work
 
 `AGENTS.md` at the repository root carries these rules for any agent; `CLAUDE.md` points at it.
@@ -58,7 +72,7 @@ In the order we would do them. Each item is a branch of its own with a review be
 1. **A public deployment anyone can click.** A Tenderly Virtual TestNet of Arbitrum One (chain id must stay 42161; the admin RPC URL is the owner's), a host that keeps SQLite on disk and runs two long-lived processes (`npm run serve` with the keeper inside it, and the agent runner under a supervisor), a domain, a Dynamic production environment with that origin allowed, a `KEY_ENCRYPTION_KEY`, an `ADMIN_TOKEN` of 32 characters or more, an OpenRouter float, a funded paid-tools wallet. The deployment record for that chain has to be added with `git add -f contracts/deployments/<chainId>.json`, since fork deployments are ignored. The runner has only ever run on forks.
 2. **The demo video.** About three minutes: Home, a deposit and a key on Treasury, the curl call, the Agents page. `docs/07-walkthrough.md` is the script.
 3. **The deck.** Design `deck/outline.md` in pen.dev. The outline matches main as of 2026-09-27.
-4. **Per-target variants.** Each submission target is a config fork (chain, USDC, yield source) plus a pitch; details and dates are in `private/events.md`. Chain-specific values live in `config/` and the deploy script's env, nothing in code.
+4. **Per-target variants.** Each submission target is a config fork (chain, USDC, yield source) plus a pitch; details and dates are in `private/events.md`. Chain-specific values live in `config/` and the deploy script's env, nothing in code. Monad testnet is built through to the deploy: the demo contracts, the mint faucet, the warp route and the fallbacks are on main; what is left is the deployment, the record, and a walkthrough (Task 7 of the plan).
 5. **Runner safety fixes, deferred on 2026-09-27 until the agent is to hold real money.** Not needed for a fork or a Tenderly demo; needed before a real book. The cut, in order: (1) start from the chain, not from SQLite: adopt the vault that holds shares, skip the first deposit when one does, record a transaction hash before waiting for its receipt, revoke orphan keys, re-key at the top of each run, refuse the demo clock on a real chain; (2) a single-instance lock; (3) bounds: the book enforced against a hand-funded wallet, a minimum split size, a minimum time between source moves, a daily transaction cap, an ETH check and a gas price cap, caps on paper positions and a finite price, stricter config validation; (4) honest failures: dust-safe sweeps, a run row before the first chain read, the error on the page, setup actions recorded, an empty provider float told apart from an empty budget, length caps on the note; (5) the runner's own env file and a credential scoped to its vaults. Items 1 and 3 are the ones that matter before real money. The review's last table lists what a real-chain start must provide.
 6. **The repository is public** (flipped 2026-09-27, MIT). The readiness review (kept out of the repo because it quotes a private name) found no secret in the working tree or in history, and the founders decided that history stays as it is, that `sources/` and `docs/superpowers/` stay public, and on the MIT license (README decisions 16 and 17). Done on the hygiene branch: `.obsidian/` and fork deployments ignored, a first name removed from the notes at HEAD, two stale "no proxy" lines fixed, a cap on JSON request bodies, a constant-time admin token check. After the flip: rate limits on `/v1`, `/mcp`, `/api/*` and login, a cap on vaults per session, generic 500 messages, a guard that `PUBLIC_RPC_URL` is never the keeper's admin RPC, a synthetic address in the auth test.
 7. **Product gaps deferred by design.** Real swaps instead of paper trades, visitors' own agents on the Agents page, more than one agent, the Treasury cosmetic gap that goes to pen.dev.

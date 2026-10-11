@@ -95,7 +95,7 @@ async function loadConfig() {
   show("stepfunds", Boolean(cfg.demoFaucet));
   document.querySelectorAll(".steps > .step:not(#stepfunds) .num").forEach((n, i) => { n.textContent = i + (cfg.demoFaucet ? 2 : 1); });
   $("amount").defaultValue = cfg.demoFaucet ? "100000" : "";
-  $("network").textContent = `${cfg.chainName ?? `chain ${cfg.chainId}`}${cfg.demoFaucet ? " · demo fork" : ""}`;
+  $("network").textContent = `${cfg.chainName ?? `chain ${cfg.chainId}`}${cfg.demoFaucet ? " · demo chain" : ""}`;
   $("contracts").innerHTML = [["Factory", cfg.factory], ["Splitter", cfg.splitter], ["USDC", cfg.usdc]]
     .filter(([, a]) => a).map(([k, a]) => `<span>${k}<b>${esc(short(a))}</b></span>`).join(" ");
 }

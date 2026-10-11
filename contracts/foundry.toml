@@ -12,6 +12,7 @@ fs_permissions = [{ access = "read-write", path = "./deployments" }]
 
 [rpc_endpoints]
 arbitrum = "${ARBITRUM_RPC_URL}"
+monad_testnet = "${MONAD_TESTNET_RPC_URL}"
 
 [fuzz]
 runs = 256
