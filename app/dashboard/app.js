@@ -340,7 +340,7 @@ $("warp").onclick = async () => {
     await render();
     const v = currentVault();
     activity({ icon: "↻", title: "Yield reported", detail: v ? `${usd(v.yieldUsd)} in the Splitter` : "" });
-  } catch (e) { fail("Six months")(e); } finally { $("warp").disabled = false; }
+  } catch (e) { fail("Six months pass failed")(e); } finally { $("warp").disabled = false; }
 };
 $("settle").onclick = async () => {
   const v = currentVault();

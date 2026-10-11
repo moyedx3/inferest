@@ -10,6 +10,9 @@ export type Faucet = {
   /** Moves the demo clock forward by `seconds`: the chain's own clock on a fork, the demo yield sources' clocks on a
    *  live testnet. Returns the transaction hashes the node reported. */
   warp?(seconds: bigint): Promise<string[]>;
+  /** True when warp moves a fork's own clock at no cost; the server then lets any signed-in visitor call it. A live
+   *  testnet's warp spends the faucet signer's gas, so it stays with the operator. */
+  forkClock?: boolean;
 };
 
 /** The faucet signer cannot cover a fund. The route answers 503 with this message instead of a stack trace. */
@@ -49,6 +52,7 @@ export function createFaucet(d: { rpcUrl: string; usdc: string; fetchFn?: typeof
   }
 
   return {
+    forkClock: true,
     async fund(address) {
       const to = address as Hex;
       await cheat([["tenderly_setBalance", [[to], toHex(FAUCET_NATIVE)]], ["anvil_setBalance", [to, toHex(FAUCET_NATIVE)]]]);

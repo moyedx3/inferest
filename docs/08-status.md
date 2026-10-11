@@ -7,7 +7,7 @@ _Where the build stands, how to run it, how we work on it, and what is left, so 
 | Area | State | Where |
 |---|---|---|
 | Contracts | One Octant ERC-4626 vault per customer over an allowlisted yield source, the Splitter, the factory, tests, the deploy script (`TARGET_VAULTS` allowlists sources) | `contracts/`, `docs/06-workflow.md` |
-| Demo chain contracts | `TestUSDC` and `DemoYieldVault` for a testnet with no USDC yield source: a fixed simulated rate on a clock the faucet signer can warp; `DeployDemo.s.sol`; the mint faucet and the warp route behind `DEMO_FAUCET=mint` | `contracts/src/demo/`, `app/faucet.ts`, spec `docs/superpowers/specs/2026-10-11-monad-testnet-design.md` |
+| Demo chain contracts | `TestUSDC` and `DemoYieldVault` for a testnet with no USDC yield source: a fixed simulated rate on a clock the faucet signer can warp; `DeployDemo.s.sol`; the mint faucet and the warp route behind `DEMO_FAUCET=mint`; on a fork (`DEMO_FAUCET=1`) the same route moves the chain's clock and backs the Treasury page's Six months pass button | `contracts/src/demo/`, `app/faucet.ts`, spec `docs/superpowers/specs/2026-10-11-monad-testnet-design.md` |
 | Ledger kernel | Pure functions for accrued yield, credit limit, settlement, required principal; tested | `engine/ledger.ts` |
 | Proxy and tools | `/v1/chat/completions` with `sk-inf-` keys metered against each key's yield budget; one encrypted OpenRouter key per vault as backstop; paid web tools over MCP at `/mcp` paid in USDC through x402 | `app/server.ts`, `app/proxy.ts`, `app/mcp.ts`, `app/tools.ts` |
 | Keeper | Reports each vault daily, keeps the backstop limit in step, settles each period; runs inside `npm run serve` | `app/keeper.ts`, `app/cli.ts` |

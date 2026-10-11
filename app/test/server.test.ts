@@ -21,7 +21,7 @@ const OTHER = "0x00000000000000000000000000000000000000dd";
 const tokenFor = (wallets: string[], over: Record<string, unknown> = {}) =>
   SIGNER.sign(claims({ verified_credentials: wallets.map((address, i) => ({ id: `vc-${i}`, address, chain: "eip155" })), ...over }));
 
-async function start(customer = "0x00000000000000000000000000000000000000cc", opts: { login?: boolean; faucet?: (address: string) => void; warp?: (seconds: bigint) => string[]; dry?: boolean; ownerCooldown?: AppDeps["ownerCooldown"] } = {}) {
+async function start(customer = "0x00000000000000000000000000000000000000cc", opts: { login?: boolean; faucet?: (address: string) => void; warp?: (seconds: bigint) => string[]; forkClock?: boolean; dry?: boolean; ownerCooldown?: AppDeps["ownerCooldown"] } = {}) {
   const store = openStore(":memory:");
   const created: string[] = [];
   const d: AppDeps = {
@@ -62,7 +62,7 @@ async function start(customer = "0x00000000000000000000000000000000000000cc", op
         opts.faucet?.(a);
         return { native: 10n ** 18n, usdc: 100_000_000_000n };
       },
-      ...(opts.warp ? { warp: async (s: bigint) => opts.warp!(s) } : {}),
+      ...(opts.warp ? { warp: async (s: bigint) => opts.warp!(s), forkClock: opts.forkClock } : {}),
     } : undefined,
     logError: () => {},
     ownerCooldown: opts.ownerCooldown,
@@ -717,19 +717,30 @@ test("the faucet funds a session's own wallet and refuses a foreign address", as
   server.close();
 });
 
-test("the warp route takes the operator or a signed-in visitor, validates seconds and reports the transactions", async () => {
+test("the warp route is operator-only on a live testnet, validates seconds and reports the transactions", async () => {
   const warped: bigint[] = [];
   const { base, server } = await start(undefined, { faucet: () => {}, warp: (s) => { warped.push(s); return ["0xaa", "0xbb"]; } });
   const ok = await post(base, "/api/demo/warp", { seconds: 15_768_000 });
   assert.equal(ok.status, 200);
   assert.deepEqual(await ok.json(), { ok: true, seconds: 15_768_000, txs: ["0xaa", "0xbb"] });
   assert.deepEqual(warped, [15_768_000n]);
-  assert.equal((await postAs(base, "/api/demo/warp", { seconds: 60 }, tokenFor([OWNER]))).status, 200);
+  assert.equal((await postAs(base, "/api/demo/warp", { seconds: 60 }, tokenFor([OWNER]))).status, 403);
   for (const seconds of [0, -5, 1.5, "soon", "60", true, 315_360_001]) {
     assert.equal((await post(base, "/api/demo/warp", { seconds })).status, 400, `seconds ${seconds}`);
   }
   assert.equal((await fetch(base + "/api/demo/warp", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ seconds: 60 }) })).status, 401);
-  assert.deepEqual(warped, [15_768_000n, 60n]);
+  assert.deepEqual(warped, [15_768_000n]);
+  server.close();
+});
+
+test("a signed-in visitor may move a fork's own clock, where the warp costs nothing", async () => {
+  const warped: bigint[] = [];
+  const { base, server } = await start(undefined, { faucet: () => {}, warp: (s) => { warped.push(s); return ["0xaa"]; }, forkClock: true });
+  const r = await postAs(base, "/api/demo/warp", { seconds: 15_768_000 }, tokenFor([OWNER]));
+  assert.equal(r.status, 200);
+  assert.deepEqual(await r.json(), { ok: true, seconds: 15_768_000, txs: ["0xaa"] });
+  assert.deepEqual(warped, [15_768_000n]);
+  assert.equal((await fetch(base + "/api/demo/warp", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ seconds: 60 }) })).status, 401);
   server.close();
 });
 

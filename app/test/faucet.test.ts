@@ -163,7 +163,6 @@ test("warp refuses zero, negative and more than ten years without a transaction"
   assert.equal(sent.length, 0);
 });
 
-
 test("overlapping faucet calls are serialized so one signer never races for a nonce", async (t) => {
   const { decoded } = node(t);
   const faucet = mintFaucet();
