@@ -55,7 +55,7 @@ Monad testnet (chain id 10143) has no USDC yield source. The variant built for i
 
 - One branch per task, a fresh reviewer (a subagent with only the diff and the spec) before merge, merge with `--no-ff` only when the review is clean, scan the commits since `origin/main` for secrets, then push `main`.
 - The spec is the authority; the plan argues from it; conflicts resolve toward the spec. Specs and plans live under `docs/superpowers/`.
-- Never commit: `.env*` except `.env.example`, `inferest.db*`, `contracts/deployments/*.json` (the `.gitkeep` stays), `app/dashboard/dynamic.bundle.js`, `private/`.
+- Never commit: `.env*` except `.env.example`, `inferest.db*`, `contracts/deployments/*.json` except the reviewed records `arbitrum-one.json` and `monad-fork.json` (the `.gitkeep` stays), `app/dashboard/dynamic.bundle.js`, `private/`.
 - Never put a submission target's name, a judge's name or a prize in a commit, a doc or a page. They live in `private/`.
 - Prose: no em dashes, American spelling, plain sentences. Commit subjects are sentences, not conventional-commit prefixes.
 - Several people and agents may use one checkout. Check the branch and the status before any checkout or merge; prefer a worktree.

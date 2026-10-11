@@ -38,7 +38,9 @@ transactions. An Arbitrum One fork can also use chain ID `42161`, so the filenam
 alone does not establish a mainnet deployment. Later runs overwrite it.
 
 Keep generated files ignored. Maintain `arbitrum-one.json` as the reviewed public
-record, with successful mainnet transaction hashes and blocks. Keep credentials,
+record, with successful mainnet transaction hashes and blocks, and `monad-fork.json`
+as the record of the Monad fork (test money only, replaced when the fork is
+recreated). Keep credentials,
 environment files, and private operational reports out of this directory.
 
 Service and Docker deployment instructions belong in [`../../deploy/`](../../deploy/).

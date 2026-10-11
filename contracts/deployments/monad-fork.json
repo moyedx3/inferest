@@ -5,7 +5,7 @@
   "forkOf": {
     "name": "Monad",
     "chainId": 143,
-    "blockNumber": "0x6b44263"
+    "blockNumber": 112476771
   },
   "virtualTestnetId": "d0ac9f1a-1765-4211-ac35-6f304485a6ac",
   "deployedAt": "2026-10-11",

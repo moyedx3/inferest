@@ -143,7 +143,7 @@ dashboard. A wallet's first "Get demo funds" click gives it 1 MON and
 the page:
 
 ```sh
-cast rpc evm_increaseTime 0xf09a80 --rpc-url "$RPC_URL"
+cast rpc evm_increaseTime 0xf099c0 --rpc-url "$RPC_URL"
 cast rpc evm_mine --rpc-url "$RPC_URL"
 ```
 

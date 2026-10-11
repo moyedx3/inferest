@@ -33,7 +33,6 @@ app/dashboard/dynamic.bundle.js
 .obsidian/
 contracts/deployments/*.json
 !contracts/deployments/arbitrum-one.json
-!contracts/deployments/monad-testnet.json
 !contracts/deployments/monad-fork.json
 
 # superpowers local only docs
