@@ -64,10 +64,12 @@ test("a hung node is cut off", async () => {
   assert.ok(Date.now() - started < 1000);
 });
 
-import { decodeFunctionData, keccak256, parseAbi, parseTransaction, toHex, type Hex } from "viem";
+import { decodeFunctionData, keccak256, pad, parseAbi, parseTransaction, toHex, type Hex } from "viem";
+import { privateKeyToAccount } from "viem/accounts";
 import { createMintFaucet, FaucetDry, MAX_WARP_SECONDS } from "../faucet.ts";
 
 const FAUCET_KEY = `0x${"07".repeat(32)}` as Hex; // synthetic, never funded
+const SIGNER = privateKeyToAccount(FAUCET_KEY).address.toLowerCase();
 const TUSDC = "0x00000000000000000000000000000000000000dd";
 const VAULT_A = "0x00000000000000000000000000000000000000ee";
 const VAULT_B = "0x00000000000000000000000000000000000000ef";
@@ -76,7 +78,7 @@ const mintAbi = parseAbi(["function mint(address to, uint256 amount)"]);
 const warpAbi = parseAbi(["function warp(uint256 by)"]);
 
 /** A node fake for viem's send path: every raw transaction is accepted and reported mined (or reverted). */
-function node(t: TestContext, options: { balance?: bigint; revert?: boolean } = {}) {
+function node(t: TestContext, options: { balance?: bigint; revert?: boolean; heldUsdc?: bigint; heldNative?: bigint } = {}) {
   const sent: Hex[] = [];
   t.mock.method(globalThis, "fetch", async (_input: unknown, init: RequestInit) => {
     const { id, method, params } = JSON.parse(String(init.body));
@@ -89,7 +91,8 @@ function node(t: TestContext, options: { balance?: bigint; revert?: boolean } = 
       case "eth_maxPriorityFeePerGas": result = toHex(2_000_000_000n); break;
       case "eth_gasPrice": result = toHex(102_000_000_000n); break;
       case "eth_estimateGas": result = toHex(60_000n); break;
-      case "eth_getBalance": result = toHex(options.balance ?? NATIVE * 10n); break;
+      case "eth_call": result = pad(toHex(options.heldUsdc ?? 0n)); break;
+      case "eth_getBalance": result = toHex(String(params[0]).toLowerCase() === SIGNER ? (options.balance ?? NATIVE * 10n) : (options.heldNative ?? 0n)); break;
       case "eth_sendRawTransaction": sent.push(params[0]); result = keccak256(params[0]); break;
       case "eth_getTransactionReceipt": result = {
         transactionHash: params[0], status: options.revert ? "0x0" : "0x1", blockHash: "0x" + "01".repeat(32), blockNumber: "0x1",
@@ -169,4 +172,20 @@ test("overlapping faucet calls are serialized so one signer never races for a no
   const faucet = mintFaucet();
   await Promise.all([faucet.fund(TO), faucet.warp!(60n)]);
   assert.deepEqual(decoded().map((tx) => tx.nonce), [0, 1, 2, 3]);
+});
+
+test("the mint faucet tops up: a wallet already holding the gift gets no transaction", async (t) => {
+  const { sent } = node(t, { heldUsdc: FAUCET_USDC, heldNative: NATIVE });
+  const r = await mintFaucet().fund(TO);
+  assert.deepEqual(r, { native: 0n, usdc: 0n });
+  assert.equal(sent.length, 0);
+});
+
+test("the mint faucet tops up only what is missing", async (t) => {
+  const { decoded } = node(t, { heldUsdc: 40_000_000_000n, heldNative: NATIVE / 2n });
+  const r = await mintFaucet().fund(TO);
+  assert.deepEqual(r, { native: NATIVE / 2n, usdc: 60_000_000_000n });
+  const [mint, gas] = decoded();
+  assert.equal(decodeFunctionData({ abi: mintAbi, data: mint.data! }).args![1], 60_000_000_000n);
+  assert.equal(gas.value, NATIVE / 2n);
 });

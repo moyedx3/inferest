@@ -1,6 +1,6 @@
 # Status and handoff
 
-_Where the build stands, how to run it, how we work on it, and what is left, so a cofounder or an agent can pick up without asking. Updated 2026-09-27 from `main`. Dates, submission targets and their deadlines live only in `private/events.md`, which is git-ignored; get it out of band._
+_Where the build stands, how to run it, how we work on it, and what is left, so a cofounder or an agent can pick up without asking. Updated 2026-10-11 from `main`. Dates, submission targets and their deadlines live only in `private/events.md`, which is git-ignored; get it out of band._
 
 ## What is on main
 
@@ -24,7 +24,7 @@ Everything above has run only on a local anvil fork of Arbitrum One. The code is
 ## How to run it
 
 ```bash
-npm install && npm test && npm run typecheck        # 310 tests, no network
+npm install && npm test && npm run typecheck        # 361 tests, no network
 git submodule update --init --recursive             # the contracts' dependencies
 cd contracts && forge test                          # read the Suite result lines; the lint noise above them is upstream
 ```
@@ -47,7 +47,7 @@ Monad testnet (chain id 10143) has no USDC yield source, so the demo runs over o
 
 Fork mode, as above, with `anvil --fork-url https://testnet-rpc.monad.xyz --port 8545` and `DEMO_FAUCET=1`; the cheat faucet and the clock warp work on the fork.
 
-Live mode, in `.env.local`: `RPC_URL=https://testnet-rpc.monad.xyz`, `PUBLIC_RPC_URL=https://testnet-rpc.monad.xyz`, `CHAIN_CONFIG=config/monad-testnet.json`, `DEPLOYMENTS=contracts/deployments/10143.json`, `DEMO_FAUCET=mint`, `DEMO_FAUCET_PRIVATE_KEY` (the demo vault owner), `KEEPER_PRIVATE_KEY`, both holding MON from `https://faucet.monad.xyz`; `AGENT_DEMO_DAYS=7` for the agent. Then:
+Live mode, in `.env.local`: `RPC_URL=https://testnet-rpc.monad.xyz`, `PUBLIC_RPC_URL=https://testnet-rpc.monad.xyz`, `CHAIN_CONFIG=config/monad-testnet.json`, `DEPLOYMENTS=contracts/deployments/10143.json`, `DEMO_FAUCET=mint`, `DEMO_FAUCET_PRIVATE_KEY` (the demo vault owner), `KEEPER_PRIVATE_KEY`, both holding MON from `https://faucet.monad.xyz`; `AGENT_DEMO_DAYS=7` for the agent. Leave `KEEPER_MIN_BALANCE_ETH` and `KEEPER_MAX_TX_COST_ETH` empty or size them for Monad's base fee of about 100 gwei: a bound carried over from the Arbitrum pilot makes the keeper refuse every report, and the walkthrough stalls at Report yield. Then:
 
 1. Deploy once, in this order (the README's deploy line, with `DEMO_OWNER` = the faucet signer's address): `forge script script/DeployDemo.s.sol ...` writes `contracts/deployments/10143-demo.json`; `TARGET_VAULT=<its target> forge script script/Deploy.s.sol ...` writes `contracts/deployments/10143.json`. The reviewed public record is `contracts/deployments/monad-testnet.json`.
 2. `npm run serve`, then `npm run demo:treasury`: its "six months pass" step moves the demo vault's clock through `POST /api/demo/warp`, and the rest runs as on a fork. To move months by hand: `curl -X POST -H "x-admin-token: $ADMIN_TOKEN" -H "Content-Type: application/json" -d '{"seconds":15768000}' http://localhost:8787/api/demo/warp`, then Report yield on the page.

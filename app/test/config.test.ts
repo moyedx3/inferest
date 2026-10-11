@@ -168,4 +168,8 @@ test("DEMO_FAUCET=mint needs the chain config's demo block and a faucet key of i
   assert.throws(() => loadConfig(env), /is not one of the chain config's targets/);
   write({ fundNative: "0.5", warpTargets: ["nope"] });
   assert.throws(() => loadConfig(env), /demo.warpTargets entry nope must be one 20-byte hex address/);
+  write({ fundNative: "0.5", warpTargets: [] });
+  assert.throws(() => loadConfig(env), /demo.warpTargets must name at least one yield source/);
+  write({ fundNative: "0.5", warpTargets: [target.toUpperCase().replace("0X", "0x")] });
+  assert.deepEqual(loadConfig(env).demoFund?.warpTargets, [target]);
 });

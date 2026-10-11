@@ -19,7 +19,7 @@ export type Config = {
   dynamicEnvironmentId?: string;
   /** Browser-facing RPC for the dashboard's wallet; never the keeper's rpcUrl. */
   publicRpcUrl?: string;
-  /** Whether POST /api/demo/fund exists (DEMO_FAUCET=1). */
+  /** Whether POST /api/demo/fund exists: true in either faucet mode. */
   demoFaucet: boolean;
   /** How POST /api/demo/fund works: "cheat" over a fork's cheat methods (DEMO_FAUCET=1), "mint" over the demo
    *  contracts of a live testnet (DEMO_FAUCET=mint). Unset means no faucet and a real chain. */
@@ -63,7 +63,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     }
     if (!/^\d+(?:\.\d{1,18})?$/.test(demo.fundNative)) throw new Error("demo.fundNative must be a nonnegative amount with at most 18 decimal places");
     const known = new Set(targets.map((t) => t.address.toLowerCase()));
-    const warpTargets = (demo.warpTargets as unknown[]).map((t) => String(t));
+    const warpTargets = (demo.warpTargets as unknown[]).map((t) => String(t).toLowerCase());
+    if (warpTargets.length === 0) throw new Error("demo.warpTargets must name at least one yield source");
     for (const t of warpTargets) {
       if (!/^0x[0-9a-f]{40}$/i.test(t)) throw new Error(`demo.warpTargets entry ${t} must be one 20-byte hex address`);
       if (!known.has(t.toLowerCase())) throw new Error(`demo.warpTargets entry ${t} is not one of the chain config's targets`);

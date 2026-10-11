@@ -54,7 +54,7 @@ async function api(path: string, body?: unknown): Promise<any> {
 async function rpc(method: string, params: unknown[]): Promise<unknown> {
   const r = await fetch(cfg.rpcUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: AbortSignal.timeout(60_000) });
   const j: any = await r.json();
-  if (j.error) throw new Error(`${method}: ${j.error.message}`);
+  if (j.error) throw Object.assign(new Error(`${method}: ${j.error.message}`), { code: j.error.code });
   return j.result;
 }
 

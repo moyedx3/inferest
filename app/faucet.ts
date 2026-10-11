@@ -62,12 +62,12 @@ export function createFaucet(d: { rpcUrl: string; usdc: string; fetchFn?: typeof
   };
 }
 
-const testUsdcAbi = parseAbi(["function mint(address to, uint256 amount)"]);
+const testUsdcAbi = parseAbi(["function mint(address to, uint256 amount)", "function balanceOf(address) view returns (uint256)"]);
 const demoVaultAbi = parseAbi(["function warp(uint256 by)"]);
 
 /**
- * Funds a wallet on a live testnet that carries the demo contracts: mints FAUCET_USDC of test USDC to it, then
- * sends it `nativeWei` of gas from the faucet signer. The same signer owns every demo yield source and moves
+ * Funds a wallet on a live testnet that carries the demo contracts: tops it up to FAUCET_USDC of test USDC and to
+ * `nativeWei` of gas from the faucet signer, minting and sending only what is missing. The same signer owns every demo yield source and moves
  * their clocks on warp(). It is never the keeper, so a faucet transaction from a public route cannot take a
  * nonce the keeper is about to use.
  */
@@ -79,7 +79,7 @@ export function createMintFaucet(d: {
     id: d.chainId, name: d.chainName, nativeCurrency: d.nativeCurrency, rpcUrls: { default: { http: [d.rpcUrl] } },
   });
   const account = privateKeyToAccount(d.signerKey);
-  const pub = createPublicClient({ chain, transport: http(d.rpcUrl) });
+  const pub = createPublicClient({ chain, transport: http(d.rpcUrl), pollingInterval: 1_000 });
   const wallet = createWalletClient({ chain, account, transport: http(d.rpcUrl) });
   const mined = async (hash: Hex): Promise<string> => {
     const receipt = await pub.waitForTransactionReceipt({ hash });
@@ -96,13 +96,21 @@ export function createMintFaucet(d: {
   return {
     fund: (address) => serial(async () => {
       const to = address as Hex;
+      // a top-up, like the fork's cheat faucet: a wallet already at the gift gets nothing, so a second click costs nothing
+      const [heldUsdc, heldNative] = await Promise.all([
+        pub.readContract({ address: d.usdc, abi: testUsdcAbi, functionName: "balanceOf", args: [to] }),
+        pub.getBalance({ address: to }),
+      ]);
+      const usdc = heldUsdc < FAUCET_USDC ? FAUCET_USDC - heldUsdc : 0n;
+      const native = heldNative < d.nativeWei ? d.nativeWei - heldNative : 0n;
+      if (usdc === 0n && native === 0n) return { native, usdc };
       const balance = await pub.getBalance({ address: account.address });
       if (balance < d.nativeWei * 2n) {
         throw new FaucetDry(`the faucet signer ${account.address} holds too little ${d.nativeCurrency.symbol} to fund a wallet`);
       }
-      await mined(await wallet.writeContract({ address: d.usdc, abi: testUsdcAbi, functionName: "mint", args: [to, FAUCET_USDC] }));
-      if (d.nativeWei > 0n) await mined(await wallet.sendTransaction({ to, value: d.nativeWei }));
-      return { native: d.nativeWei, usdc: FAUCET_USDC };
+      if (usdc > 0n) await mined(await wallet.writeContract({ address: d.usdc, abi: testUsdcAbi, functionName: "mint", args: [to, usdc] }));
+      if (native > 0n) await mined(await wallet.sendTransaction({ to, value: native }));
+      return { native, usdc };
     }),
     warp: (seconds) => serial(async () => {
       if (!(seconds > 0n && seconds <= MAX_WARP_SECONDS)) throw new Error("warp must be between one second and ten years");

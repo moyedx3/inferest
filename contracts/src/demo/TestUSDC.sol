@@ -5,8 +5,8 @@ import { ERC20 } from "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 
 /// @title TestUSDC
 /// @notice Test money for a testnet that has no USDC yield source: six decimals like USDC, and anyone can mint up
-///         to MAX_MINT per call. The cap keeps one caller from minting enough to overflow the demo vault's accrual
-///         arithmetic. Never deployed where real money is.
+///         to MAX_MINT per call. The cap bounds what one call can mint; the demo vault mints its own shortfall in
+///         chunks under it. Never deployed where real money is.
 contract TestUSDC is ERC20 {
     uint256 public constant MAX_MINT = 1_000_000e6;
 
