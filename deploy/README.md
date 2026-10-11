@@ -9,10 +9,8 @@ Install Docker with Compose v2. Prepare an Arbitrum fork or virtual testnet and
 its Inferest contracts using the [deployment workflow](../docs/06-workflow.md).
 Compose does not start Anvil or deploy contracts. The default deployment record
 is `contracts/deployments/42161.json`, with `config/arbitrum-one.json` as its config.
-For Monad testnet, set `CHAIN_CONFIG_FILE=./config/monad-testnet.json` and
-`DEPLOYMENTS_FILE=./contracts/deployments/10143.json`, and in `.env.server` set
-`DEMO_FAUCET=mint` with `DEMO_FAUCET_PRIVATE_KEY` (the demo vault owner, a funded
-wallet of its own); the status page has the full recipe.
+A Monad demo runs as a second instance beside it on a fork of Monad mainnet; see
+[the section below](#a-second-instance-on-a-monad-fork).
 
 From the repository root:
 
@@ -69,7 +67,100 @@ On Linux, Anvil must listen on an interface reachable from Docker, for example
 with `--host 0.0.0.0`; restrict access with the host firewall. For a virtual testnet,
 use its operator RPC in `RPC_URL` and a browser-safe endpoint in `PUBLIC_RPC_URL`.
 Keep `DEMO_FAUCET=0` and `AGENT_DEMO_DAYS=0` unless using a verified disposable
-fork. Chain ID 42161 alone does not distinguish a fork from Arbitrum mainnet.
+fork, such as the Monad fork below. Chain ID 42161 alone does not distinguish a
+fork from Arbitrum mainnet, and chain ID 143 alone does not distinguish one from Monad.
+
+## A second instance on a Monad fork
+
+One host can run the Arbitrum instance and a Monad demo side by side. Each
+instance is its own Compose project with its own database volume, env file,
+image tag, port and hostname; they share only the checkout. The Monad instance
+runs on a Tenderly Virtual TestNet that forks Monad mainnet with chain id 143
+kept: the yield source is Aave's static USDC wrapper itself, the fork's cheat
+methods are the faucet and the clock, and nothing on it is real value.
+`config/monad.json` is the chain config; `contracts/deployments/monad-fork.json`
+records the Inferest contracts on that fork, the fork itself, and the keeper
+under `initialRoles`. The status page's Monad section has the fork's facts.
+
+```sh
+cp deploy/monad-fork.env.example .env.monad
+chmod 600 .env.monad
+```
+
+Fill in the fork's admin RPC as `RPC_URL` (from the Tenderly dashboard; it is a
+credential, because it accepts the cheat methods), the keeper key that matches
+the record (from the founder), the instance's public origin as `PUBLIC_URL`, and
+fresh `ADMIN_TOKEN` and `KEY_ENCRYPTION_KEY` values. Never reuse another
+instance's encryption key or admin token. `DEMO_FAUCET=1` serves "Get demo
+funds" through the cheat methods, so no faucet wallet exists; give the keeper
+its gas the same way, here 10 MON:
+
+```sh
+cast rpc tenderly_setBalance '["<keeper address>"]' 0x8ac7230489e80000 --rpc-url "$RPC_URL"
+```
+
+Leave the keeper bounds empty. The provider and the paid tools cost real money
+on this instance too, so keep `OPENROUTER_TOTAL_LIMIT_USD` small; the cap counts
+only this instance's own keys, and two instances on one management key add up.
+
+Put the project's settings in the shell for every `docker compose` command on
+it; without them the defaults address the Arbitrum project. The image gets its
+own tag so the running Arbitrum containers keep theirs.
+
+```sh
+export COMPOSE_PROJECT_NAME=inferest-monad INFEREST_IMAGE=inferest:monad SERVER_PORT=8788
+export SERVER_ENV_FILE=$PWD/.env.monad CHAIN_CONFIG_FILE=$PWD/config/monad.json
+export DEPLOYMENTS_FILE=$PWD/contracts/deployments/monad-fork.json
+NODE_VERSION=$(cat .node-version) docker compose build server
+docker compose config --quiet
+docker compose up --detach --wait server
+```
+
+SQLite lives in the `inferest-monad_data` volume; back it up as in
+[Data and backups](#data-and-backups) with the same settings in the shell and
+a directory of its own, such as `backup-monad`.
+
+Give the instance its own hostname at the reverse proxy and point it at the
+port, for example in a Caddyfile:
+
+```
+monad.example.com {
+    reverse_proxy 127.0.0.1:8788
+}
+```
+
+`PUBLIC_URL` must be that origin, and the Dynamic environment's allowed origins
+must include it, or the sign-in card fails its origin check; the same
+environment id can serve several origins. The dashboard adds the fork to
+Dynamic's network list from `PUBLIC_RPC_URL` by itself, with the network pill
+reading `Monad · demo chain`; embedded wallets use the fork. A visitor's own
+wallet on chain 143 has to point at the public RPC as well, or its transactions
+go to Monad mainnet, as the walkthrough warns. No explorer is configured: the
+free Tenderly plan has no public explorer page, so the pages show no
+transaction links, and project members read transactions in the Tenderly
+dashboard. A wallet's first "Get demo funds" click gives it 1 MON and
+100,000 USDC. To move the clock by hand, six months here, then Report yield on
+the page:
+
+```sh
+cast rpc evm_increaseTime 0xf09a80 --rpc-url "$RPC_URL"
+cast rpc evm_mine --rpc-url "$RPC_URL"
+```
+
+If the fork is gone, make a new Virtual TestNet of Monad in the Tenderly
+dashboard with chain id 143 and state sync off, deploy with the root README's
+deploy line against its admin RPC with
+`TARGET_VAULT=0xC554aFfE2f581F5E0811e0D42D484ECaC5c6B8e2` and a keeper of your
+own, then replace `contracts/deployments/monad-fork.json` (`Deploy.s.sol`
+writes `143.json`; copy its addresses in) and the keeper key in `.env.monad`.
+
+For the agent profile on this instance, copy `deploy/agent.env.example` to
+`.env.monad-agent` with the admin RPC as `RPC_URL` (the runner moves the clock
+through it), this instance's `ADMIN_TOKEN`, a fresh wallet and
+`AGENT_DEMO_DAYS=7`, then run the agent commands from
+[Optional agent](#optional-agent) with `AGENT_ENV_FILE=$PWD/.env.monad-agent`
+beside the settings above. The agent's first start funds its wallet through the
+faucet route, and each run moves the clock a week before it reports.
 
 ## Optional agent
 

@@ -1,0 +1,39 @@
+{
+  "network": "monad-fork",
+  "environment": "tenderly-virtual-testnet",
+  "chainId": 143,
+  "forkOf": {
+    "name": "Monad",
+    "chainId": 143,
+    "blockNumber": "0x6b44263"
+  },
+  "virtualTestnetId": "d0ac9f1a-1765-4211-ac35-6f304485a6ac",
+  "deployedAt": "2026-10-11",
+  "implementation": "0xBEE610077885DA5F0623B97ca4476C316F48a24f",
+  "splitter": "0x65bdb46a3b15caD0847b1e18dabF75F00233b570",
+  "factory": "0xF3061d6f65b18bE47992d032891c73dd7D29225a",
+  "target": "0xC554aFfE2f581F5E0811e0D42D484ECaC5c6B8e2",
+  "targets": [
+    "0xC554aFfE2f581F5E0811e0D42D484ECaC5c6B8e2"
+  ],
+  "asset": "0x754704Bc059F8C67012fEd69BC8A327a5aafb603",
+  "targetName": "Aave USDC (static), the real Aave V3 wrapper on Monad",
+  "sourceCommit": "3a4240ef54d707517006f0a5839de09e31ac95d7",
+  "compiler": {
+    "version": "0.8.33+commit.64118f21",
+    "optimizer": {
+      "enabled": true,
+      "runs": 200
+    },
+    "evmVersion": "cancun"
+  },
+  "initialRoles": {
+    "owner": "0x9372931ECe90443aD0DFa19784617a83f4E4313e",
+    "keeper": "0x9372931ECe90443aD0DFa19784617a83f4E4313e",
+    "emergencyAdmin": "0x9372931ECe90443aD0DFa19784617a83f4E4313e",
+    "floatAddress": "0x9372931ECe90443aD0DFa19784617a83f4E4313e",
+    "feeAddress": "0x9372931ECe90443aD0DFa19784617a83f4E4313e"
+  },
+  "initialFeeBps": 1000,
+  "note": "A private Tenderly Virtual TestNet forking Monad mainnet: test money only, never real value. Recreating the fork means redeploying and replacing this record."
+}

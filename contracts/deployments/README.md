@@ -20,6 +20,16 @@ The three Inferest contracts have Sourcify creation and runtime verification
 results of `match`; their verification links are in the JSON. These results do
 not constitute a security audit. This deployment is a limited mainnet pilot.
 
+## Monad fork
+
+[`monad-fork.json`](monad-fork.json) records the Inferest contracts deployed on
+2026-10-11 to a Tenderly Virtual TestNet that forks Monad mainnet (chain ID `143`,
+kept), over Aave's static USDC wrapper. It is a private fork with test money only.
+The record names the fork, its block and its keeper so a host can run the demo
+against it, and is replaced when the fork is recreated and the contracts
+redeployed. `Deploy.s.sol` writes `143.json` during execution; that file stays
+ignored.
+
 ## Generated files
 
 [`../script/Deploy.s.sol`](../script/Deploy.s.sol) writes `<chainId>.json`, including
