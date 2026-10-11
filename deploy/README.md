@@ -139,7 +139,13 @@ go to Monad mainnet, as the walkthrough warns. No explorer is configured: the
 free Tenderly plan has no public explorer page, so the pages show no
 transaction links, and project members read transactions in the Tenderly
 dashboard. A wallet's first "Get demo funds" click gives it 1 MON and
-100,000 USDC. To move the clock by hand, six months here, then Report yield on
+100,000 USDC.
+
+To let a visitor switch between the two instances, set `CHAIN_SITES` to the
+same list in both server env files, this instance included, for example
+`CHAIN_SITES=Arbitrum One|https://inferest.example.com,Monad|https://monad.example.com`.
+The network chip in the top bar then becomes a picker that opens the same page
+on the chosen instance. Recreate both containers after the change. To move the clock by hand, six months here, then Report yield on
 the page:
 
 ```sh

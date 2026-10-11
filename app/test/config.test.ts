@@ -173,3 +173,22 @@ test("DEMO_FAUCET=mint needs the chain config's demo block and a faucet key of i
   write({ fundNative: "0.5", warpTargets: [target.toUpperCase().replace("0X", "0x")] });
   assert.deepEqual(loadConfig(env).demoFund?.warpTargets, [target]);
 });
+
+test("CHAIN_SITES lists the instances a visitor can switch to, without trailing slashes", () => {
+  const cfg = loadConfig({ ...envFor(42161, 42161), CHAIN_SITES: "Arbitrum One|https://a.example/, Monad|https://m.example" });
+  assert.deepEqual(cfg.sites, [{ name: "Arbitrum One", url: "https://a.example" }, { name: "Monad", url: "https://m.example" }]);
+});
+
+test("CHAIN_SITES is an empty list when unset or blank", () => {
+  assert.deepEqual(loadConfig(envFor(42161, 42161)).sites, []);
+  assert.deepEqual(loadConfig({ ...envFor(42161, 42161), CHAIN_SITES: "  " }).sites, []);
+});
+
+test("CHAIN_SITES rejects an entry without a url", () => {
+  assert.throws(() => loadConfig({ ...envFor(42161, 42161), CHAIN_SITES: "Monad" }), /CHAIN_SITES entry Monad must be name\|url/);
+});
+
+test("CHAIN_SITES rejects an empty name and a url that is not http", () => {
+  assert.throws(() => loadConfig({ ...envFor(42161, 42161), CHAIN_SITES: "|https://m.example" }), /names must not be empty/);
+  assert.throws(() => loadConfig({ ...envFor(42161, 42161), CHAIN_SITES: "Monad|ftp://m.example" }), /must start with http/);
+});

@@ -1,5 +1,6 @@
 import { parseAbi, parseEventLogs, parseUnits, formatUnits } from "https://esm.sh/viem@2.56.9";
 import { snippets, NOTES } from "/snippets.js";
+import { renderNetwork } from "/network.js";
 
 const factoryAbi = parseAbi([
   "function createVault(address target, string name, string symbol) returns (address)",
@@ -95,7 +96,7 @@ async function loadConfig() {
   show("stepfunds", Boolean(cfg.demoFaucet));
   document.querySelectorAll(".steps > .step:not(#stepfunds) .num").forEach((n, i) => { n.textContent = i + (cfg.demoFaucet ? 2 : 1); });
   $("amount").defaultValue = cfg.demoFaucet ? "100000" : "";
-  $("network").textContent = `${cfg.chainName ?? `chain ${cfg.chainId}`}${cfg.demoFaucet ? " · demo chain" : ""}`;
+  renderNetwork($("network"), cfg);
   $("contracts").innerHTML = [["Factory", cfg.factory], ["Splitter", cfg.splitter], ["USDC", cfg.usdc]]
     .filter(([, a]) => a).map(([k, a]) => `<span>${k}<b>${esc(short(a))}</b></span>`).join(" ");
 }

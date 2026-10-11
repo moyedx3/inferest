@@ -2,6 +2,7 @@
 // It never reads a wallet or the chain. It does not import app.js, which carries the Dynamic session code.
 import { snippets } from "/snippets.js";
 import { runsText } from "./runs-text.js";
+import { renderNetwork } from "./network.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -47,7 +48,7 @@ async function loadExplorer() {
     if (!r.ok) return;
     const cfg = (await r.json()).config ?? {};
     explorer = cfg.explorer ?? null;
-    $("network").textContent = `${cfg.chainName ?? `chain ${cfg.chainId}`}${cfg.demoFaucet ? " · demo chain" : ""}`;
+    renderNetwork($("network"), cfg);
   } catch { /* links fall back to plain hashes */ }
 }
 const txLink = (tx, label = `${short(tx)} ↗`) => (!tx ? "" : explorer
