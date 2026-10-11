@@ -112,7 +112,7 @@ Smallest fix: make `report` and `settle` operator-only unless `DEMO_FAUCET=1`, o
 
 Evidence: `agent/run.ts:28-30` and `agent/run.ts:41` (no `chainCfg.chainId === dep.chainId` check, while the server has one at `app/config.ts:31`), `agent/run.ts:96` (the fork mode depends only on `AGENT_DEMO_DAYS`).
 
-Scenario: `AGENT_DEMO_DAYS=7` copied into a real-chain env. With an empty wallet the faucet's last method is refused and the agent stops (`app/faucet.ts:33-35`), which is safe. With a funded wallet every run logs "clock not advanced" and nothing else happens. viem's `writeContract` checks the RPC's chain against `dep.chainId` before signing, so a wrong RPC fails closed. Also, `contracts/deployments/42161.json` was untracked at the time (only `.gitkeep` is tracked), so the real deployment record existed only in the reviewer's working tree; it is now git-ignored on purpose.
+Scenario: `AGENT_DEMO_DAYS=7` copied into a real-chain env. With an empty wallet the server's faucet route answers 404 on a real chain and the agent stops (`agent/run.ts`, first start), which is safe. With a funded wallet every run logs "clock not advanced" and nothing else happens. viem's `writeContract` checks the RPC's chain against `dep.chainId` before signing, so a wrong RPC fails closed. Also, `contracts/deployments/42161.json` was untracked at the time (only `.gitkeep` is tracked), so the real deployment record existed only in the reviewer's working tree; it is now git-ignored on purpose.
 
 Smallest fix: copy the server's chain-id check. Refuse `AGENT_DEMO_DAYS > 0` when `eth_chainId` matches a real chain and `anvil_nodeInfo` or `tenderly_*` is unavailable. Add the real-chain deployment file with `git add -f`.
 
