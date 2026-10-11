@@ -163,9 +163,6 @@ test("warp refuses zero, negative and more than ten years without a transaction"
   assert.equal(sent.length, 0);
 });
 
-test("the cheat faucet has no warp: a fork moves its own clock", () => {
-  assert.equal(createFaucet({ rpcUrl: "http://rpc", usdc: USDC }).warp, undefined);
-});
 
 test("overlapping faucet calls are serialized so one signer never races for a nonce", async (t) => {
   const { decoded } = node(t);
@@ -188,4 +185,17 @@ test("the mint faucet tops up only what is missing", async (t) => {
   const [mint, gas] = decoded();
   assert.equal(decodeFunctionData({ abi: mintAbi, data: mint.data! }).args![1], 60_000_000_000n);
   assert.equal(gas.value, NATIVE / 2n);
+});
+
+test("moves a fork's clock with evm_increaseTime then a block, returning the hashes the node reports", async () => {
+  const calls: { method: string; params: unknown[] }[] = [];
+  const fn = (async (_url: string, init: RequestInit) => {
+    const { method, params, id } = JSON.parse(String(init.body));
+    calls.push({ method, params });
+    const result = method === "evm_increaseTime" ? `0x${"ab".repeat(32)}` : null;
+    return new Response(JSON.stringify({ jsonrpc: "2.0", id, result }), { status: 200 });
+  }) as unknown as typeof fetch;
+  const txs = await createFaucet({ rpcUrl: "http://rpc", usdc: USDC, fetchFn: fn }).warp!(15_768_000n);
+  assert.deepEqual(calls.map((c) => [c.method, c.params]), [["evm_increaseTime", ["0xf099c0"]], ["evm_mine", []]]);
+  assert.deepEqual(txs, [`0x${"ab".repeat(32)}`]);
 });
