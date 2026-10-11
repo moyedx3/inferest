@@ -94,6 +94,7 @@ async function api(path, body) {
 async function loadConfig() {
   cfg = (await api("/api/state")).config;
   show("stepfunds", Boolean(cfg.demoFaucet));
+  show("warp", Boolean(cfg.demoFaucet));
   document.querySelectorAll(".steps > .step:not(#stepfunds) .num").forEach((n, i) => { n.textContent = i + (cfg.demoFaucet ? 2 : 1); });
   $("amount").defaultValue = cfg.demoFaucet ? "100000" : "";
   renderNetwork($("network"), cfg);
@@ -328,6 +329,18 @@ $("report").onclick = async () => {
     const v = currentVault();
     activity({ icon: "↻", title: "Yield reported", detail: v ? `${usd(v.yieldUsd)} in the Splitter` : "" });
   } catch (e) { fail("Report failed")(e); }
+};
+$("warp").onclick = async () => {
+  if (!syncSession()) return;
+  $("warp").disabled = true;
+  try {
+    await api("/api/demo/warp", { seconds: 15_768_000 });
+    activity({ icon: "⏭", title: "Six months passed", detail: "the demo chain's clock moved forward" });
+    await api("/api/admin/report", scope());
+    await render();
+    const v = currentVault();
+    activity({ icon: "↻", title: "Yield reported", detail: v ? `${usd(v.yieldUsd)} in the Splitter` : "" });
+  } catch (e) { fail("Six months pass failed")(e); } finally { $("warp").disabled = false; }
 };
 $("settle").onclick = async () => {
   const v = currentVault();

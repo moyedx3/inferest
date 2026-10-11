@@ -147,7 +147,8 @@ same list in both server env files, this instance included, for example
 The network chip in the top bar then becomes a picker that opens the same page
 on the chosen instance. Recreate both containers after the change.
 
-To move the clock by hand, six months here, then Report yield on the page:
+A signed-in visitor moves the clock six months with the Treasury page's "Six months
+pass" button, which reports the yield as well. By hand, with the admin RPC:
 
 ```sh
 cast rpc evm_increaseTime 0xf099c0 --rpc-url "$RPC_URL"

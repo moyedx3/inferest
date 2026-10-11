@@ -7,9 +7,12 @@ export const FAUCET_USDC = 100_000_000_000n;
 
 export type Faucet = {
   fund(address: string): Promise<{ native: bigint; usdc: bigint }>;
-  /** Moves the demo yield sources' clocks forward by `seconds` and returns the transaction hashes. Absent on a
-   *  fork, where the chain's own clock moves through evm_increaseTime. */
+  /** Moves the demo clock forward by `seconds`: the chain's own clock on a fork, the demo yield sources' clocks on a
+   *  live testnet. Returns the transaction hashes the node reported. */
   warp?(seconds: bigint): Promise<string[]>;
+  /** True when warp moves a fork's own clock at no cost; the server then lets any signed-in visitor call it. A live
+   *  testnet's warp spends the faucet signer's gas, so it stays with the operator. */
+  forkClock?: boolean;
 };
 
 /** The faucet signer cannot cover a fund. The route answers 503 with this message instead of a stack trace. */
@@ -21,7 +24,8 @@ export const MAX_WARP_SECONDS = 10n * 365n * 86_400n;
 /**
  * Funds a wallet on a forked chain through the node's cheat methods, trying Tenderly's names first and anvil's
  * after. Native USDC (FiatToken v2.2) defeats anvil's slot search, so the last resort writes the balance mapping
- * at slot 9 directly. Useless on a real chain by construction: every method is refused there.
+ * at slot 9 directly, and moves the fork's clock with evm_increaseTime. Useless on a real chain by construction:
+ * every method is refused there.
  */
 export function createFaucet(d: { rpcUrl: string; usdc: string; fetchFn?: typeof fetch; rpcTimeoutMs?: number }): Faucet {
   const fetchFn = d.fetchFn ?? fetch;
@@ -48,6 +52,7 @@ export function createFaucet(d: { rpcUrl: string; usdc: string; fetchFn?: typeof
   }
 
   return {
+    forkClock: true,
     async fund(address) {
       const to = address as Hex;
       await cheat([["tenderly_setBalance", [[to], toHex(FAUCET_NATIVE)]], ["anvil_setBalance", [to, toHex(FAUCET_NATIVE)]]]);
@@ -58,6 +63,10 @@ export function createFaucet(d: { rpcUrl: string; usdc: string; fetchFn?: typeof
         ["anvil_setStorageAt", [d.usdc, keccak256(encodeAbiParameters([{ type: "address" }, { type: "uint256" }], [to, 9n])), pad(toHex(FAUCET_USDC))]],
       ]);
       return { native: FAUCET_NATIVE, usdc: FAUCET_USDC };
+    },
+    async warp(seconds) {
+      const results = [await rpc("evm_increaseTime", [toHex(seconds)]), await rpc("evm_mine", [])];
+      return results.filter((r): r is string => typeof r === "string" && /^0x[0-9a-f]{64}$/i.test(r));
     },
   };
 }

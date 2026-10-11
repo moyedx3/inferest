@@ -318,13 +318,13 @@ async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse, cool
     }
     if (url.pathname === "/api/demo/warp") {
       if (!d.faucet?.warp) return send(res, 404, { error: "not found" });
-      if (caller.kind !== "operator") return send(res, 403, { error: "operator only" });
+      if (caller.kind !== "operator" && !d.faucet.forkClock) return send(res, 403, { error: "operator only" });
       const seconds = typeof body.seconds === "number" ? body.seconds : NaN;
       if (!Number.isInteger(seconds) || seconds < 1 || BigInt(seconds) > MAX_WARP_SECONDS) {
         return send(res, 400, { error: "seconds must be a whole number between 1 and ten years" });
       }
       const txs = await d.faucet.warp(BigInt(seconds));
-      d.keeper.log(`demo clock moved ${seconds} seconds in ${txs.length} transactions`);
+      d.keeper.log(`demo clock moved ${seconds} seconds in ${txs.length} transactions by ${caller.kind === "session" ? `session ${caller.session.userId}` : "the operator"}`);
       return send(res, 200, { ok: true, seconds, txs });
     }
     if (url.pathname === "/api/admin/sync" || url.pathname === "/api/admin/report") {
