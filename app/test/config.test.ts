@@ -192,3 +192,10 @@ test("CHAIN_SITES rejects an empty name and a url that is not http", () => {
   assert.throws(() => loadConfig({ ...envFor(42161, 42161), CHAIN_SITES: "|https://m.example" }), /names must not be empty/);
   assert.throws(() => loadConfig({ ...envFor(42161, 42161), CHAIN_SITES: "Monad|ftp://m.example" }), /must start with http/);
 });
+
+test("CHAIN_SITES skips empty entries and rejects a url with a query, a fragment or a pipe", () => {
+  assert.deepEqual(loadConfig({ ...envFor(42161, 42161), CHAIN_SITES: "Monad|https://m.example,," }).sites, [{ name: "Monad", url: "https://m.example" }]);
+  for (const bad of ["Monad|https://m.example/?x=1", "Monad|https://m.example/#top", "Monad|https://m.example|extra"]) {
+    assert.throws(() => loadConfig({ ...envFor(42161, 42161), CHAIN_SITES: bad }), /must not hold a query, a fragment, a pipe or spaces/);
+  }
+});

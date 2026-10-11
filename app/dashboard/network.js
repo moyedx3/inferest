@@ -9,13 +9,13 @@ export function renderNetwork(el, cfg) {
     el.textContent = label;
     return;
   }
-  const here = String(cfg.publicUrl ?? "").replace(/\/+$/, "");
+  const here = String(cfg.publicUrl ?? "").replace(/\/+$/, "").toLowerCase();
   const select = document.createElement("select");
   select.setAttribute("aria-label", "Chain");
   let found = false;
   for (const site of sites) {
     const option = document.createElement("option");
-    const isHere = site.url === here;
+    const isHere = site.url.toLowerCase() === here;
     option.value = site.url;
     option.textContent = isHere ? label : site.name;
     option.selected = isHere;
@@ -30,7 +30,7 @@ export function renderNetwork(el, cfg) {
     select.prepend(option);
   }
   select.addEventListener("change", () => {
-    if (select.value) location.assign(select.value + location.pathname + location.search);
+    if (select.value) location.assign(select.value + location.pathname + location.search + location.hash);
   });
   el.replaceChildren(select);
 }

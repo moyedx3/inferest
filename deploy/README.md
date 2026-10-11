@@ -145,8 +145,9 @@ To let a visitor switch between the two instances, set `CHAIN_SITES` to the
 same list in both server env files, this instance included, for example
 `CHAIN_SITES=Arbitrum One|https://inferest.example.com,Monad|https://monad.example.com`.
 The network chip in the top bar then becomes a picker that opens the same page
-on the chosen instance. Recreate both containers after the change. To move the clock by hand, six months here, then Report yield on
-the page:
+on the chosen instance. Recreate both containers after the change.
+
+To move the clock by hand, six months here, then Report yield on the page:
 
 ```sh
 cast rpc evm_increaseTime 0xf099c0 --rpc-url "$RPC_URL"

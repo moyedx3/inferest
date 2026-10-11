@@ -35,16 +35,17 @@ export type Config = {
   sites: { name: string; url: string }[];
 };
 
-/** Parses CHAIN_SITES: comma-separated `name|url` pairs, each url http(s) without a trailing slash. */
+/** Parses CHAIN_SITES: comma-separated `name|url` pairs (so a name cannot hold a comma), each url http(s) with no query, fragment or trailing slash; empty entries are skipped. */
 export function parseSites(raw: string | undefined): { name: string; url: string }[] {
   if (!raw?.trim()) return [];
-  return raw.split(",").map((entry) => {
+  return raw.split(",").filter((entry) => entry.trim()).map((entry) => {
     const at = entry.indexOf("|");
     if (at < 0) throw new Error(`CHAIN_SITES entry ${entry.trim()} must be name|url`);
     const name = entry.slice(0, at).trim();
     const url = entry.slice(at + 1).trim().replace(/\/+$/, "");
     if (!name) throw new Error("CHAIN_SITES names must not be empty");
     if (!/^https?:\/\/[^\s/]+/i.test(url)) throw new Error(`CHAIN_SITES url ${url} must start with http:// or https://`);
+    if (/[?#|\s]/.test(url)) throw new Error(`CHAIN_SITES url ${url} must not hold a query, a fragment, a pipe or spaces`);
     return { name, url };
   });
 }
