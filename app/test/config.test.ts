@@ -127,3 +127,49 @@ test("keeper ETH bounds parse exactly to wei and reject invalid or excessive pre
     }
   }
 });
+
+test("DEMO_FAUCET=1 keeps the fork's cheat faucet and needs nothing else", () => {
+  const cfg = loadConfig({ ...envFor(42161, 42161), DEMO_FAUCET: "1" });
+  assert.equal(cfg.demoFaucet, true);
+  assert.equal(cfg.faucetMode, "cheat");
+  assert.equal(cfg.faucetKey, undefined);
+  assert.equal(cfg.demoFund, undefined);
+  assert.equal(loadConfig(envFor(42161, 42161)).faucetMode, undefined);
+});
+
+test("DEMO_FAUCET=mint needs the chain config's demo block and a faucet key of its own", () => {
+  const dir = mkdtempSync(join(tmpdir(), "inferest-config-"));
+  const chainPath = join(dir, "chain.json");
+  const depPath = join(dir, "deployments.json");
+  const target = "0x" + "02".repeat(20);
+  const faucetKey = "0x" + "07".repeat(32); // synthetic, never funded
+  const write = (demo: unknown) => writeFileSync(chainPath, JSON.stringify({
+    chainId: 10143, usdc: "0x01", target, targets: [{ address: target, name: "Demo" }], demo,
+  }));
+  writeFileSync(depPath, JSON.stringify({ chainId: 10143, target, targets: [target], factory: "0x03", splitter: "0x04" }));
+  const env = { ...envFor(10143, 10143), CHAIN_CONFIG: chainPath, DEPLOYMENTS: depPath, DEMO_FAUCET: "mint", DEMO_FAUCET_PRIVATE_KEY: faucetKey };
+
+  write(undefined);
+  assert.throws(() => loadConfig(env), /DEMO_FAUCET=mint needs demo.fundNative and demo.warpTargets in the chain config/);
+
+  write({ fundNative: "0.5", warpTargets: [target] });
+  const cfg = loadConfig(env);
+  assert.equal(cfg.demoFaucet, true);
+  assert.equal(cfg.faucetMode, "mint");
+  assert.equal(cfg.faucetKey, faucetKey);
+  assert.deepEqual(cfg.demoFund, { nativeWei: 500_000_000_000_000_000n, warpTargets: [target] });
+  assert.throws(() => loadConfig({ ...env, DEMO_FAUCET_PRIVATE_KEY: "" }), /missing env DEMO_FAUCET_PRIVATE_KEY/);
+  assert.throws(() => loadConfig({ ...env, DEMO_FAUCET_PRIVATE_KEY: "0x05" }), /DEMO_FAUCET_PRIVATE_KEY must be 32 bytes/);
+  assert.throws(() => loadConfig({ ...env, KEEPER_PRIVATE_KEY: faucetKey }), /DEMO_FAUCET_PRIVATE_KEY must not be the keeper's key/);
+
+  write({ fundNative: "abc", warpTargets: [target] });
+  assert.throws(() => loadConfig(env), /demo.fundNative must be a nonnegative amount/);
+  write({ fundNative: "0.5", warpTargets: ["0x" + "09".repeat(20)] });
+  assert.throws(() => loadConfig(env), /is not one of the chain config's targets/);
+  write({ fundNative: "0.5", warpTargets: ["nope"] });
+  assert.throws(() => loadConfig(env), /demo.warpTargets entry nope must be one 20-byte hex address/);
+  write({ fundNative: "0.5", warpTargets: [] });
+  assert.throws(() => loadConfig(env), /demo.warpTargets must name at least one yield source/);
+  write({ fundNative: "0.5", warpTargets: [target.toUpperCase().replace("0X", "0x")] });
+  assert.deepEqual(loadConfig(env).demoFund?.warpTargets, [target]);
+});

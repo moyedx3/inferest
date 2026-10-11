@@ -1,4 +1,4 @@
-import { createWalletClient, http, toHex, type Hex } from "viem";
+import { createWalletClient, http, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
@@ -9,7 +9,7 @@ import { rateFrom } from "./rate.ts";
 import { applyFence } from "./fence.ts";
 import { think, type Mcp, type PromptBook } from "./think.ts";
 import { planActions, act, errorText, sendTx, usdcAbi, vaultAbi, type ActDeps, type LoggedAction, type Step } from "./act.ts";
-import { createFaucet } from "../app/faucet.ts";
+import { moveClock } from "../app/demo-clock.ts";
 
 // an empty value in an env file counts as unset, so `AGENT_MODEL=` falls back like a missing line
 const env = (k: string, fallback?: string): string => { const v = process.env[k] || fallback; if (v === undefined) throw new Error(`missing env ${k}`); return v; };
@@ -54,7 +54,7 @@ async function api(path: string, body?: unknown): Promise<any> {
 async function rpc(method: string, params: unknown[]): Promise<unknown> {
   const r = await fetch(cfg.rpcUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: AbortSignal.timeout(60_000) });
   const j: any = await r.json();
-  if (j.error) throw new Error(`${method}: ${j.error.message}`);
+  if (j.error) throw Object.assign(new Error(`${method}: ${j.error.message}`), { code: j.error.code });
   return j.result;
 }
 
@@ -92,9 +92,10 @@ async function ensureRegistered(): Promise<void> {
   }
   if (vault) { await act([{ kind: "rekey" }], deps(null)); return; }
   const book = BigInt(Math.round(cfg.bookUsdc * 1e6));
-  // only a wallet the faucet funded in this start is trimmed: a pre-funded wallet, or any real chain, is never touched
+  // only a wallet the faucet funded in this start is trimmed: a pre-funded wallet is never touched, and on a real
+  // chain the server has no faucet route, so this call fails and the runner stops
   if (cfg.demoDays > 0 && (await usdcBalance()) === 0n) {
-    await createFaucet({ rpcUrl: cfg.rpcUrl, usdc }).fund(address);
+    await api("/api/demo/fund", { address });
     // the faucet gives far more than the book; burn the surplus so the wallet holds exactly what the prompt describes
     const surplus = (await usdcBalance()) - book;
     if (surplus > 0n) {
@@ -112,14 +113,14 @@ async function ensureRegistered(): Promise<void> {
 }
 
 /**
- * On a fork or a Tenderly testnet, moves the chain clock so yield accrues between runs, then has the server read it.
- * True only when this process moved the clock.
+ * On a fork or a Tenderly testnet, moves the chain clock so yield accrues between runs; on a live testnet with the
+ * demo contracts, moves the demo yield sources' clocks through the server instead. Then has the server read it.
+ * True only when this process moved a clock.
  */
 async function advanceClock(): Promise<boolean> {
   if (cfg.demoDays <= 0) return false;
   try {
-    await rpc("evm_increaseTime", [toHex(Math.round(cfg.demoDays * 86_400))]);
-    await rpc("evm_mine", []);
+    await moveClock({ rpc, api, seconds: Math.round(cfg.demoDays * 86_400) });
   } catch (e) {
     console.log(`clock not advanced: ${errorOf(e)}`);
     return false;

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
-import { createPublicClient, createWalletClient, defineChain, http, parseAbi, parseEventLogs, toHex, type Hex } from "viem";
+import { createPublicClient, createWalletClient, defineChain, http, parseAbi, parseEventLogs, type Hex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { createFaucet } from "../app/faucet.ts";
+import { moveClock } from "../app/demo-clock.ts";
 
 export const env = (k: string): string => {
   const v = process.env[k];
@@ -22,11 +22,11 @@ async function rpc(method: string, params: unknown[]): Promise<unknown> {
   if (j.error) throw Object.assign(new Error(`${method}: ${j.error.message}`), { code: j.error.code });
   return j.result;
 }
-export const warp = async (seconds: number) => { await rpc("evm_increaseTime", [toHex(seconds)]); await rpc("evm_mine", []); };
+/** Moves the demo clock: the fork's own, or the demo yield sources' through the server on a live testnet. */
+export const warp = async (seconds: number) => { await moveClock({ rpc, api, seconds }); };
 
-const faucet = createFaucet({ rpcUrl: RPC, usdc: chainCfg.usdc });
-/** Gas plus 100,000 USDC from the fork's cheat methods, the same code the dashboard's faucet route runs. */
-export const fundDemoWallet = async (to: string) => { await faucet.fund(to); };
+/** Gas plus 100,000 USDC through the server's faucet route: a fork's cheat methods, or minted test money on a live testnet. */
+export const fundDemoWallet = async (to: string) => { await api("/api/demo/fund", { address: to }); };
 
 export async function api(path: string, body?: unknown): Promise<any> {
   const headers = { "Content-Type": "application/json", "x-admin-token": env("ADMIN_TOKEN") };
@@ -36,7 +36,11 @@ export async function api(path: string, body?: unknown): Promise<any> {
   return j;
 }
 
-const chain = defineChain({ id: Number(dep.chainId), name: "fork", nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 }, rpcUrls: { default: { http: [RPC] } } });
+const chain = defineChain({
+  id: Number(dep.chainId), name: String(chainCfg.name ?? "fork"),
+  nativeCurrency: chainCfg.nativeCurrency ?? { name: "Ether", symbol: "ETH", decimals: 18 },
+  rpcUrls: { default: { http: [RPC] } },
+});
 export const pub = createPublicClient({ chain, transport: http(RPC) });
 
 const factoryAbi = parseAbi([

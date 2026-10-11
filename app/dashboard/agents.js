@@ -47,7 +47,7 @@ async function loadExplorer() {
     if (!r.ok) return;
     const cfg = (await r.json()).config ?? {};
     explorer = cfg.explorer ?? null;
-    $("network").textContent = `${cfg.chainName ?? `chain ${cfg.chainId}`}${cfg.demoFaucet ? " · demo fork" : ""}`;
+    $("network").textContent = `${cfg.chainName ?? `chain ${cfg.chainId}`}${cfg.demoFaucet ? " · demo chain" : ""}`;
   } catch { /* links fall back to plain hashes */ }
 }
 const txLink = (tx, label = `${short(tx)} ↗`) => (!tx ? "" : explorer
