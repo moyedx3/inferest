@@ -319,7 +319,7 @@ async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse, cool
     if (url.pathname === "/api/demo/warp") {
       if (!d.faucet?.warp) return send(res, 404, { error: "not found" });
       if (caller.kind !== "operator") return send(res, 403, { error: "operator only" });
-      const seconds = Number(body.seconds);
+      const seconds = typeof body.seconds === "number" ? body.seconds : NaN;
       if (!Number.isInteger(seconds) || seconds < 1 || BigInt(seconds) > MAX_WARP_SECONDS) {
         return send(res, 400, { error: "seconds must be a whole number between 1 and ten years" });
       }

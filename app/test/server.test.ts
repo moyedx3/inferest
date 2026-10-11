@@ -725,7 +725,7 @@ test("the warp route is operator-only, validates seconds and reports the transac
   assert.deepEqual(await ok.json(), { ok: true, seconds: 15_768_000, txs: ["0xaa", "0xbb"] });
   assert.deepEqual(warped, [15_768_000n]);
   assert.equal((await postAs(base, "/api/demo/warp", { seconds: 60 }, tokenFor([OWNER]))).status, 403);
-  for (const seconds of [0, -5, 1.5, "soon", 315_360_001]) {
+  for (const seconds of [0, -5, 1.5, "soon", "60", true, 315_360_001]) {
     assert.equal((await post(base, "/api/demo/warp", { seconds })).status, 400, `seconds ${seconds}`);
   }
   assert.equal((await fetch(base + "/api/demo/warp", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ seconds: 60 }) })).status, 401);

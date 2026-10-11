@@ -25,7 +25,7 @@ export function runsText(runs, schedule, total = runs?.length ?? 0) {
   let count = first === last ? `${heading} on ${first}` : `${heading} from ${first} to ${last}`;
   if (demoDays > 0) count += `, one every ${plural(demoDays, "day")} of vault time`;
   const sentences = [count + ".", "Each run reads the book, samples every yield source, fetches a price through a paid tool and decides once."];
-  if (demoDays > 0) sentences.push(`On this demo fork the clock moves ${plural(demoDays, "day")} before each run and every fourth run is a month end.`);
+  if (demoDays > 0) sentences.push(`On this demo chain the clock moves ${plural(demoDays, "day")} before each run and every fourth run is a month end.`);
   else if (schedule?.intervalMs > 0) sentences.push(`The runner wakes every ${every(schedule.intervalMs)}.`);
   return sentences.join(" ");
 }

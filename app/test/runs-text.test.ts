@@ -8,10 +8,10 @@ const DAY = 86_400;
 const weekly = Array.from({ length: 8 }, (_, i) => ({ clockAt: noon(2026, 10, 4) + i * 7 * DAY }));
 const MIDDLE = "Each run reads the book, samples every yield source, fetches a price through a paid tool and decides once.";
 
-test("the demo fork says the vault clock and the month ends", () => {
+test("the demo chain says the vault clock and the month ends", () => {
   assert.equal(runsText(weekly, { intervalMs: 600000, demoDays: 7 }),
     "8 runs from Oct 4 to Nov 22, one every 7 days of vault time. " + MIDDLE +
-    " On this demo fork the clock moves 7 days before each run and every fourth run is a month end.");
+    " On this demo chain the clock moves 7 days before each run and every fourth run is a month end.");
 });
 
 test("a real chain says how often the runner wakes", () => {
