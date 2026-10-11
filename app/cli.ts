@@ -10,7 +10,7 @@ import { createApp } from "./server.ts";
 import { createProxy } from "./proxy.ts";
 import { settleThroughServer, describeSettle } from "./remote.ts";
 import { createAuth } from "./auth.ts";
-import { createFaucet } from "./faucet.ts";
+import { createFaucet, createMintFaucet, type Faucet } from "./faucet.ts";
 
 const cfg = loadConfig();
 const store = openStore(cfg.dbPath, { log: (m) => console.log(new Date().toISOString(), m) });
@@ -38,13 +38,23 @@ keeper.drain = proxy.drain; // settlement waits for in-flight metering
 
 const auth = cfg.dynamicEnvironmentId ? createAuth({ environmentId: cfg.dynamicEnvironmentId }) : undefined;
 
+/** The demo faucet: a fork's cheat methods, or minted test money and gas on a live testnet. Unset on a real chain. */
+const faucet: Faucet | undefined = cfg.faucetMode === "cheat"
+  ? createFaucet({ rpcUrl: cfg.rpcUrl, usdc: cfg.usdc })
+  : cfg.faucetMode === "mint" && cfg.faucetKey && cfg.demoFund
+    ? createMintFaucet({
+        rpcUrl: cfg.rpcUrl, chainId: cfg.chainId, chainName: cfg.chainName, nativeCurrency: cfg.nativeCurrency,
+        usdc: cfg.usdc, signerKey: cfg.faucetKey, nativeWei: cfg.demoFund.nativeWei, warpTargets: cfg.demoFund.warpTargets,
+      })
+    : undefined;
+
 const [cmd, arg] = process.argv.slice(2);
 switch (cmd) {
   case "serve": {
     const app = createApp({
       store, or, chain, gateway, params: cfg.params, adminToken: cfg.adminToken, keeper, secrets: box, proxy, auth,
       pilotCustomerAddress: cfg.pilotCustomerAddress,
-      faucet: cfg.demoFaucet ? createFaucet({ rpcUrl: cfg.rpcUrl, usdc: cfg.usdc }) : undefined,
+      faucet,
       agentLog: openAgentLog(cfg.dbPath),
       // an owner may make the keeper report once an hour and settle once a day per vault; demo chains have no limit
       ownerCooldown: cfg.demoFaucet ? undefined : { reportMs: 3_600_000, settleMs: 86_400_000 },

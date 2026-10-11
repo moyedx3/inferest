@@ -9,7 +9,7 @@ import type { Store, VaultRow } from "./store.ts";
 import type { ToolGateway } from "./tools.ts";
 import { readBody, BodyTooLarge, type Proxy } from "./proxy.ts";
 import type { Auth, Session } from "./auth.ts";
-import type { Faucet } from "./faucet.ts";
+import { FaucetDry, MAX_WARP_SECONDS, type Faucet } from "./faucet.ts";
 import { OwnerCooldown } from "./cooldown.ts";
 import { buildMcpServer } from "./mcp.ts";
 import { computeLimits, settlePreview } from "./limits.ts";
@@ -305,9 +305,27 @@ async function route(d: AppDeps, req: IncomingMessage, res: ServerResponse, cool
         d.keeper.log(`faucet refused ${address}: the session's verified wallets are [${caller.session.wallets.join(", ")}]`);
         return send(res, 403, { error: "not your wallet" });
       }
-      const funded = await d.faucet.fund(address);
+      let funded: { native: bigint; usdc: bigint };
+      try {
+        funded = await d.faucet.fund(address);
+      } catch (e) {
+        if (!(e instanceof FaucetDry)) throw e;
+        d.keeper.log(`faucet dry: ${e.message}`);
+        return send(res, 503, { error: e.message });
+      }
       d.keeper.log(`faucet funded ${address}`);
       return send(res, 200, { ok: true, native: funded.native.toString(), usdc: funded.usdc.toString() });
+    }
+    if (url.pathname === "/api/demo/warp") {
+      if (!d.faucet?.warp) return send(res, 404, { error: "not found" });
+      if (caller.kind !== "operator") return send(res, 403, { error: "operator only" });
+      const seconds = Number(body.seconds);
+      if (!Number.isInteger(seconds) || seconds < 1 || BigInt(seconds) > MAX_WARP_SECONDS) {
+        return send(res, 400, { error: "seconds must be a whole number between 1 and ten years" });
+      }
+      const txs = await d.faucet.warp(BigInt(seconds));
+      d.keeper.log(`demo clock moved ${seconds} seconds in ${txs.length} transactions`);
+      return send(res, 200, { ok: true, seconds, txs });
     }
     if (url.pathname === "/api/admin/sync" || url.pathname === "/api/admin/report") {
       const report = url.pathname.endsWith("/report");
