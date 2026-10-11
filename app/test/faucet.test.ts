@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { createFaucet, FAUCET_NATIVE, FAUCET_USDC } from "../faucet.ts";
 
@@ -62,4 +62,104 @@ test("a hung node is cut off", async () => {
   await assert.rejects(createFaucet({ rpcUrl: "http://rpc", usdc: USDC, fetchFn: fn, rpcTimeoutMs: 50 }).fund(TO));
   assert.ok(aborted, "the fetch was cut off by its signal");
   assert.ok(Date.now() - started < 1000);
+});
+
+import { decodeFunctionData, keccak256, parseAbi, parseTransaction, toHex, type Hex } from "viem";
+import { createMintFaucet, FaucetDry, MAX_WARP_SECONDS } from "../faucet.ts";
+
+const FAUCET_KEY = `0x${"07".repeat(32)}` as Hex; // synthetic, never funded
+const TUSDC = "0x00000000000000000000000000000000000000dd";
+const VAULT_A = "0x00000000000000000000000000000000000000ee";
+const VAULT_B = "0x00000000000000000000000000000000000000ef";
+const NATIVE = 500_000_000_000_000_000n; // 0.5 MON
+const mintAbi = parseAbi(["function mint(address to, uint256 amount)"]);
+const warpAbi = parseAbi(["function warp(uint256 by)"]);
+
+/** A node fake for viem's send path: every raw transaction is accepted and reported mined (or reverted). */
+function node(t: TestContext, options: { balance?: bigint; revert?: boolean } = {}) {
+  const sent: Hex[] = [];
+  t.mock.method(globalThis, "fetch", async (_input: unknown, init: RequestInit) => {
+    const { id, method, params } = JSON.parse(String(init.body));
+    let result: unknown;
+    switch (method) {
+      case "eth_fillTransaction": return Response.json({ jsonrpc: "2.0", id, error: { code: -32601, message: "unsupported" } });
+      case "eth_chainId": result = toHex(10143); break;
+      case "eth_getTransactionCount": result = toHex(sent.length); break;
+      case "eth_getBlockByNumber": result = { number: "0x1", hash: "0x" + "01".repeat(32), transactions: [], baseFeePerGas: toHex(100_000_000_000n) }; break;
+      case "eth_maxPriorityFeePerGas": result = toHex(2_000_000_000n); break;
+      case "eth_gasPrice": result = toHex(102_000_000_000n); break;
+      case "eth_estimateGas": result = toHex(60_000n); break;
+      case "eth_getBalance": result = toHex(options.balance ?? NATIVE * 10n); break;
+      case "eth_sendRawTransaction": sent.push(params[0]); result = keccak256(params[0]); break;
+      case "eth_getTransactionReceipt": result = {
+        transactionHash: params[0], status: options.revert ? "0x0" : "0x1", blockHash: "0x" + "01".repeat(32), blockNumber: "0x1",
+        transactionIndex: "0x0", cumulativeGasUsed: "0xea60", gasUsed: "0xea60", logs: [], logsBloom: "0x" + "00".repeat(256),
+        effectiveGasPrice: toHex(102_000_000_000n), type: "0x2",
+      }; break;
+      default: throw new Error(`unexpected RPC method ${method}`);
+    }
+    return Response.json({ jsonrpc: "2.0", id, result });
+  });
+  return { sent, decoded: () => sent.map((raw) => parseTransaction(raw)) };
+}
+
+const mintFaucet = (over: Partial<Parameters<typeof createMintFaucet>[0]> = {}) => createMintFaucet({
+  rpcUrl: "http://faucet-rpc.invalid", chainId: 10143, chainName: "Monad Testnet",
+  nativeCurrency: { name: "Testnet MON Token", symbol: "MON", decimals: 18 },
+  usdc: TUSDC, signerKey: FAUCET_KEY, nativeWei: NATIVE, warpTargets: [VAULT_A, VAULT_B], ...over,
+});
+
+test("the mint faucet mints test USDC to the wallet and then sends it gas", async (t) => {
+  const { decoded } = node(t);
+  const r = await mintFaucet().fund(TO);
+  assert.deepEqual(r, { native: NATIVE, usdc: FAUCET_USDC });
+  const [mint, gas] = decoded();
+  assert.equal(mint.to?.toLowerCase(), TUSDC);
+  assert.equal(mint.chainId, 10143);
+  const call = decodeFunctionData({ abi: mintAbi, data: mint.data! });
+  assert.equal(call.functionName, "mint");
+  assert.equal(String(call.args![0]).toLowerCase(), TO);
+  assert.equal(call.args![1], FAUCET_USDC);
+  assert.equal(gas.to?.toLowerCase(), TO);
+  assert.equal(gas.value, NATIVE);
+  assert.equal(gas.data, undefined);
+});
+
+test("the mint faucet sends no gas when fundNative is zero", async (t) => {
+  const { sent } = node(t);
+  const r = await mintFaucet({ nativeWei: 0n }).fund(TO);
+  assert.equal(r.native, 0n);
+  assert.equal(sent.length, 1);
+});
+
+test("a nearly dry faucet signer refuses before minting anything", async (t) => {
+  const { sent } = node(t, { balance: NATIVE * 2n - 1n });
+  await assert.rejects(mintFaucet().fund(TO), (e: unknown) => e instanceof FaucetDry && /holds too little MON to fund a wallet/.test((e as Error).message));
+  assert.equal(sent.length, 0);
+});
+
+test("a reverted faucet transaction is reported with its hash", async (t) => {
+  const { sent } = node(t, { revert: true });
+  await assert.rejects(mintFaucet().fund(TO), /faucet transaction reverted: 0x[0-9a-f]{64}/);
+  assert.equal(sent.length, 1);
+});
+
+test("warp moves every demo yield source's clock and returns one hash per source", async (t) => {
+  const { sent, decoded } = node(t);
+  const txs = await mintFaucet().warp!(15_768_000n);
+  assert.deepEqual(txs, sent.map((raw) => keccak256(raw)));
+  const [a, b] = decoded();
+  assert.equal(a.to?.toLowerCase(), VAULT_A);
+  assert.equal(b.to?.toLowerCase(), VAULT_B);
+  for (const tx of [a, b]) assert.deepEqual(decodeFunctionData({ abi: warpAbi, data: tx.data! }), { functionName: "warp", args: [15_768_000n] });
+});
+
+test("warp refuses zero, negative and more than ten years without a transaction", async (t) => {
+  const { sent } = node(t);
+  for (const by of [0n, -1n, MAX_WARP_SECONDS + 1n]) await assert.rejects(mintFaucet().warp!(by), /between one second and ten years/);
+  assert.equal(sent.length, 0);
+});
+
+test("the cheat faucet has no warp: a fork moves its own clock", () => {
+  assert.equal(createFaucet({ rpcUrl: "http://rpc", usdc: USDC }).warp, undefined);
 });
