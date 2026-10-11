@@ -1,0 +1,11 @@
+{
+  "chainId": 143,
+  "name": "Monad",
+  "nativeCurrency": { "name": "Monad", "symbol": "MON", "decimals": 18 },
+  "usdc": "0x754704Bc059F8C67012fEd69BC8A327a5aafb603",
+  "target": "0xC554aFfE2f581F5E0811e0D42D484ECaC5c6B8e2",
+  "targetName": "Aave USDC (static)",
+  "targets": [
+    { "address": "0xC554aFfE2f581F5E0811e0D42D484ECaC5c6B8e2", "name": "Aave USDC (static)" }
+  ]
+}
