@@ -45,7 +45,7 @@ function rpc(t: TestContext, options: { balance?: bigint; legacy?: boolean } = {
     keeperMinBalanceWei: RESERVE, keeperMaxTxCostWei: COST,
     usdc: V, target: V, factory: V, targets: [{ address: V, name: "test" }],
     openRouterKey: "", orthogonalKey: "", adminToken: "", keyEncryptionKey: "", publicUrl: "", dbPath: ":memory:",
-    port: 0, params: HACKATHON_PARAMS, demoFaucet: false, chainName: "test", nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+    port: 0, params: HACKATHON_PARAMS, demoFaucet: false, chainName: "test", nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 }, sites: [],
   };
   return { cfg, calls, sent };
 }

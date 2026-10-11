@@ -63,6 +63,7 @@ switch (cmd) {
         dynamicEnvironmentId: cfg.dynamicEnvironmentId ?? null, publicRpcUrl: cfg.publicRpcUrl ?? null, chainName: cfg.chainName,
         nativeCurrency: cfg.nativeCurrency, explorer: cfg.explorer ?? null, demoFaucet: cfg.demoFaucet,
         pilotCustomerAddress: cfg.pilotCustomerAddress ?? null,
+        sites: cfg.sites,
       },
     });
     app.listen(cfg.port, () => console.log(`Inferest on http://localhost:${cfg.port} (chat at /v1/chat/completions, MCP at /mcp, login ${auth ? "on" : "off"})`));
