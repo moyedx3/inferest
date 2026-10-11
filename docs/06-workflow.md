@@ -212,6 +212,8 @@ event VaultCreated(address indexed customer, address indexed vault, address inde
 - **Deploy script** writes `contracts/deployments/<chainId>.json`, which the app reads. The app refuses a deployment whose chain id or target differs from the chain config.
 - **Fork test** (`contracts/test/Fork.t.sol`) runs the full cycle against the live Fluid vault when an Arbitrum One RPC is set.
 - **Demos** run on a Tenderly Virtual TestNet or a local anvil fork of Arbitrum One; the demo helpers support both. A virtual testnet must keep chain id 42161.
+- **A testnet without a yield source.** `DemoYieldVault` (`contracts/src/demo/`) is an ERC-4626 vault over `TestUSDC` whose assets grow at a fixed annual rate on a clock its owner can move forward with `warp(seconds)`, minting the test asset to pay what it owes. `DeployDemo.s.sol` deploys both; `Deploy.s.sol` then allowlists the vault as `TARGET_VAULT`. With `DEMO_FAUCET=mint` the server mints demo funds from them and its operator-only `POST /api/demo/warp` moves that clock the way `evm_increaseTime` moves a fork's; the demo script and the agent runner fall back to it. Monad testnet runs this way: spec `docs/superpowers/specs/2026-10-11-monad-testnet-design.md`.
+- **Monad.** Monad's EVM runs the Cancun bytecode unchanged. Gas is charged on the limit, not on usage, so `KEEPER_MAX_TX_COST_ETH` (in MON there) is the exact charge; blocks are about 300 ms; verification is Sourcify's Monad instance. Monad mainnet has Circle USDC and Aave's static USDC wrapper, so a mainnet config would need no new contracts.
 - **License:** the Splitter only calls the vault through its interface, so it is not a derivative of the AGPL code. The factory imports Octant and is AGPL.
 
 ---

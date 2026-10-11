@@ -9,6 +9,10 @@ Install Docker with Compose v2. Prepare an Arbitrum fork or virtual testnet and
 its Inferest contracts using the [deployment workflow](../docs/06-workflow.md).
 Compose does not start Anvil or deploy contracts. The default deployment record
 is `contracts/deployments/42161.json`, with `config/arbitrum-one.json` as its config.
+For Monad testnet, set `CHAIN_CONFIG_FILE=./config/monad-testnet.json` and
+`DEPLOYMENTS_FILE=./contracts/deployments/10143.json`, and in `.env.server` set
+`DEMO_FAUCET=mint` with `DEMO_FAUCET_PRIVATE_KEY` (the demo vault owner, a funded
+wallet of its own); the status page has the full recipe.
 
 From the repository root:
 
